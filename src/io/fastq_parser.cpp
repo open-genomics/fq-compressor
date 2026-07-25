@@ -18,11 +18,17 @@ auto FastqParser::readRecord() -> Result<std::optional<FastqRecord>> {
 
     std::string idLine;
     if (!readLine(idLine)) {
+        if (streamError_) {
+            return makeError<std::optional<FastqRecord>>(streamReadError());
+        }
         return std::optional<FastqRecord>{};
     }
 
     while (idLine.empty()) {
         if (!readLine(idLine)) {
+            if (streamError_) {
+                return makeError<std::optional<FastqRecord>>(streamReadError());
+            }
             return std::optional<FastqRecord>{};
         }
     }
@@ -52,6 +58,9 @@ auto FastqParser::readRecord() -> Result<std::optional<FastqRecord>> {
     }
 
     if (!readLine(record.sequence)) {
+        if (streamError_) {
+            return makeError<std::optional<FastqRecord>>(streamReadError());
+        }
         return makeError<std::optional<FastqRecord>>(ErrorCode::kFormatError,
                                                      "invalid FASTQ: unexpected EOF at line " +
                                                          std::to_string(lineNumber_));
@@ -65,6 +74,9 @@ auto FastqParser::readRecord() -> Result<std::optional<FastqRecord>> {
 
     std::string plusLine;
     if (!readLine(plusLine)) {
+        if (streamError_) {
+            return makeError<std::optional<FastqRecord>>(streamReadError());
+        }
         return makeError<std::optional<FastqRecord>>(ErrorCode::kFormatError,
                                                      "invalid FASTQ: unexpected EOF at line " +
                                                          std::to_string(lineNumber_));
@@ -77,6 +89,9 @@ auto FastqParser::readRecord() -> Result<std::optional<FastqRecord>> {
     }
 
     if (!readLine(record.quality)) {
+        if (streamError_) {
+            return makeError<std::optional<FastqRecord>>(streamReadError());
+        }
         return makeError<std::optional<FastqRecord>>(ErrorCode::kFormatError,
                                                      "invalid FASTQ: unexpected EOF at line " +
                                                          std::to_string(lineNumber_));
@@ -94,13 +109,27 @@ auto FastqParser::readRecord() -> Result<std::optional<FastqRecord>> {
 }
 
 auto FastqParser::readLine(std::string& line) -> bool {
-    if (eof_ || !std::getline(stream_, line)) {
+    if (eof_) {
+        return false;
+    }
+    if (!std::getline(stream_, line)) {
+        // badbit (not eofbit) means the underlying stream failed -- e.g. a corrupt
+        // gzip member made GzipStreamBuf::underflow() throw. Distinguish this from a
+        // clean end-of-file so the caller can surface an I/O error instead of silently
+        // truncating the input.
+        if (stream_.bad()) {
+            streamError_ = true;
+        }
         eof_ = true;
         return false;
     }
     ++lineNumber_;
     trimRight(line);
     return true;
+}
+
+auto FastqParser::streamReadError() -> Error {
+    return Error{ErrorCode::kIOError, "input stream read error while parsing FASTQ"};
 }
 
 void FastqParser::trimRight(std::string& str) {

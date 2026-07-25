@@ -7,6 +7,8 @@
 #include "fqc/common/types.h"
 
 #include <sstream>
+#include <stdexcept>
+#include <streambuf>
 #include <type_traits>
 
 #include <gtest/gtest.h>
@@ -94,6 +96,24 @@ TEST(FastqParserTest, TracksLineAndRecordNumbers) {
     auto second = parser.readRecord();
     ASSERT_TRUE(second.has_value());
     EXPECT_EQ(parser.recordNumber(), 2U);
+}
+
+TEST(FastqParserTest, ReportsIOErrorWhenUnderlyingStreamFails) {
+    // A streambuf whose underflow throws, mimicking GzipStreamBuf on corrupt gzip input.
+    // iostream catches the exception and sets badbit; the parser must surface this as an
+    // I/O error rather than a clean end-of-file (which would silently truncate the input).
+    struct ThrowingStreamBuf : std::streambuf {
+        int_type underflow() override {
+            throw std::runtime_error("gzip decompression failed");
+        }
+    };
+    ThrowingStreamBuf buf;
+    std::istream stream(&buf);
+    FastqParser parser(stream);
+
+    auto result = parser.readRecord();
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, ErrorCode::kIOError);
 }
 
 }  // namespace fqc::io::test

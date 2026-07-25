@@ -58,4 +58,15 @@ struct ReadRecord {
     [[nodiscard]] auto operator==(const ReadRecord& other) const noexcept -> bool = default;
 };
 
+/// @brief Framing bytes of a canonical FASTQ record: '@' id [' ' comment] '\n' seq '\n' '+' '\n'
+/// qual '\n'.
+inline constexpr std::size_t kCanonicalFastqFramingBytes = 6;
+
+/// @brief Size in bytes of the canonical FASTQ serialisation of @p record (for throughput
+/// accounting).
+[[nodiscard]] inline auto canonicalFastqBytes(const ReadRecord& record) noexcept -> std::size_t {
+    return record.id.size() + record.comment.size() + record.sequence.size() +
+        record.quality.size() + kCanonicalFastqFramingBytes + (record.comment.empty() ? 0 : 1);
+}
+
 }  // namespace fqc

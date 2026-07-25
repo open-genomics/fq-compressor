@@ -9,23 +9,16 @@ v1 兼容、索引、随机访问、全局 read 重排序、第二套并行引�
 ## 数据流
 
 ```text
-FASTQ/.gz/stdin
-    -> FastqParser
-    -> profile 采样与判定
-    -> 保留字节帧累积器
-    -> 三路逻辑流编码器
-    -> 带校验的 FQC v2 帧
-    -> 文件/stdout
+压缩路径（2-stage 并发流水线）：
+  主线程   FASTQ/.gz/stdin -> FastqParser 采样 -> profile 判定 -> 打开输出
+  reader   FastqParser 续读 + 保留字节帧累积器 --[有界 SPSC 队列]-->
+  writer   --> 三路逻辑流编码器(zstd + xxh64) -> 带校验 FQC v2 帧 -> 文件/stdout
 
-FQC v2/文件/stdin
-    -> 校验头部
-    -> 有界帧解码
-    -> 逻辑校验和
-    -> 规范 FASTQ 写出
-    -> 文件/stdout
+解压路径（纯顺序）：
+  FQC v2/文件/stdin -> 校验头部 -> 有界帧解码 -> 逻辑校验和 -> 规范 FASTQ 写出 -> 文件/stdout
 ```
 
-内部编排的入口是 `include/fqc/commands/v2_archive_engine.h`。`src/main.cpp` 里的 CLI 只做三件事：
+内部编排的入口是 `include/fqc/commands/archive_engine.h`。`src/main.cpp` 里的 CLI 只做三件事：
 解析参数、构造请求、报告结构化错误。
 
 ## 归档布局
@@ -87,13 +80,18 @@ RSS 为 25–32 MiB（随机化短读长和长读长 fixture）。
 
 ## 执行架构
 
-引擎有意保持纯顺序执行。在 8 核 x86_64 WSL2 主机上，取三次运行的中位数：随机化 150 bp 数据
+压缩路径使用 2-stage 并发流水线：reader 线程解析 FASTQ 并累积有界帧，writer 线程编码并
+写入归档，两阶段通过有界 SPSC 队列（深度 4）解耦，解析与 CPU 密集的编码/压缩重叠执行。引擎
+在帧粒度上仍然顺序—同一时刻只有一帧在编码—但 I/O 解析与编码不再串行。profile 采样在主
+线程先于流水线完成，采样读到的记录作为初始帧喂给 reader。解压路径保持纯顺序执行。
+
+在 8 核 x86_64 WSL2 主机上，取三次运行的中位数：随机化 150 bp 数据
 压缩/解压 53.15/182.40 MiB/s，随机化 20 kbp 数据 55.66/215.22 MiB/s。WSL2 上重跑有时会
 跌破 50 MiB/s 的压缩下限，所以发布鉴定仍以非 WSL2 机器为准。在尚未证实存在瓶颈的前提下引入
 TBB DAG，只会把 v2 已经干掉的重复状态、输出排序和在途内存风险重新请回来。
 
-帧边界天然独立，这就是将来并发化的切分点。如果发布机器真的跑不到下限，应该加一条有序帧流水线、
-配上字节预算准入——而不是另起一套压缩实现。编解码器状态必须保持帧内局部或 worker 内局部。
+帧边界天然独立，这是进一步并发化（如多帧并行编码）的切分点。编解码器状态保持帧内局部或
+worker 内局部。
 
 ## 双端 reads
 
@@ -113,8 +111,8 @@ TBB DAG，只会把 v2 已经干掉的重复状态、输出排序和在途内存
 
 | 命名空间 | 职责 |
 |---|---|
-| `fqc::format::v2` | 线上格式、流编码、校验和、内存预检 |
-| `fqc::commands::v2` | profile 判定与单引擎有界执行 |
+| `fqc::format` | 线上格式、流编码、校验和、内存预检 |
+| `fqc::commands` | profile 判定与单引擎有界执行 |
 | `fqc::io` | FASTQ 解析、gzip 输入、文件/stdin/stdout 流工厂 |
 | `fqc::common` | 记录、结构化错误、日志 |
 

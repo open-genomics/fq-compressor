@@ -145,9 +145,9 @@ public:
 
     /// @brief Construct from an existing stream.
     /// @param source Source stream.
-    /// @param format Compression format (auto-detect if kUnknown).
-    explicit CompressedInputStream(std::unique_ptr<std::istream> source,
-                                   CompressionFormat format = CompressionFormat::kUnknown);
+    /// @param format Compression format (must be known; detect beforehand via
+    ///                detectCompressionFormat()).
+    explicit CompressedInputStream(std::unique_ptr<std::istream> source, CompressionFormat format);
 
     /// @brief Destructor.
     ~CompressedInputStream() override;

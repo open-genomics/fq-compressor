@@ -20,17 +20,9 @@ namespace fqc::pipeline {
 
 namespace {
 
-// FASTQ framing bytes: '@' id [' ' comment] '\n' seq '\n' '+' '\n' qual '\n'.
-constexpr std::size_t kCanonicalFastqFramingBytes = 6;
-
 [[nodiscard]] auto retainedRecordBytes(const ReadRecord& record) noexcept -> std::size_t {
     return sizeof(ReadRecord) + record.id.capacity() + 1 + record.comment.capacity() + 1 +
         record.sequence.capacity() + 1 + record.quality.capacity() + 1;
-}
-
-[[nodiscard]] auto canonicalFastqBytes(const ReadRecord& record) noexcept -> std::size_t {
-    return record.id.size() + record.comment.size() + record.sequence.size() +
-        record.quality.size() + kCanonicalFastqFramingBytes + (record.comment.empty() ? 0 : 1);
 }
 
 }  // namespace

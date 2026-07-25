@@ -35,7 +35,6 @@ namespace {
 
 constexpr std::size_t kEngineMemoryReserveBytes = std::size_t{16} * 1024 * 1024;
 constexpr std::size_t kMinimumMemoryLimitBytes = std::size_t{64} * 1024 * 1024;
-constexpr std::size_t kCanonicalFastqFramingBytes = 6;
 
 class OutputTransaction {
 public:
@@ -117,11 +116,6 @@ private:
                                std::initializer_list<std::string_view> needles) -> bool {
     return std::ranges::any_of(needles,
                                [value](std::string_view needle) { return value.contains(needle); });
-}
-
-[[nodiscard]] auto canonicalFastqBytes(const ReadRecord& record) noexcept -> std::size_t {
-    return record.id.size() + record.comment.size() + record.sequence.size() +
-        record.quality.size() + kCanonicalFastqFramingBytes + (record.comment.empty() ? 0 : 1);
 }
 
 [[nodiscard]] auto validateMemoryLimit(std::size_t memoryLimitBytes) -> VoidResult {

@@ -34,11 +34,15 @@ public:
 private:
     [[nodiscard]] auto readLine(std::string& line) -> bool;
     static void trimRight(std::string& str);
+    /// @brief Error returned when the underlying stream fails (e.g. corrupt gzip input),
+    /// as opposed to a clean end-of-file. The streambuf signals this via @c badbit.
+    [[nodiscard]] static auto streamReadError() -> Error;
 
     std::istream& stream_;
     std::uint64_t lineNumber_ = 0;
     std::uint64_t recordNumber_ = 0;
     bool eof_ = false;
+    bool streamError_ = false;
 };
 
 }  // namespace fqc::io

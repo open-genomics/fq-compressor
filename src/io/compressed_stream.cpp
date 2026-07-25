@@ -99,19 +99,6 @@ CompressionFormat detectCompressionFormatFromExtension(const std::filesystem::pa
         return CompressionFormat::kZstd;
     }
 
-    // Check for double extensions like .fastq.gz
-    auto stem = path.stem();
-    if (stem.has_extension()) {
-        auto innerExt = stem.extension().string();
-        std::transform(innerExt.begin(), innerExt.end(), innerExt.begin(), [](unsigned char c) {
-            return std::tolower(c);
-        });
-        if (innerExt == ".fastq" || innerExt == ".fq") {
-            // Already checked outer extension above
-            return CompressionFormat::kNone;
-        }
-    }
-
     return CompressionFormat::kNone;
 }
 
@@ -365,20 +352,6 @@ CompressedInputStream::CompressedInputStream(const std::filesystem::path& path)
 CompressedInputStream::CompressedInputStream(std::unique_ptr<std::istream> source,
                                              CompressionFormat format)
     : std::istream(nullptr), sourceStream_(std::move(source)), format_(format) {
-    if (format_ == CompressionFormat::kUnknown && sourceStream_) {
-        // Try to detect from magic bytes
-        std::uint8_t magic[8];
-        sourceStream_->read(reinterpret_cast<char*>(magic), sizeof(magic));
-        auto bytesRead = static_cast<std::size_t>(sourceStream_->gcount());
-
-        // Put bytes back (if possible)
-        for (std::size_t i = bytesRead; i > 0; --i) {
-            sourceStream_->putback(static_cast<char>(magic[i - 1]));
-        }
-
-        format_ = detectCompressionFormat({magic, bytesRead});
-    }
-
     setup();
 }
 
