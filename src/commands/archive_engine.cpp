@@ -276,36 +276,18 @@ auto ArchiveEngine::compress(const CompressionRequest& request) const -> Result<
     const auto maxSampleBytes = sampleLimitBytes(request.memoryLimitBytes);
     std::size_t sampledBases = 0;
     while (sample.size() < kProfileSampleMaxRecords && sampledBases < maxSampleBytes) {
-        auto first = primary.readRecord();
-        if (!first) {
-            return makeError<OperationStats>(first.error());
+        auto pair = io::readRecordPair(primary, mate ? &*mate : nullptr);
+        if (!pair) {
+            return makeError<OperationStats>(pair.error());
         }
-        if (!first->has_value()) {
-            if (mate) {
-                auto second = mate->readRecord();
-                if (!second) {
-                    return makeError<OperationStats>(second.error());
-                }
-                if (second->has_value()) {
-                    return makeError<OperationStats>(ErrorCode::kFormatError,
-                                                     "paired inputs have different record counts");
-                }
-            }
+        if (!pair->has_value()) {
             break;
         }
-        sampledBases += (*first)->sequence.size();
-        sample.push_back(std::move(**first));
-        if (mate) {
-            auto second = mate->readRecord();
-            if (!second) {
-                return makeError<OperationStats>(second.error());
-            }
-            if (!second->has_value()) {
-                return makeError<OperationStats>(ErrorCode::kFormatError,
-                                                 "paired inputs have different record counts");
-            }
-            sampledBases += (*second)->sequence.size();
-            sample.push_back(std::move(**second));
+        sampledBases += (*pair)->first.sequence.size();
+        sample.push_back(std::move((*pair)->first));
+        if ((*pair)->second) {
+            sampledBases += (*pair)->second->sequence.size();
+            sample.push_back(std::move(*(*pair)->second));
         }
     }
 

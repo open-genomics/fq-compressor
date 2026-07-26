@@ -138,4 +138,38 @@ void FastqParser::trimRight(std::string& str) {
     }
 }
 
+auto readRecordPair(FastqParser& primary, FastqParser* mate) -> Result<std::optional<ReadPair>> {
+    auto first = primary.readRecord();
+    if (!first) {
+        return makeError<std::optional<ReadPair>>(first.error());
+    }
+    if (!first->has_value()) {
+        if (mate != nullptr) {
+            auto second = mate->readRecord();
+            if (!second) {
+                return makeError<std::optional<ReadPair>>(second.error());
+            }
+            if (second->has_value()) {
+                return makeError<std::optional<ReadPair>>(
+                    ErrorCode::kFormatError, "paired inputs have different record counts");
+            }
+        }
+        return std::optional<ReadPair>{};
+    }
+    ReadPair pair;
+    pair.first = std::move(**first);
+    if (mate != nullptr) {
+        auto second = mate->readRecord();
+        if (!second) {
+            return makeError<std::optional<ReadPair>>(second.error());
+        }
+        if (!second->has_value()) {
+            return makeError<std::optional<ReadPair>>(ErrorCode::kFormatError,
+                                                      "paired inputs have different record counts");
+        }
+        pair.second = std::move(**second);
+    }
+    return std::optional<ReadPair>{std::move(pair)};
+}
+
 }  // namespace fqc::io

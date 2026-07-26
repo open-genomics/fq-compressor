@@ -40,6 +40,13 @@ auto CompressPipeline::run(std::istream& primary,
     PipelineStats stats;
     std::uint64_t logicalBytes = 0;
 
+    // Synchronization invariant: `readerError`/`logicalBytes` are written only
+    // by the reader thread, `writerError`/`stats` (except logicalBytes) only by
+    // the writer thread. The two workers share no mutable state but `queue`
+    // (SPSC, thread-safe by construction). Each worker's writes are read by the
+    // main thread only after the matching join() below, whose happens-before
+    // edge makes the access safe without extra synchronization -- do not read
+    // them earlier, and do not let the other thread touch them.
     std::thread reader([&] {
         io::FastqParser parser(primary);
         std::optional<io::FastqParser> mateParser;
@@ -84,41 +91,19 @@ auto CompressPipeline::run(std::istream& primary,
         }
 
         while (!queue.isAborted()) {
-            auto first = parser.readRecord();
-            if (!first) {
-                readerError = first.error();
+            auto pair = io::readRecordPair(parser, mateParser ? &*mateParser : nullptr);
+            if (!pair) {
+                readerError = pair.error();
                 break;
             }
-            if (!first->has_value()) {
-                if (mateParser) {
-                    auto second = mateParser->readRecord();
-                    if (!second) {
-                        readerError = second.error();
-                        break;
-                    }
-                    if (second->has_value()) {
-                        readerError = Error{ErrorCode::kFormatError,
-                                            "paired inputs have different record counts"};
-                        break;
-                    }
-                }
+            if (!pair->has_value()) {
                 break;
             }
-            if (!append(std::move(**first))) {
+            if (!append(std::move((*pair)->first))) {
                 break;
             }
-            if (mateParser) {
-                auto second = mateParser->readRecord();
-                if (!second) {
-                    readerError = second.error();
-                    break;
-                }
-                if (!second->has_value()) {
-                    readerError = Error{ErrorCode::kFormatError,
-                                        "paired inputs have different record counts"};
-                    break;
-                }
-                if (!append(std::move(**second))) {
+            if ((*pair)->second) {
+                if (!append(std::move(*(*pair)->second))) {
                     break;
                 }
             }

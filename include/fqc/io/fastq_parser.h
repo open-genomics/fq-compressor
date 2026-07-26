@@ -45,4 +45,17 @@ private:
     bool streamError_ = false;
 };
 
+/// 一对配对 reads；非配对模式下 `second` 为空。
+struct ReadPair {
+    FastqRecord first;
+    std::optional<FastqRecord> second;
+};
+
+/// 读取下一条记录（配对模式下读一对）。
+/// - 成功且非空：读到记录，`first` 必有，配对时 `second` 也有
+/// - 成功且空：正常 EOF；配对模式下两端同时 EOF
+/// - 失败：解析错误，或配对两端记录数不一致（kFormatError）
+[[nodiscard]] auto readRecordPair(FastqParser& primary,
+                                  FastqParser* mate) -> Result<std::optional<ReadPair>>;
+
 }  // namespace fqc::io
