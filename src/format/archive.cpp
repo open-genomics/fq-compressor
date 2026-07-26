@@ -9,6 +9,7 @@
 #include <cstring>
 #include <istream>
 #include <limits>
+#include <memory>
 #include <ostream>
 #include <string>
 #include <utility>
@@ -589,6 +590,51 @@ auto parseProfile(std::string_view value) -> Result<DatasetProfile> {
                                      "unknown dataset profile: " + std::string(value));
 }
 
+auto encodeFrame(std::span<const ReadRecord> records,
+                 const ArchiveOptions& options) -> Result<std::unique_ptr<EncodedFrame>> {
+    if (records.empty()) {
+        return makeError<std::unique_ptr<EncodedFrame>>(ErrorCode::kUsageError,
+                                                        "FQC v2 frame cannot be empty");
+    }
+    if (options.paired && records.size() % 2 != 0) {
+        return makeError<std::unique_ptr<EncodedFrame>>(
+            ErrorCode::kUsageError, "paired FQC v2 frame must contain complete pairs");
+    }
+    auto recordCount = checkedU32(records.size(), "frame record count");
+    if (!recordCount) {
+        return makeError<std::unique_ptr<EncodedFrame>>(recordCount.error().code,
+                                                        recordCount.error().message);
+    }
+    auto rawSizes = measureRawStreams(records);
+    if (!rawSizes) {
+        return makeError<std::unique_ptr<EncodedFrame>>(rawSizes.error().code,
+                                                        rawSizes.error().message);
+    }
+    if (rawSizes->ids > options.maxFrameBytes || rawSizes->sequences > options.maxFrameBytes ||
+        rawSizes->qualities > options.maxFrameBytes) {
+        return makeError<std::unique_ptr<EncodedFrame>>(
+            ErrorCode::kUsageError, "FQC v2 frame exceeds configured raw stream limit");
+    }
+    auto peakMemory = estimateCompressionPeak(records, *rawSizes);
+    if (!peakMemory) {
+        return makeError<std::unique_ptr<EncodedFrame>>(peakMemory.error().code,
+                                                        peakMemory.error().message);
+    }
+    if (*peakMemory > options.memoryLimitBytes) {
+        return makeError<std::unique_ptr<EncodedFrame>>(
+            ErrorCode::kUsageError, "FQC v2 frame exceeds configured memory limit");
+    }
+    auto raw = encodeRawStreams(records, *rawSizes);
+    auto frame = std::make_unique<EncodedFrame>();
+    frame->rawIds = std::move(raw.ids);
+    frame->rawSequences = std::move(raw.sequences);
+    frame->rawQualities = std::move(raw.qualities);
+    frame->recordCount = *recordCount;
+    frame->totalBases = raw.totalBases;
+    frame->checksum = logicalChecksum(frame->rawIds, frame->rawSequences, frame->rawQualities);
+    return frame;
+}
+
 // =============================================================================
 // ArchiveWriter
 // =============================================================================
@@ -634,62 +680,46 @@ auto ArchiveWriter::writeFrame(std::span<const ReadRecord> records) -> VoidResul
     if (finished_) {
         return makeVoidError(ErrorCode::kFormatError, "FQC v2 writer is already finished");
     }
-    if (records.empty()) {
-        return makeVoidError(ErrorCode::kUsageError, "FQC v2 frame cannot be empty");
+    auto encoded = encodeFrame(records, options_);
+    if (!encoded) {
+        return makeVoidError(encoded.error().code, encoded.error().message);
     }
-    if (metadata_.paired && records.size() % 2 != 0) {
-        return makeVoidError(ErrorCode::kUsageError,
-                             "paired FQC v2 frame must contain complete pairs");
+    return writeEncodedFrame(std::move(*encoded));
+}
+
+auto ArchiveWriter::writeEncodedFrame(std::unique_ptr<EncodedFrame> frame) -> VoidResult {
+    if (finished_) {
+        return makeVoidError(ErrorCode::kFormatError, "FQC v2 writer is already finished");
     }
-    auto recordCount = checkedU32(records.size(), "frame record count");
-    if (!recordCount) {
-        return makeVoidError(recordCount.error().code, recordCount.error().message);
+    if (frame == nullptr) {
+        return makeVoidError(ErrorCode::kUsageError, "FQC v2 encoded frame is null");
     }
     if (auto headerResult = ensureHeader(); !headerResult) {
         return headerResult;
     }
 
-    auto rawSizes = measureRawStreams(records);
-    if (!rawSizes) {
-        return makeVoidError(rawSizes.error().code, rawSizes.error().message);
-    }
-    if (rawSizes->ids > options_.maxFrameBytes || rawSizes->sequences > options_.maxFrameBytes ||
-        rawSizes->qualities > options_.maxFrameBytes) {
-        return makeVoidError(ErrorCode::kUsageError,
-                             "FQC v2 frame exceeds configured raw stream limit");
-    }
-    auto peakMemory = estimateCompressionPeak(records, *rawSizes);
-    if (!peakMemory) {
-        return makeVoidError(peakMemory.error().code, peakMemory.error().message);
-    }
-    if (*peakMemory > options_.memoryLimitBytes) {
-        return makeVoidError(ErrorCode::kUsageError,
-                             "FQC v2 frame exceeds configured memory limit");
-    }
-    auto raw = encodeRawStreams(records, *rawSizes);
-    auto ids = compress(raw.ids);
-    auto sequences = compress(raw.sequences);
-    auto qualities = compress(raw.qualities);
+    auto ids = compress(frame->rawIds);
+    auto sequences = compress(frame->rawSequences);
+    auto qualities = compress(frame->rawQualities);
     if (!ids || !sequences || !qualities) {
         const auto& error =
             !ids ? ids.error() : (!sequences ? sequences.error() : qualities.error());
         return makeVoidError(error.code, error.message);
     }
 
-    const auto checksum = logicalChecksum(raw.ids, raw.sequences, raw.qualities);
     Bytes frameHeader;
     frameHeader.reserve(kFrameHeaderSize);
     appendU32(frameHeader, kFrameMagic);
     appendU32(frameHeader, kFrameHeaderSize);
     appendU32(frameHeader, static_cast<std::uint32_t>(stats_.frameCount));
-    appendU32(frameHeader, *recordCount);
-    appendU64(frameHeader, raw.ids.size());
+    appendU32(frameHeader, frame->recordCount);
+    appendU64(frameHeader, frame->rawIds.size());
     appendU64(frameHeader, ids->size());
-    appendU64(frameHeader, raw.sequences.size());
+    appendU64(frameHeader, frame->rawSequences.size());
     appendU64(frameHeader, sequences->size());
-    appendU64(frameHeader, raw.qualities.size());
+    appendU64(frameHeader, frame->rawQualities.size());
     appendU64(frameHeader, qualities->size());
-    appendU64(frameHeader, checksum);
+    appendU64(frameHeader, frame->checksum);
 
     for (const auto bytes : {std::span<const std::uint8_t>(frameHeader),
                              std::span<const std::uint8_t>(*ids),
@@ -701,10 +731,10 @@ auto ArchiveWriter::writeFrame(std::span<const ReadRecord> records) -> VoidResul
     }
 
     ++stats_.frameCount;
-    stats_.recordCount += records.size();
-    stats_.totalBases += raw.totalBases;
+    stats_.recordCount += frame->recordCount;
+    stats_.totalBases += frame->totalBases;
     stats_.encodedBytes += frameHeader.size() + ids->size() + sequences->size() + qualities->size();
-    globalChecksum_ = advanceGlobalChecksum(globalChecksum_, checksum);
+    globalChecksum_ = advanceGlobalChecksum(globalChecksum_, frame->checksum);
     return {};
 }
 

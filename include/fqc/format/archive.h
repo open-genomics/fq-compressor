@@ -10,6 +10,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <iosfwd>
+#include <memory>
 #include <optional>
 #include <span>
 #include <string_view>
@@ -65,6 +66,24 @@ struct ArchiveStats {
     std::uint64_t encodedBytes = 0;
 };
 
+/// A frame's three raw (pre-compression) logical streams plus the metadata the
+/// writer needs to emit it. Produced by `encodeFrame` (CPU-only, no I/O) and
+/// consumed by `ArchiveWriter::writeEncodedFrame` (zstd + write). Splitting the
+/// two lets the pipeline overlap encoding with compression/I/O.
+struct EncodedFrame {
+    std::vector<std::uint8_t> rawIds;
+    std::vector<std::uint8_t> rawSequences;
+    std::vector<std::uint8_t> rawQualities;
+    std::uint32_t recordCount = 0;
+    std::uint64_t totalBases = 0;
+    std::uint64_t checksum = 0;
+};
+
+/// Encode records into an `EncodedFrame` (validate + measure + 2-bit pack +
+/// checksum). Pure computation, no I/O -- safe to call on a worker thread.
+[[nodiscard]] auto encodeFrame(std::span<const ReadRecord> records, const ArchiveOptions& options)
+    -> Result<std::unique_ptr<EncodedFrame>>;
+
 class ArchiveWriter {
 public:
     ArchiveWriter(std::ostream& output, ArchiveOptions options);
@@ -73,6 +92,9 @@ public:
     ArchiveWriter& operator=(const ArchiveWriter&) = delete;
 
     [[nodiscard]] auto writeFrame(std::span<const ReadRecord> records) -> VoidResult;
+    /// Compress (zstd x3) and write an `EncodedFrame` produced by `encodeFrame`,
+    /// then update stats/checksum. Owns `output_`, so call from a single thread.
+    [[nodiscard]] auto writeEncodedFrame(std::unique_ptr<EncodedFrame> frame) -> VoidResult;
     [[nodiscard]] auto finish() -> VoidResult;
 
     [[nodiscard]] auto metadata() const noexcept -> const ArchiveMetadata& {
@@ -81,6 +103,10 @@ public:
 
     [[nodiscard]] auto stats() const noexcept -> const ArchiveStats& {
         return stats_;
+    }
+
+    [[nodiscard]] auto options() const noexcept -> const ArchiveOptions& {
+        return options_;
     }
 
 private:

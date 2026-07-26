@@ -1,5 +1,5 @@
 // =============================================================================
-// fq-compressor - Concurrent 2-Stage Compression Pipeline
+// fq-compressor - Concurrent 3-Stage Compression Pipeline
 // =============================================================================
 
 #include "fqc/pipeline/compress_pipeline.h"
@@ -10,6 +10,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <istream>
+#include <memory>
 #include <optional>
 #include <span>
 #include <stop_token>
@@ -35,26 +36,30 @@ auto CompressPipeline::run(std::istream& primary,
                            std::istream* mate,
                            std::span<const ReadRecord> initialRecords,
                            format::ArchiveWriter& writer) -> Result<PipelineStats> {
-    SpscQueue<std::vector<ReadRecord>, kDefaultQueueDepth> queue;
+    // Stage 1 -> 2: parsed FASTQ records accumulated into bounded frames.
+    SpscQueue<std::vector<ReadRecord>, kDefaultQueueDepth> queue1;
+    // Stage 2 -> 3: encoded (pre-compression) frames. unique_ptr so the queue
+    // only moves the frame pointer, not the raw streams.
+    SpscQueue<std::unique_ptr<format::EncodedFrame>, kDefaultQueueDepth> queue2;
     std::optional<Error> readerError;
+    std::optional<Error> encoderError;
     std::optional<Error> writerError;
     PipelineStats stats;
     std::uint64_t logicalBytes = 0;
 
-    // Cooperative cancellation. Either worker, on failure, calls
-    // request_stop(); the other worker's blocked push/pop wakes through the
-    // stop_token CV wait and exits without draining. Normal end-of-production
-    // still uses queue.close() so the writer drains in-flight frames.
+    // Cooperative cancellation. Any stage, on failure, calls request_stop();
+    // the other stages' blocked push/pop wakes through the stop_token CV wait
+    // and exits. Normal end-of-production chains close(): reader closes queue1,
+    // encoder sees nullopt and closes queue2, compressor sees nullopt.
     std::stop_source stopSource;
     std::stop_token stopToken = stopSource.get_token();
 
-    // Synchronization invariant: `readerError`/`logicalBytes` are written only
-    // by the reader thread, `writerError`/`stats` (except logicalBytes) only by
-    // the writer thread. The two workers share no mutable state but `queue`
-    // (SPSC, thread-safe by construction). Each worker's writes are read by the
-    // main thread only after the matching join() below, whose happens-before
-    // edge makes the access safe without extra synchronization -- do not read
-    // them earlier, and do not let the other thread touch them.
+    // Synchronization invariant: each shared variable is written by exactly one
+    // worker -- `readerError`/`logicalBytes` by reader, `encoderError` by
+    // encoder, `writerError`/`stats` (except logicalBytes) by compressor. The
+    // workers share no mutable state but the two queues (SPSC, thread-safe).
+    // The main thread reads these only after the matching join() below, whose
+    // happens-before edge makes the access safe without extra synchronization.
     std::jthread reader([&] {
         io::FastqParser parser(primary);
         std::optional<io::FastqParser> mateParser;
@@ -73,7 +78,7 @@ auto CompressPipeline::run(std::istream& primary,
             if (frame.empty()) {
                 return true;
             }
-            bool ok = queue.push(std::move(frame), stopToken);
+            bool ok = queue1.push(std::move(frame), stopToken);
             frame.clear();
             retainedBytes = 0;
             return ok;
@@ -121,18 +126,41 @@ auto CompressPipeline::run(std::istream& primary,
         if (!stopToken.stop_requested()) {
             pushFrame();
         }
-        queue.close();
+        queue1.close();
     });
 
-    std::jthread writerThread([&] {
+    // Stage 2: pop ReadRecord frames, encode (CPU-only) into EncodedFrame,
+    // push to queue2. encodeFrame is a free function -- no writer state touched.
+    std::jthread encoder([&] {
         while (!stopToken.stop_requested()) {
-            auto frame = queue.pop(stopToken);
+            auto frame = queue1.pop(stopToken);
             if (!frame.has_value()) {
                 break;
             }
-            stats.recordCount += frame->size();
+            auto encoded = format::encodeFrame(*frame, writer.options());
+            if (!encoded) {
+                encoderError = encoded.error();
+                stopSource.request_stop();
+                break;
+            }
+            if (!queue2.push(std::move(*encoded), stopToken)) {
+                break;
+            }
+        }
+        queue2.close();
+    });
+
+    // Stage 3: pop EncodedFrame, compress (zstd) + write to disk + update
+    // stats. ArchiveWriter is owned by this thread (output_/stats_/checksum).
+    std::jthread compressor([&] {
+        while (!stopToken.stop_requested()) {
+            auto encoded = queue2.pop(stopToken);
+            if (!encoded.has_value()) {
+                break;
+            }
+            stats.recordCount += (*encoded)->recordCount;
             stats.frameCount += 1;
-            auto result = writer.writeFrame(*frame);
+            auto result = writer.writeEncodedFrame(std::move(*encoded));
             if (!result) {
                 writerError = result.error();
                 stopSource.request_stop();
@@ -142,12 +170,16 @@ auto CompressPipeline::run(std::istream& primary,
     });
 
     reader.join();
-    writerThread.join();
+    encoder.join();
+    compressor.join();
 
     stats.logicalBytes = logicalBytes;
 
     if (writerError.has_value()) {
         return makeError<PipelineStats>(std::move(*writerError));
+    }
+    if (encoderError.has_value()) {
+        return makeError<PipelineStats>(std::move(*encoderError));
     }
     if (readerError.has_value()) {
         return makeError<PipelineStats>(std::move(*readerError));
