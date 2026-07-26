@@ -17,7 +17,7 @@ fq-compressor 并发流水线练手路线。定位：业余练手 C++ 并发流�
 
 ### A. 阻塞同步替换 yield 轮询 ★★★
 
-- 状态：进行中
+- 状态：完成
 - 问题：`spsc_queue.h` 的 `push`/`pop` 在满/空时 `yield` 自旋，生产消费速度不匹配时 CPU 空转。
 - 练手点：`condition_variable`+`mutex`、虚假唤醒、shutdown 的 `notify_all`、CV+bool predicate 模式。
 - 做法：单文件重写 `SpscQueue`，状态用 mutex 保护，`push` 满则 `wait(notFull)`、`pop` 空则 `wait(notEmpty)`，`close`/`abort` 唤醒所有等待者。顺带简化原 atomic 版本的 stale-head 终检（mutex 保证一致快照）。
@@ -70,7 +70,7 @@ A -> B -> C -> D。A 是其余同步底座，必须最先；D 依赖 A/B/C 全�
 
 | 阶段 | 状态 | commit |
 |---|---|---|
-| A | 进行中 | - |
+| A | 完成 | 94a16d4 |
 | B | 未开始 | - |
 | C | 未开始 | - |
 | D | 未开始 | - |
