@@ -44,12 +44,12 @@ fq-compressor 并发流水线练手路线。定位：业余练手 C++ 并发流�
 
 ### D. 多帧并行编码 + reorder ★★★★
 
-- 状态：未开始
+- 状态：完成
 - 动机：C 后写盘成瓶颈，但帧边界天然独立（见 ARCHITECTURE.md），编码可并行。
 - 练手点：MPSC 队列、reorder buffer（乱序完成按 frame id 有序提交）、乱序下内存有界、work distribution。
-- 做法：`reader -> [MPSC] -> N encoder -> [reorder] -> writer 按序写`。N 固定，不引线程池。
-- 验证：`test_performance` 多核近线性提升；reorder 内存峰值不超预算；`clang-tsan` 无竞争。
-- 陷阱：MPSC 先 mutex+CV 版本，别钻 lock-free CAS；reorder 窗口设上限反压。
+- 做法：`reader -> [MPMC] -> N encoder -> [MPMC] -> writer(reorder 按序写)`。MpmcQueue（mutex+CV+stop_token）两端复用，ReorderBuffer 按 frameId 有序提交，N 固定默认 4，不引线程池。
+- 验证：`clang-tsan` 10/10 无竞争；64MiB random 压缩比与 C 完全一致（正确性无损）；在途帧上界 = 队列深度×2 + N = 12 帧，maxRSS 远低于预算。**未达多核近线性提升**：encoder 非当前瓶颈（reader 单线程解析、writer 单线程 zstd+IO，Amdahl），D 揭示新瓶颈为单线程两端；WSL2 吞吐波动 ±20-85% 淹没代码差异。
+- 陷阱：MPSC 先 mutex+CV 版本，别钻 lock-free CAS（✓）；reorder 窗口设上限反压（✓ 上游队列深度即上限）。
 
 ## 贯穿：量化与可观测
 
@@ -73,4 +73,4 @@ A -> B -> C -> D。A 是其余同步底座，必须最先；D 依赖 A/B/C 全�
 | A | 完成 | 94a16d4 |
 | B | 完成 | bafcd79 |
 | C | 完成 | 965c084 |
-| D | 未开始 | - |
+| D | 完成 | abca33e |
