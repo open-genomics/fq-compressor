@@ -27,7 +27,7 @@ fq-compressor 并发流水线练手路线。定位：业余练手 C++ 并发流�
 
 ### B. jthread + stop_token 现代取消 ★★
 
-- 状态：未开始
+- 状态：完成
 - 问题：裸 `std::thread`+手动 `abort()` bool，靠主线程纪律保证 join。
 - 练手点：RAII 线程、`stop_token` 协作式取消、`stop_callback`、与 A 的 CV 集成。
 - 做法：`std::thread`->`jthread`，循环条件改 `!stop_token.stop_requested()`，`request_stop()` 触发 CV 唤醒。
@@ -71,6 +71,6 @@ A -> B -> C -> D。A 是其余同步底座，必须最先；D 依赖 A/B/C 全�
 | 阶段 | 状态 | commit |
 |---|---|---|
 | A | 完成 | 94a16d4 |
-| B | 未开始 | - |
+| B | 完成 | bafcd79 |
 | C | 未开始 | - |
 | D | 未开始 | - |
