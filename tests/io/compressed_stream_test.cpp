@@ -107,13 +107,6 @@ TEST_F(CompressedStreamTest, DetectFromExtension) {
     EXPECT_EQ(detectCompressionFormatFromExtension("file.txt"), CompressionFormat::kNone);
 }
 
-TEST_F(CompressedStreamTest, FormatExtension) {
-    EXPECT_EQ(compressionFormatExtension(CompressionFormat::kGzip), ".gz");
-    EXPECT_EQ(compressionFormatExtension(CompressionFormat::kBzip2), ".bz2");
-    EXPECT_EQ(compressionFormatExtension(CompressionFormat::kXz), ".xz");
-    EXPECT_EQ(compressionFormatExtension(CompressionFormat::kNone), "");
-}
-
 TEST_F(CompressedStreamTest, FormatName) {
     EXPECT_EQ(compressionFormatName(CompressionFormat::kGzip), "gzip");
     EXPECT_EQ(compressionFormatName(CompressionFormat::kBzip2), "bzip2");
@@ -322,15 +315,6 @@ TEST_F(CompressedStreamTest, IsCompressionSupported) {
     EXPECT_FALSE(isCompressionSupported(CompressionFormat::kBzip2));
     EXPECT_FALSE(isCompressionSupported(CompressionFormat::kXz));
     EXPECT_FALSE(isCompressionSupported(CompressionFormat::kZstd));
-}
-
-TEST_F(CompressedStreamTest, SupportedFormats) {
-    auto formats = supportedCompressionFormats();
-    EXPECT_FALSE(formats.empty());
-    EXPECT_TRUE(std::find(formats.begin(), formats.end(), CompressionFormat::kGzip) !=
-                formats.end());
-    EXPECT_TRUE(std::find(formats.begin(), formats.end(), CompressionFormat::kNone) !=
-                formats.end());
 }
 
 // =============================================================================

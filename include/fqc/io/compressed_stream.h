@@ -1,20 +1,15 @@
 // =============================================================================
 // fq-compressor - Compressed Stream Support
 // =============================================================================
-// Transparent decompression support for compressed input files.
+// Transparent gzip decompression for compressed input files.
 //
-// This module provides:
-// - CompressedStream: Wrapper for transparent decompression
-// - Automatic format detection (gzip, bzip2, xz, zstd)
-// - Streaming decompression for memory efficiency
-//
-// Supported formats: gzip (zlib)
+// Only gzip (.gz) is decompressed. bzip2/xz/zstd magic bytes are still detected
+// so an unsupported input is rejected (fail-closed) rather than silently read
+// as plain text.
 //
 // Usage:
-//   auto stream = CompressedStream::open("/path/to/reads.fastq.gz");
-//   // Use stream like any std::istream
-//
-// Requirements: 1.1.1
+//   auto stream = io::openInputFile("/path/to/reads.fastq.gz");
+//   // Use *stream like any std::istream
 // =============================================================================
 
 #pragma once
@@ -39,13 +34,14 @@ namespace fqc::io {
 // Compression Format Detection
 // =============================================================================
 
-/// @brief Supported compression formats.
+/// @brief Compression formats recognised on input. Only kGzip can be
+/// decompressed; the others are detected so they can be rejected explicitly.
 enum class CompressionFormat : std::uint8_t {
     kNone = 0,   ///< Uncompressed (plain text)
-    kGzip = 1,   ///< gzip (.gz)
-    kBzip2 = 2,  ///< bzip2 (.bz2)
-    kXz = 3,     ///< xz/lzma (.xz)
-    kZstd = 4,   ///< zstd (.zst) - not yet supported
+    kGzip = 1,   ///< gzip (.gz) - decompressed in-process via zlib
+    kBzip2 = 2,  ///< bzip2 (.bz2) - detected, not supported
+    kXz = 3,     ///< xz/lzma (.xz) - detected, not supported
+    kZstd = 4,   ///< zstd (.zst) - detected, not supported
     kUnknown = 255
 };
 
@@ -60,11 +56,6 @@ enum class CompressionFormat : std::uint8_t {
 [[nodiscard]] CompressionFormat detectCompressionFormatFromExtension(
     const std::filesystem::path& path);
 
-/// @brief Get file extension for compression format.
-/// @param format Compression format.
-/// @return File extension (e.g., ".gz").
-[[nodiscard]] std::string_view compressionFormatExtension(CompressionFormat format);
-
 /// @brief Get human-readable name for compression format.
 /// @param format Compression format.
 /// @return Format name (e.g., "gzip").
@@ -76,6 +67,8 @@ enum class CompressionFormat : std::uint8_t {
 
 /// @brief Stream buffer for gzip decompression.
 /// @note Uses zlib for streaming decompression.
+/// @note Internal implementation detail; kept public only so the move
+/// semantics (see the gzip-streambuf-move-loss postmortem) can be unit-tested.
 class GzipStreamBuf : public std::streambuf {
 public:
     /// @brief Default constructor (for move semantics).
@@ -209,9 +202,5 @@ private:
 /// @param format Compression format.
 /// @return true if format is supported for decompression.
 [[nodiscard]] bool isCompressionSupported(CompressionFormat format) noexcept;
-
-/// @brief Get list of supported compression formats.
-/// @return Vector of supported formats.
-[[nodiscard]] std::vector<CompressionFormat> supportedCompressionFormats();
 
 }  // namespace fqc::io

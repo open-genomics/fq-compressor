@@ -3,13 +3,12 @@
 **把 FASTQ 压成小而可校验的归档，内存可控，管道友好。**
 
 [![CI 状态](https://github.com/LessUp/fq-compressor/actions/workflows/ci.yml/badge.svg)](https://github.com/LessUp/fq-compressor/actions/workflows/ci.yml)
-[![GitHub Release](https://img.shields.io/github/v/release/LessUp/fq-compressor)](https://github.com/LessUp/fq-compressor/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 ![C++23](https://img.shields.io/badge/C%2B%2B-23-blue.svg)
 ![CMake 3.28+](https://img.shields.io/badge/CMake-3.28%2B-blue.svg)
 ![Conan 2.x](https://img.shields.io/badge/Conan-2.x-blue.svg)
 
-[English](README.en.md) · [快速开始](#快速开始) · [架构](ARCHITECTURE.md) · [发布版本](https://github.com/LessUp/fq-compressor/releases)
+[快速开始](#快速开始) · [架构](ARCHITECTURE.md) · [算法](ALGORITHM.md)
 
 ## 解决什么问题
 
@@ -23,17 +22,6 @@ FASTQ 文件大、传输贵、存档要防静默损坏。fq-compressor 针对这
 
 ## 快速开始
 
-### 下载二进制（推荐）
-
-从 [Releases](https://github.com/LessUp/fq-compressor/releases) 下载对应平台包，解压即用：
-
-```bash
-tar -xzf fqc-*-linux-x86_64-musl.tar.gz
-./fqc/fqc --version
-```
-
-平台：Linux x86_64（glibc / musl）、macOS x86_64。ARM64 暂不支持。
-
 ### 源码构建
 
 ```bash
@@ -45,9 +33,7 @@ cd fq-compressor
 下文示例用 `$fqc` 代指可执行文件路径：
 
 ```bash
-fqc=./build/clang-release/src/fqc   # 源码构建
-# 或
-fqc=./fqc/fqc                       # 下载二进制
+fqc=./build/clang-release/src/fqc
 ```
 
 ### 用法
@@ -75,7 +61,7 @@ $fqc compress -i R1.fastq.gz -2 R2.fastq.gz -o paired.fqc
 | Illumina-like 150 bp | 65.49 MiB | 53.15 MiB/s | 182.40 MiB/s | 31.4 MiB | 12.1 MiB | 2.95× |
 | ONT-like 20 kbp | 63.97 MiB | 55.66 MiB/s | 215.22 MiB/s | 25.5 MiB | 12.9 MiB | 2.84× |
 
-WSL2 下 wall-clock 波动较大，同机重跑结果可能低于上表，仅供参考。真实生物语料的压缩比尚未测量，见 [performance/INDEX.md](performance/INDEX.md)。
+WSL2 下 wall-clock 波动较大，同机重跑结果可能低于上表，仅供参考。真实生物语料的压缩比尚未测量。
 
 ## 设计
 
@@ -97,7 +83,6 @@ C++23（GCC 14+ / Clang 18+）· CMake 3.28+ + Ninja · Conan 2.x · Zstd · xxH
 * 不支持随机访问、按区间提取 reads。
 * 不支持有损压缩、原始顺序重排。
 * 仅支持 FASTQ 格式。
-* 发布产物仅 x86_64（Linux glibc/musl、macOS），暂不支持 ARM64。
 * 真实生物语料的压缩比尚未测量，当前数字基于随机合成数据。
 
 ## 构建
@@ -119,7 +104,6 @@ CI 覆盖：clang-format、clang-tidy、GCC/Clang Release 构建、ASan/TSan/UBS
 | 命令参数 | `$fqc --help` |
 | 压缩算法与原理 | [ALGORITHM.md](ALGORITHM.md) |
 | 架构与字节布局 | [ARCHITECTURE.md](ARCHITECTURE.md) |
-| 性能数据 | [performance/INDEX.md](performance/INDEX.md) |
 | 变更记录 | [CHANGELOG.md](CHANGELOG.md) |
 
 ## 许可证

@@ -1,11 +1,7 @@
 // =============================================================================
 // fq-compressor - Compressed Stream Implementation
 // =============================================================================
-// Transparent decompression support implementation.
-//
-// Supported formats: gzip (zlib)
-//
-// Requirements: 1.1.1
+// Transparent gzip decompression. bzip2/xz/zstd are detected but not supported.
 // =============================================================================
 
 #include "fqc/io/compressed_stream.h"
@@ -102,23 +98,6 @@ CompressionFormat detectCompressionFormatFromExtension(const std::filesystem::pa
     return CompressionFormat::kNone;
 }
 
-std::string_view compressionFormatExtension(CompressionFormat format) {
-    switch (format) {
-        case CompressionFormat::kGzip:
-            return ".gz";
-        case CompressionFormat::kBzip2:
-            return ".bz2";
-        case CompressionFormat::kXz:
-            return ".xz";
-        case CompressionFormat::kZstd:
-            return ".zst";
-        case CompressionFormat::kNone:
-        case CompressionFormat::kUnknown:
-        default:
-            return "";
-    }
-}
-
 std::string_view compressionFormatName(CompressionFormat format) {
     switch (format) {
         case CompressionFormat::kGzip:
@@ -145,10 +124,6 @@ bool isCompressionSupported(CompressionFormat format) noexcept {
         default:
             return false;
     }
-}
-
-std::vector<CompressionFormat> supportedCompressionFormats() {
-    return {CompressionFormat::kNone, CompressionFormat::kGzip};
 }
 
 // =============================================================================
