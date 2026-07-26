@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <mutex>
 #include <optional>
+#include <stop_token>
 #include <utility>
 
 namespace fqc::pipeline {
@@ -12,17 +13,22 @@ namespace fqc::pipeline {
 /// Single-producer single-consumer bounded ring buffer.
 ///
 /// `close()` signals normal end-of-production: a consumer blocked on `pop()`
-/// returns `std::nullopt` once the queue drains. `abort()` signals abnormal
-/// shutdown: a producer blocked on a full `push()` returns `false` so it can
-/// stop without deadlocking when the consumer has already failed.
+/// drains the remaining items, then returns `std::nullopt`. `abort()` signals
+/// abnormal shutdown at the queue level (kept for unit tests): a producer
+/// blocked on a full `push()` returns `false`, a consumer `std::nullopt`.
 ///
-/// Synchronization is a mutex plus two condition variables (`cvNotFull_` for
-/// producers, `cvNotEmpty_` for consumers). This replaces an earlier
-/// atomic + `std::this_thread::yield()` spin: the spin wasted CPU when one
-/// side outran the other, and blocking on a CV lets the OS park the thread
-/// until progress is possible. Because all state lives under the mutex, the
-/// consumer observes a consistent snapshot, so the stale-head terminal recheck
-/// the atomic version needed is no longer required.
+/// `push`/`pop` also accept a `std::stop_token`: when `request_stop()` is
+/// called on the owning `stop_source`, a blocked `push` returns `false` and a
+/// blocked `pop` returns `std::nullopt` *without draining* -- cooperative
+/// cancellation that wakes the thread through the CV instead of spinning. This
+/// is the cancel path the pipeline uses; `close()` remains the normal
+/// end-of-production path with drain semantics.
+///
+/// Synchronization is a mutex plus two `condition_variable_any` (`cvNotFull_`
+/// for producers, `cvNotEmpty_` for consumers). `condition_variable_any`
+/// rather than `condition_variable` is required for the stop_token `wait`
+/// overload that wakes on `request_stop()`. Because all state lives under the
+/// mutex, the consumer observes a consistent snapshot.
 template <typename T, std::size_t Capacity>
 requires(Capacity > 0 && (Capacity & (Capacity - 1)) == 0)
 class SpscQueue {
@@ -32,12 +38,14 @@ public:
     SpscQueue(const SpscQueue&) = delete;
     SpscQueue& operator=(const SpscQueue&) = delete;
 
-    /// Enqueue an item. Returns false if the queue was aborted (item dropped);
-    /// otherwise blocks until space is available and returns true.
-    auto push(T item) -> bool {
+    /// Enqueue an item. Returns false if `st` was stop-requested or the queue
+    /// was aborted (item dropped); otherwise blocks until space is available
+    /// and returns true.
+    auto push(T item, std::stop_token st = {}) -> bool {
         std::unique_lock lock(m_);
-        cvNotFull_.wait(lock, [&] { return aborted_ || !isFullLocked(); });
-        if (aborted_) {
+        cvNotFull_.wait(
+            lock, st, [&] { return st.stop_requested() || aborted_ || !isFullLocked(); });
+        if (st.stop_requested() || aborted_) {
             return false;
         }
         storage_[head_] = std::move(item);
@@ -47,12 +55,15 @@ public:
         return true;
     }
 
-    /// Dequeue the next item, or `std::nullopt` if the queue is empty and has
-    /// been closed or aborted.
-    [[nodiscard]] auto pop() -> std::optional<T> {
+    /// Dequeue the next item, or `std::nullopt`. Returns `std::nullopt` if `st`
+    /// was stop-requested (cancel, without draining), or once the queue has
+    /// drained after `close()`/`abort()`.
+    [[nodiscard]] auto pop(std::stop_token st = {}) -> std::optional<T> {
         std::unique_lock lock(m_);
-        cvNotEmpty_.wait(lock, [&] { return closed_ || aborted_ || !isEmptyLocked(); });
-        if (isEmptyLocked()) {
+        cvNotEmpty_.wait(lock, st, [&] {
+            return st.stop_requested() || closed_ || aborted_ || !isEmptyLocked();
+        });
+        if (st.stop_requested() || isEmptyLocked()) {
             return std::nullopt;
         }
         T item = std::move(storage_[tail_]);
@@ -62,7 +73,8 @@ public:
         return item;
     }
 
-    /// Signal that production is complete (no more items will be pushed).
+    /// Signal that production is complete (no more items will be pushed). A
+    /// blocked consumer drains the remaining items, then sees `std::nullopt`.
     void close() {
         {
             std::lock_guard lock(m_);
@@ -72,7 +84,8 @@ public:
     }
 
     /// Signal abnormal shutdown: unblock a producer blocked on a full push and
-    /// a consumer blocked on an empty pop.
+    /// a consumer blocked on an empty pop. Kept for unit tests; the pipeline
+    /// uses stop_token cancellation instead.
     void abort() {
         {
             std::lock_guard lock(m_);
@@ -101,8 +114,8 @@ private:
     }
 
     mutable std::mutex m_;
-    std::condition_variable cvNotFull_;
-    std::condition_variable cvNotEmpty_;
+    std::condition_variable_any cvNotFull_;
+    std::condition_variable_any cvNotEmpty_;
     std::size_t head_ = 0;
     std::size_t tail_ = 0;
     bool closed_ = false;

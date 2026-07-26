@@ -12,6 +12,7 @@
 #include <istream>
 #include <optional>
 #include <span>
+#include <stop_token>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -40,6 +41,13 @@ auto CompressPipeline::run(std::istream& primary,
     PipelineStats stats;
     std::uint64_t logicalBytes = 0;
 
+    // Cooperative cancellation. Either worker, on failure, calls
+    // request_stop(); the other worker's blocked push/pop wakes through the
+    // stop_token CV wait and exits without draining. Normal end-of-production
+    // still uses queue.close() so the writer drains in-flight frames.
+    std::stop_source stopSource;
+    std::stop_token stopToken = stopSource.get_token();
+
     // Synchronization invariant: `readerError`/`logicalBytes` are written only
     // by the reader thread, `writerError`/`stats` (except logicalBytes) only by
     // the writer thread. The two workers share no mutable state but `queue`
@@ -47,7 +55,7 @@ auto CompressPipeline::run(std::istream& primary,
     // main thread only after the matching join() below, whose happens-before
     // edge makes the access safe without extra synchronization -- do not read
     // them earlier, and do not let the other thread touch them.
-    std::thread reader([&] {
+    std::jthread reader([&] {
         io::FastqParser parser(primary);
         std::optional<io::FastqParser> mateParser;
         if (mate != nullptr) {
@@ -65,7 +73,7 @@ auto CompressPipeline::run(std::istream& primary,
             if (frame.empty()) {
                 return true;
             }
-            bool ok = queue.push(std::move(frame));
+            bool ok = queue.push(std::move(frame), stopToken);
             frame.clear();
             retainedBytes = 0;
             return ok;
@@ -82,7 +90,7 @@ auto CompressPipeline::run(std::istream& primary,
         };
 
         for (auto& record : initialRecords) {
-            if (queue.isAborted()) {
+            if (stopToken.stop_requested()) {
                 break;
             }
             if (!append(std::move(record))) {
@@ -90,10 +98,11 @@ auto CompressPipeline::run(std::istream& primary,
             }
         }
 
-        while (!queue.isAborted()) {
+        while (!stopToken.stop_requested()) {
             auto pair = io::readRecordPair(parser, mateParser ? &*mateParser : nullptr);
             if (!pair) {
                 readerError = pair.error();
+                stopSource.request_stop();
                 break;
             }
             if (!pair->has_value()) {
@@ -109,15 +118,15 @@ auto CompressPipeline::run(std::istream& primary,
             }
         }
 
-        if (!queue.isAborted()) {
+        if (!stopToken.stop_requested()) {
             pushFrame();
         }
         queue.close();
     });
 
-    std::thread writerThread([&] {
-        while (true) {
-            auto frame = queue.pop();
+    std::jthread writerThread([&] {
+        while (!stopToken.stop_requested()) {
+            auto frame = queue.pop(stopToken);
             if (!frame.has_value()) {
                 break;
             }
@@ -126,7 +135,7 @@ auto CompressPipeline::run(std::istream& primary,
             auto result = writer.writeFrame(*frame);
             if (!result) {
                 writerError = result.error();
-                queue.abort();
+                stopSource.request_stop();
                 break;
             }
         }

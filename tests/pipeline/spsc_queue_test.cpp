@@ -6,6 +6,7 @@
 
 #include <cstddef>
 #include <optional>
+#include <stop_token>
 #include <thread>
 #include <vector>
 
@@ -112,4 +113,35 @@ TEST(SpscQueueTest, StressProducerConsumer) {
     for (std::size_t i = 0; i < kItemCount; ++i) {
         EXPECT_EQ(received[i], i);
     }
+}
+
+TEST(SpscQueueTest, StopTokenUnblocksFullPush) {
+    // capacity 2 holds one item; push(2) would block. request_stop cancels it
+    // through the stop_token CV wait and push returns false.
+    SpscQueue<int, 2> queue;
+    std::stop_source ss;
+    auto token = ss.get_token();
+    EXPECT_TRUE(queue.push(1, token));
+    bool pushed = false;
+    std::thread producer([&] {
+        EXPECT_FALSE(queue.push(2, token));
+        pushed = true;
+    });
+    ss.request_stop();
+    producer.join();
+    EXPECT_TRUE(pushed);
+}
+
+TEST(SpscQueueTest, StopTokenReturnsNulloptFromEmptyPop) {
+    SpscQueue<int, 4> queue;
+    std::stop_source ss;
+    auto token = ss.get_token();
+    bool popped = false;
+    std::thread consumer([&] {
+        EXPECT_FALSE(queue.pop(token).has_value());
+        popped = true;
+    });
+    ss.request_stop();
+    consumer.join();
+    EXPECT_TRUE(popped);
 }
