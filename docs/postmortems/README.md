@@ -28,3 +28,4 @@ CHANGELOG 只记"做了什么"，这里记"为什么发生、如何定位、如�
 | 2026-07-13 | LeakSanitizer/vptr 在受管 ptrace 环境不可用 | low | wontfix |
 | 2026-07-13 | Conan 工具链漂移（zlib-ng/Clang21/CMake export） | medium | closed |
 | 2026-07-24 | SPSC `pop()` 在 `close` 后丢失尾帧 | high | closed |
+| 2026-07-26 | 阶段 D 多帧并行编码未提速（Amdahl） | low | closed |
