@@ -35,7 +35,7 @@ fq-compressor 并发流水线练手路线。定位：业余练手 C++ 并发流�
 
 ### C. 3-stage 流水线 ★★
 
-- 状态：未开始
+- 状态：完成
 - 问题：`writer.writeFrame` 把 measure+encode+zstd+checksum+写盘混在一处，CPU 密集 encode 与 I/O 密集写盘未分离。
 - 练手点：多级背压传递、中间 stage shutdown 双向传播（q1 close -> 中间 stage -> q2 close）、何时抽泛型 stage。
 - 做法：拆 `reader -> encoder(2bit打包+measure) -> compressor(zstd+xxh64+写盘)`，两条 SPSC。
@@ -72,5 +72,5 @@ A -> B -> C -> D。A 是其余同步底座，必须最先；D 依赖 A/B/C 全�
 |---|---|---|
 | A | 完成 | 94a16d4 |
 | B | 完成 | bafcd79 |
-| C | 未开始 | - |
+| C | 完成 | 965c084 |
 | D | 未开始 | - |
