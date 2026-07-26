@@ -1,0 +1,223 @@
+// =============================================================================
+// fq-compressor - MPMC Queue Tests
+// =============================================================================
+
+#include "fqc/pipeline/mpmc_queue.h"
+
+#include <algorithm>
+#include <cstddef>
+#include <optional>
+#include <stop_token>
+#include <thread>
+#include <vector>
+
+#include <gtest/gtest.h>
+
+using fqc::pipeline::MpmcQueue;
+
+TEST(MpmcQueueTest, PushPopSingleItem) {
+    MpmcQueue<int, 4> queue;
+    EXPECT_TRUE(queue.push(42));
+    auto item = queue.pop();
+    ASSERT_TRUE(item.has_value());
+    EXPECT_EQ(*item, 42);
+}
+
+TEST(MpmcQueueTest, FillToCapacityAndDrain) {
+    MpmcQueue<int, 4> queue;
+    queue.push(1);
+    queue.push(2);
+    queue.push(3);
+
+    EXPECT_EQ(*queue.pop(), 1);
+    EXPECT_EQ(*queue.pop(), 2);
+    EXPECT_EQ(*queue.pop(), 3);
+}
+
+TEST(MpmcQueueTest, BackpressureUnblocksOnPop) {
+    MpmcQueue<int, 2> queue;
+    queue.push(1);
+
+    bool pushed = false;
+    std::thread producer([&] {
+        EXPECT_TRUE(queue.push(2));
+        pushed = true;
+    });
+
+    EXPECT_EQ(*queue.pop(), 1);
+    producer.join();
+    EXPECT_TRUE(pushed);
+    EXPECT_EQ(*queue.pop(), 2);
+}
+
+TEST(MpmcQueueTest, CloseReturnsNulloptAfterDrain) {
+    MpmcQueue<int, 4> queue;
+    queue.push(10);
+    queue.push(20);
+    queue.close();
+
+    EXPECT_EQ(*queue.pop(), 10);
+    EXPECT_EQ(*queue.pop(), 20);
+    EXPECT_FALSE(queue.pop().has_value());
+}
+
+TEST(MpmcQueueTest, StopTokenUnblocksFullPush) {
+    MpmcQueue<int, 2> queue;
+    std::stop_source ss;
+    auto token = ss.get_token();
+    EXPECT_TRUE(queue.push(1, token));
+    bool pushed = false;
+    std::thread producer([&] {
+        EXPECT_FALSE(queue.push(2, token));
+        pushed = true;
+    });
+    ss.request_stop();
+    producer.join();
+    EXPECT_TRUE(pushed);
+}
+
+TEST(MpmcQueueTest, StopTokenReturnsNulloptFromEmptyPop) {
+    MpmcQueue<int, 4> queue;
+    std::stop_source ss;
+    auto token = ss.get_token();
+    bool popped = false;
+    std::thread consumer([&] {
+        EXPECT_FALSE(queue.pop(token).has_value());
+        popped = true;
+    });
+    ss.request_stop();
+    consumer.join();
+    EXPECT_TRUE(popped);
+}
+
+// N producers, one consumer: no item lost, no id corrupted.
+TEST(MpmcQueueTest, MultiProducerSingleConsumerNoLoss) {
+    constexpr std::size_t kProducers = 4;
+    constexpr std::size_t kPerProducer = 2000;
+    constexpr std::size_t kTotal = kProducers * kPerProducer;
+    MpmcQueue<std::size_t, 8> queue;
+
+    std::vector<std::thread> producers;
+    producers.reserve(kProducers);
+    for (std::size_t p = 0; p < kProducers; ++p) {
+        producers.emplace_back([&, p] {
+            for (std::size_t i = 0; i < kPerProducer; ++i) {
+                queue.push(p * kPerProducer + i);
+            }
+        });
+    }
+
+    std::vector<unsigned> seen(kTotal, 0);
+    std::thread consumer([&] {
+        while (true) {
+            auto item = queue.pop();
+            if (!item.has_value()) {
+                break;
+            }
+            ASSERT_LT(*item, kTotal);
+            ++seen[*item];
+        }
+    });
+
+    for (auto& t : producers)
+        t.join();
+    queue.close();
+    consumer.join();
+
+    for (std::size_t i = 0; i < kTotal; ++i) {
+        EXPECT_EQ(seen[i], 1u) << "value " << i << " seen " << seen[i] << " times";
+    }
+}
+
+// One producer, N consumers: every item delivered to exactly one consumer.
+TEST(MpmcQueueTest, SingleProducerMultiConsumerNoDuplicate) {
+    constexpr std::size_t kConsumers = 4;
+    constexpr std::size_t kTotal = 8000;
+    MpmcQueue<std::size_t, 8> queue;
+
+    std::vector<std::vector<std::size_t>> consumed(kConsumers);
+    std::vector<std::thread> consumers;
+    consumers.reserve(kConsumers);
+    for (std::size_t c = 0; c < kConsumers; ++c) {
+        consumers.emplace_back([&, c] {
+            while (true) {
+                auto item = queue.pop();
+                if (!item.has_value())
+                    break;
+                consumed[c].push_back(*item);
+            }
+        });
+    }
+
+    std::thread producer([&] {
+        for (std::size_t i = 0; i < kTotal; ++i)
+            queue.push(i);
+        queue.close();
+    });
+
+    producer.join();
+    for (auto& t : consumers)
+        t.join();
+
+    std::vector<std::size_t> all;
+    all.reserve(kTotal);
+    for (auto& v : consumed)
+        all.insert(all.end(), v.begin(), v.end());
+    std::sort(all.begin(), all.end());
+
+    ASSERT_EQ(all.size(), kTotal);
+    for (std::size_t i = 0; i < kTotal; ++i) {
+        EXPECT_EQ(all[i], i) << "missing/duplicate at " << i;
+    }
+}
+
+// N producers, M consumers: the full MPMC stress test -- no loss, no
+// duplication, no corruption under concurrent fan-in and fan-out.
+TEST(MpmcQueueTest, StressMultiProducerMultiConsumer) {
+    constexpr std::size_t kProducers = 4;
+    constexpr std::size_t kConsumers = 4;
+    constexpr std::size_t kPerProducer = 2500;
+    constexpr std::size_t kTotal = kProducers * kPerProducer;
+    MpmcQueue<std::size_t, 16> queue;
+
+    std::vector<std::thread> producers;
+    producers.reserve(kProducers);
+    for (std::size_t p = 0; p < kProducers; ++p) {
+        producers.emplace_back([&, p] {
+            for (std::size_t i = 0; i < kPerProducer; ++i) {
+                queue.push(p * kPerProducer + i);
+            }
+        });
+    }
+
+    std::vector<std::vector<std::size_t>> consumed(kConsumers);
+    std::vector<std::thread> consumers;
+    consumers.reserve(kConsumers);
+    for (std::size_t c = 0; c < kConsumers; ++c) {
+        consumers.emplace_back([&, c] {
+            while (true) {
+                auto item = queue.pop();
+                if (!item.has_value())
+                    break;
+                consumed[c].push_back(*item);
+            }
+        });
+    }
+
+    for (auto& t : producers)
+        t.join();
+    queue.close();
+    for (auto& t : consumers)
+        t.join();
+
+    std::vector<std::size_t> all;
+    all.reserve(kTotal);
+    for (auto& v : consumed)
+        all.insert(all.end(), v.begin(), v.end());
+    std::sort(all.begin(), all.end());
+
+    ASSERT_EQ(all.size(), kTotal);
+    for (std::size_t i = 0; i < kTotal; ++i) {
+        EXPECT_EQ(all[i], i) << "missing/duplicate at " << i;
+    }
+}
