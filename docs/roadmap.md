@@ -11,7 +11,15 @@ fq-compressor 并发流水线练手路线。定位：业余练手 C++ 并发流�
 
 ## 当前基线
 
-`reader`(解析+帧累积) -> SPSC(深度4) -> `writer`(编码+zstd+xxh64+写盘)。`yield` 轮询、`std::thread`+`join`、`close`/`abort` 双 bool shutdown。SPSC 已修过丢尾帧竞态。
+阶段 D 后（commit abca33e）：
+
+```text
+压缩: reader(解析+帧累积) -> [MPMC 深度4] -> encoder×4(2bit打包+measure+校验和)
+      -> [MPMC 深度4] -> writer(ReorderBuffer 按帧id排序 -> zstd×3 -> 写盘)
+解压: 纯顺序(ArchiveReader::readFrame + writeFastqRecord 单线程)
+```
+
+`jthread`+`stop_token` 协作取消；MPMC 为 mutex+CV 有界环形缓冲；在途帧上界 12。已确认瓶颈在单线程 reader(解析) 与单线程 writer(zstd+IO)，encoder 并行未提速(Amdahl，见阶段 D 复盘)。WSL2 吞吐波动 ±20-85%，单次数字不可信。
 
 ## 阶段
 
@@ -51,13 +59,70 @@ fq-compressor 并发流水线练手路线。定位：业余练手 C++ 并发流�
 - 验证：`clang-tsan` 10/10 无竞争；64MiB random 压缩比与 C 完全一致（正确性无损）；在途帧上界 = 队列深度×2 + N = 12 帧，maxRSS 远低于预算。**未达多核近线性提升**：encoder 非当前瓶颈（reader 单线程解析、writer 单线程 zstd+IO，Amdahl），D 揭示新瓶颈为单线程两端；WSL2 吞吐波动 ±20-85% 淹没代码差异。
 - 陷阱：MPSC 先 mutex+CV 版本，别钻 lock-free CAS（✓）；reorder 窗口设上限反压（✓ 上游队列深度即上限）。
 
+### E. 可观测性与可靠 benchmark 平台 ★★（硬依赖，排第一）
+
+- 状态：未开始
+- 动机：阶段 D 复盘教训二"并发优化前先 profiling"；WSL2 波动 ±20-85% 使单次数字不可信；下文"贯穿"节承诺的计数器在 `mpmc_queue.h` 中至今未实现——E 是补旧账 + 建底座。F 的预期收益可能就在环境噪声量级内，没有 E 则 F/G/H 全部无法可信验证。
+- 练手点（新并发知识，不与 A-D 重复）：**原子操作与内存序**——`memory_order_relaxed` 统计计数器的唯一正当用例；低侵入观测（计数不拖慢热路径）。
+- 做法：
+  1. `MpmcQueue` 加 relaxed 原子计数器：push/pop 次数、阻塞等待次数、高水位，run 结束打印。
+  2. 分段计时：reader/encoder/writer 各 stage 用 `steady_clock` 累计墙钟占比（按帧采样，不在 push/pop 热循环内取时钟），直接产出 Amdahl 证据，替代复盘里的间接推断。
+  3. benchmark 脚本加固（`tests/e2e/test_performance.sh` 基础上，已有 median-of-3/jsonl/round-trip cmp/SLA）：warmup 轮、`FQC_PERF_REPEATS` 提到 ≥5、方差/极差报告、**同状态 A/B 模式**（两个二进制路径对比，把阶段 D 复盘"切代码同状态重跑"方法论工具化）、结果归档 `perf-baselines/YYYY-MM-DD-stage-x/`。
+- 验证：计数器自身 tsan 干净；同二进制同配置连跑方差量化报告（证明平台能区分"代码差异"与"环境噪声"的阈值）；热路径开销可忽略（release 下吞吐回退 <2%）。
+- 陷阱：计数器别用 seq_cst 默认序（拖慢热路径）；A/B 模式禁止跨时比基线（复盘教训三）。
+
+### F. zstd 下沉到 encoder worker ★★★
+
+- 状态：未开始
+- 动机：阶段 D 复盘确认 writer（单线程 zstd+IO）是两瓶颈之一；E 的分段计时给出量化占比。zstd 帧间独立天然可并行（每帧×每流独立 `ZSTD_compress`，`archive.cpp:337-347`）；下沉后 writer 退化为 reorder+写盘。
+- 练手点：**工作粒度再平衡**——把 CPU 密集工作从串行段迁入已有 worker 池后的背压再分析；**确定性验证方法论**（见验证）。
+- 做法：`compress()` 提出匿名命名空间（或新 `compressFrame` free 函数）；`EncodedFrame`（`archive.h:73-80`）改携压缩后流（或新 `CompressedFrame`），queue2 载荷从 raw 变 compressed；writer 只做 reorder + 帧头拼装 + 写盘。内存口径：worker 侧 `ZSTD_compressBound` scratch ×N 计入预检；在途帧 12 上界不变，单帧峰值不变，maxRSS 预期不升（queue2 载荷变小）。
+- 验证：**归档逐字节一致**——同输入 64MiB random 的 .fqc 与 F 前基线 `cmp` 完全相等。依据：同版本同参数 `ZSTD_compress` 输出确定 + reorder 保序 + 帧 id 由 writer 计数器派生不变。这是比"压缩比一致"更强的门禁；tsan 干净；E 平台量吞吐（writer 段应趋近纯 IO）。
+- 陷阱：①预检公式乘 N（N worker 并发 bound 分配）；②worker 内 zstd 失败走 encoderError + request_stop 通道（复用现有模式）；③若归档字节不一致，必是改动引入差异，不得归因 zstd。
+- 注意：codec ID 不变（zstd 帧自描述，解压与 level 无关），格式零破坏。
+
+### I（可选番外）. 轻量压缩比：per-stream zstd level ★★
+
+- 状态：未开始
+- 动机：调研报告 §6 差距①（质量流零变换，见 `docs/fastq-compression-survey.md`）+ ALGORITHM.md:172；紧随 F——zstd 调用点刚动过，E 平台立即可判门槛。
+- 练手点：无新并发知识——定位为**准入门槛制度练手**（CODEC_GATES 理念轻量复活，见 v1 复盘 :50 与 ARCHITECTURE.md:61-62）。
+- 做法：质量流 zstd level 独立参数（扫描 3-7），ID/序列保持 1；`ArchiveOptions` 加字段；codec ID 不变、解码零改动、格式零破坏。门槛建议：压缩吞吐回退 ≤10% 且 ratio 改善 ≥3% 才合入默认值，否则只留为 CLI 选项。
+- 验证：E 平台中位数（禁单次）；吞吐/ratio 曲线记录回调研报告 §6 的实测小节（两份文档联动）。
+- 明确排除：跨帧字典（破坏帧独立）、任何重排序（v1 坟场）、自研 AC/range coder（复杂度）、有损分箱（无损硬约束）。
+
+### G. 解压路径流水线化 + 泛型 stage 抽取 ★★★
+
+- 状态：未开始
+- 动机：解压纯顺序（`archive_engine.cpp:353-367`），98-122 MiB/s；帧解码（zstd 解压+decode）与 FASTQ 写出零重叠。reviews F-7 当年判"不做"理由是"吞吐非瓶颈"——在 E 有数据后重审。
+- 练手点：**抽象时机**——MPMC+ReorderBuffer 第二次出现、"pop-process-push 循环"第 4-6 次手写，满足设计原则 4"第三个重复模式再抽泛型"；泛型 stage 的最小接口设计（In/Out/Handler + close/stop 语义），不造 pipeline 框架。
+- 做法：`ArchiveReader::readFrame` 拆为"读帧头+载荷+预检"（reader 线程）与"zstd 解压+逻辑校验和+decodeRawStreams"（N decoder worker，乱序完成）；writer 线程 reorder 按帧 id 有序提交 → **滚动校验和 + writeFastqRecord**。`verify` 命令复用同一流水线（writer 换空 handler）——泛型 stage 的第一个复用者。
+- 验证：round-trip cmp（脚本已有）；全部现存归档 fixture 回归；tsan；E 平台量解压吞吐；滚动校验和尾值与顺序版一致。
+- 陷阱：①**滚动校验和（`advanceGlobalChecksum`）是逐帧链式顺序依赖，必须留在有序提交端**（per-frame 逻辑校验和独立，可在 worker 验）——本阶段最核心的正确性陷阱；②`vector<ReadRecord>` 大对象跨队列移动用 unique_ptr；③预检在 reader 端完成后再入队，内存有界不变量（2×4+N 帧）不破；④泛型只抽最小核，禁止顺带造 DAG/调度器。
+
+### H. 并行解析（限未压缩普通文件）★★★★
+
+- 状态：未开始
+- 动机：F 之后 reader（单线程解析+帧累积）是压缩路径唯一串行瓶颈（E 数据确认）。
+- 练手点：**数据并行**（区别于 D 的任务并行）——字节块切分 + 记录边界对齐协议 + 有序重组（复用 frame id/reorder）；条件启用策略（输入类型分派）。
+- 做法：输入为未压缩普通文件时启用——fstat 得大小 → 等分 K 块 → 每 worker 从块起点扫描定位下一条完整记录（4 行结构验证：seq 长度==qual 长度、'+' 行）→ 解析累积成帧 → 帧 id 按块序分配 → reorder 保序。.gz/stdin/双端输入走现有单 reader 路径（范围裁剪：双端 R1/R2 锁步在并行下复杂度爆炸，不做）。profile 采样保持在主线程，并行解析从采样终点字节偏移接续。
+- 验证：同输入归档与单 reader 版逐字节一致（块边界对齐协议的强检验）；含 '@' 出现在质量行的对抗 fixture（构造质量行恰好以 `@` 起始的记录）；tsan；E 平台量吞吐。
+- 陷阱：①'@' 歧义——不能找行首 '@' 就当记录起点，必须 4 行结构回验，失败续扫；②采样终点偏移与块切分的衔接；③退化路径覆盖测试（gz/stdin/paired 全部走旧路径且行为不变）。
+- 范围纪律：gzip 流式输入无法随机切块（`GzipStreamBuf` 纯 inflate 流）。**inflate/parse 分离设计（gz 下 inflate 串行、parse 扇出）明确不做**——除非 E 的分段计时证明 gz 路径 parse 占比 > inflate 占比，否则属投机优化。benchmark 脚本恰生成未压缩文件，H 的收益在平台上可直接量化，不构成"只为 benchmark 优化"。
+
 ## 贯穿：量化与可观测
 
 每阶段给队列加 `memory_order_relaxed` 原子计数器（push/pop 次数、阻塞次数、高水位），测试时打印。并发调优无观测即盲调。计数器用 relaxed 序，别拖慢热路径。
 
+注：计数器在 A-D 阶段未兑现（`mpmc_queue.h` 无计数器），由阶段 E 统一补上并工具化。
+
 ## 优先级
 
-A -> B -> C -> D。A 是其余同步底座，必须最先；D 依赖 A/B/C 全部正确性基础，放最后。
+A -> B -> C -> D（已完成，同步底座与多级流水线）-> E -> F -> I -> G -> H。
+
+- E 是 F/G/H/I 的验证底座（WSL2 波动下无测量即盲调），必须最先。
+- F 验证成本最低（归档逐字节一致门禁）、直击已确认瓶颈；I 依赖 F 落定后的 zstd 调用点。
+- G 低风险稳赢（解压侧当前零重叠），产出的泛型 stage 供 H 可选复用；H 最难放最后。
+- 弹性条款：若 E 数据显示 reader 占压缩路径 >60%，允许 H 提前到 G 之前——排序决策交给 E 的数据（呼应"先 profiling"教训）。
 
 ## 不推荐
 
@@ -65,6 +130,11 @@ A -> B -> C -> D。A 是其余同步底座，必须最先；D 依赖 A/B/C 全�
 - **lock-free MPSC（复杂 CAS）**：练手阶段 mutex 版足够，无锁是另一课题。
 - **异步 I/O（io_uring/aio）**：引入平台复杂度，偏离并发流水线主题。
 - **过早泛型 pipeline 框架**：预先造必返工。
+- **自研熵编码器（算术编码/range coder/手写 FSE）**：复杂度与验证成本超练手预算，熵编码交给 zstd（v1 SCM 已删，见 `docs/fastq-compression-survey.md` §7）。
+- **read 重排序 / 全局相似聚类（SPRING 路线）**：v1 坟场——重排序/编码器状态/内存核算耦合错位，内存上限无法强制执行（v1 复盘根因）。
+- **跨帧 zstd 字典**：破坏帧独立性——帧独立是阶段 D 并行编码的切分点（ARCHITECTURE.md:97）。
+- **有参压缩（参考基因组）**：项目定位外。
+- **gz 输入的 inflate/parse 分离并行**：除非阶段 E 数据证明 gz 路径 parse 占比超 inflate，否则不做（反投机）。
 
 ## 进度
 
@@ -74,3 +144,8 @@ A -> B -> C -> D。A 是其余同步底座，必须最先；D 依赖 A/B/C 全�
 | B | 完成 | bafcd79 |
 | C | 完成 | 965c084 |
 | D | 完成 | abca33e |
+| E | 未开始 | — |
+| F | 未开始 | — |
+| I（番外） | 未开始 | — |
+| G | 未开始 | — |
+| H | 未开始 | — |
