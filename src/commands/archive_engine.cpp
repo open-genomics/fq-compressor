@@ -348,7 +348,8 @@ auto ArchiveEngine::compress(const CompressionRequest& request) const -> Result<
                                  {.profile = *resolvedProfile,
                                   .paired = request.paired(),
                                   .maxFrameBytes = maxFrameBytesFor(request.memoryLimitBytes),
-                                  .memoryLimitBytes = request.memoryLimitBytes});
+                                  .memoryLimitBytes = request.memoryLimitBytes,
+                                  .qualityZstdLevel = request.qualityZstdLevel});
     pipeline::CompressPipeline pipelineEngine(targetFrameBytesFor(request), request.paired());
     std::istream* mateStream = mateStreamPtr ? mateStreamPtr.get() : nullptr;
     auto pipelineResult = pipelineEngine.run(

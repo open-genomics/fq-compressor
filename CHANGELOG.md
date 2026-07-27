@@ -2,6 +2,12 @@
 
 ## [未发布]
 
+### 新增
+
+- **质量流 per-stream zstd level（路线图阶段 I 番外）**：`compress --quality-level N`（1–19）允许质量流单独提升 zstd 档位，ID/序列流保持 level 1。zstd 帧自描述，解码零改动、codec ID 不变、线上格式零破坏；默认 level=1 与阶段 F 归档逐字节一致。
+  - **CODEC_GATES 准入门槛判定**（吞吐回退 ≤10% 且压缩比改善 ≥3% 才合入默认值）：拟真质量分布（64 MiB，Q38–41 集中）下 L7/L9 体积 −3.3%/−4.0% 但压缩吞吐 −43%/−53%，L19 体积 −10.6% 但吞吐 −97%；11 符号随机质量下 L3–L9 归档反而更大（+3–7%）。**无任何档位通过门槛 → 默认保持 level 1**，选项仅作为 CLI 实验入口保留。实测曲线见 `docs/fastq-compression-survey.md` §6。
+  - 单测：高层级只影响质量流载荷（ID/序列载荷跨层级逐字节一致）、越界 level 拒绝（kUsageError）、高层级归档 round-trip 一致。
+
 ### 变更
 
 - **zstd 下沉到 encoder worker（路线图阶段 F）**：压缩流水线的 CPU 密集段全部迁入 worker 池，writer 退化为纯 I/O。

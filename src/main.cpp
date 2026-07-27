@@ -36,6 +36,7 @@ struct CompressOptions {
     std::string output;
     std::string profile = "auto";
     std::uint64_t frameMiB = 64;
+    int qualityLevel = 1;
     bool force = false;
 };
 
@@ -130,6 +131,12 @@ int main(int argc, char* argv[]) {
         ->add_option("--frame-mib", compress.frameMiB, "Target raw FASTQ bytes per frame")
         ->default_val(64)
         ->check(CLI::PositiveNumber);
+    compressCommand
+        ->add_option("--quality-level",
+                     compress.qualityLevel,
+                     "zstd level for the quality stream (ID/sequence stay at 1)")
+        ->default_val(1)
+        ->check(CLI::Range(1, 19));
     compressCommand->add_flag("-f,--force", compress.force, "Overwrite an existing output");
 
     auto* decompressCommand =
@@ -176,6 +183,7 @@ int main(int argc, char* argv[]) {
                                            .profile = *profile,
                                            .memoryLimitBytes = *memoryLimit,
                                            .targetFrameBytes = *targetFrameBytes,
+                                           .qualityZstdLevel = compress.qualityLevel,
                                            .forceOverwrite = compress.force});
             if (!result) {
                 return reportError(result);

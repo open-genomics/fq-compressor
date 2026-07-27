@@ -228,7 +228,8 @@ auto CompressPipeline::run(std::istream& primary,
                 break;
             }
             const auto compressStart = Clock::now();
-            auto compressed = format::compressFrame(std::move(*encoded));
+            auto compressed =
+                format::compressFrame(std::move(*encoded), writer.options().qualityZstdLevel);
             compressNs += nanosSince(compressStart);
             if (!compressed) {
                 {

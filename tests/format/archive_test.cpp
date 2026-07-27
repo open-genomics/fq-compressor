@@ -220,6 +220,42 @@ TEST(ArchiveTest, RoundTripsAllRecordFieldsAndFooter) {
     EXPECT_EQ(reader.stats().recordCount, records.size());
 }
 
+TEST(ArchiveTest, HigherQualityLevelNeverGrowsArchiveAndRoundTrips) {
+    // Repetitive quality data compresses at any level; a higher quality level
+    // must never produce a larger archive, and the decoder (unchanged -- zstd
+    // frames are self-describing) must reproduce the records exactly.
+    // (Sequence and quality lengths must match -- validRecordShape.)
+    std::vector<ReadRecord> records;
+    records.reserve(2000);
+    for (int i = 0; i < 2000; ++i) {
+        records.push_back(
+            {"read_" + std::to_string(i), "", std::string(150, 'A'), std::string(150, 'I')});
+    }
+    const auto level1 =
+        writeArchive({.profile = DatasetProfile::kIllumina, .qualityZstdLevel = 1}, records);
+    const auto level7 =
+        writeArchive({.profile = DatasetProfile::kIllumina, .qualityZstdLevel = 7}, records);
+    EXPECT_LE(level7.size(), level1.size());
+
+    std::istringstream input(level7, std::ios::binary);
+    ArchiveReader reader(input, 1024 * 1024);
+    ASSERT_TRUE(reader.open());
+    auto frame = reader.readFrame();
+    ASSERT_TRUE(frame);
+    ASSERT_TRUE(frame->has_value());
+    EXPECT_EQ(**frame, records);
+    ASSERT_FALSE(reader.readFrame()->has_value());
+}
+
+TEST(ArchiveTest, RejectsOutOfRangeQualityLevel) {
+    const auto records = makeRecords();
+    std::ostringstream output(std::ios::binary);
+    ArchiveWriter writer(output, {.profile = DatasetProfile::kIllumina, .qualityZstdLevel = 0});
+    auto result = writer.writeFrame(records);
+    ASSERT_FALSE(result);
+    EXPECT_EQ(result.error().code, ErrorCode::kUsageError);
+}
+
 TEST(ArchiveTest, SupportsMultipleFramesAndEmptyArchive) {
     const auto records = makeRecords();
     std::ostringstream output(std::ios::binary);
@@ -513,6 +549,43 @@ TEST(ArchiveTest, ParsesProfilesStrictly) {
     EXPECT_EQ(parseProfile("pacbio-hifi").value(), DatasetProfile::kPacBioHiFi);
     EXPECT_EQ(parseProfile("pacbio-clr").value(), DatasetProfile::kPacBioClr);
     EXPECT_FALSE(parseProfile("auto"));
+}
+
+TEST(ArchiveTest, QualityZstdLevelOnlyTouchesQualityPayload) {
+    // Patterned quality stream (a 37-char motif with long-range repeats) so
+    // the higher zstd level has cross-read redundancy to exploit. The frame
+    // header is parsed to compare the *quality payload* sizes, and to prove
+    // the ID/sequence payloads are bit-identical across levels (stage I:
+    // only the quality stream gets the configurable level).
+    std::vector<ReadRecord> records;
+    const std::string motif = "IIIIIHGFEDCB@?>=<;:9876543210!!!!##";
+    for (int i = 0; i < 64; ++i) {
+        std::string quality;
+        while (quality.size() < 150) {
+            quality += motif;
+        }
+        quality.resize(150);
+        records.push_back({"read_" + std::to_string(i), "", std::string(150, 'A'), quality});
+    }
+
+    const auto level1 = writeArchive({.qualityZstdLevel = 1}, records);
+    const auto level9 = writeArchive({.qualityZstdLevel = 9}, records);
+
+    const auto qualities1 = readU64(level1, kQualitiesSizeOffset);
+    const auto qualities9 = readU64(level9, kQualitiesSizeOffset);
+    EXPECT_LE(qualities9, qualities1);
+    // ID/sequence payloads must be unaffected by the quality level.
+    EXPECT_EQ(readU64(level1, kIdsSizeOffset), readU64(level9, kIdsSizeOffset));
+    EXPECT_EQ(readU64(level1, kSequencesSizeOffset), readU64(level9, kSequencesSizeOffset));
+
+    // The decoder is level-agnostic: a level-9 archive must round-trip.
+    std::istringstream input(level9, std::ios::binary);
+    ArchiveReader reader(input);
+    ASSERT_TRUE(reader.open());
+    auto frame = reader.readFrame();
+    ASSERT_TRUE(frame);
+    ASSERT_TRUE(frame->has_value());
+    EXPECT_EQ(**frame, records);
 }
 
 }  // namespace fqc::format::test

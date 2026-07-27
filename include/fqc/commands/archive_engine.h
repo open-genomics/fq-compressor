@@ -27,6 +27,7 @@ struct CompressionRequest {
     std::optional<format::DatasetProfile> profile;
     std::size_t memoryLimitBytes = kDefaultMemoryLimitBytes;
     std::size_t targetFrameBytes = format::kDefaultTargetFrameBytes;
+    int qualityZstdLevel = 1;
     bool forceOverwrite = false;
 
     [[nodiscard]] auto paired() const noexcept -> bool {

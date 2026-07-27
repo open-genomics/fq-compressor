@@ -51,6 +51,11 @@ struct ArchiveOptions {
     bool paired = false;
     std::size_t maxFrameBytes = kDefaultMaxFrameBytes;
     std::size_t memoryLimitBytes = kDefaultMemoryLimitBytes;
+    /// zstd level for the quality stream only; ID/sequence streams stay at
+    /// level 1 (stage I: quality is the ratio bottleneck, the other streams
+    /// gain little from higher levels). zstd frames are self-describing, so
+    /// the decoder needs no change and the on-disk codec IDs are untouched.
+    int qualityZstdLevel = 1;
 };
 
 struct ArchiveMetadata {
@@ -104,16 +109,17 @@ struct CompressedFrame {
     -> Result<std::unique_ptr<EncodedFrame>>;
 
 /// Compress an `EncodedFrame`'s three raw streams with zstd (one
-/// `ZSTD_compress` call per stream, level 1). Takes ownership of the input and
-/// releases each raw stream right after compressing it, so the resident peak
-/// during the call stays at raw x3 + one `ZSTD_compressBound` scratch instead
-/// of raw x3 + bound x3. Pure computation -- safe to call on a worker thread.
+/// `ZSTD_compress` call per stream): ID/sequence at level 1, quality at
+/// `qualityZstdLevel`. Takes ownership of the input and releases each raw
+/// stream right after compressing it, so the resident peak during the call
+/// stays at raw x3 + one `ZSTD_compressBound` scratch instead of
+/// raw x3 + bound x3. Pure computation -- safe to call on a worker thread.
 ///
-/// The output is deterministic for a fixed zstd build and input: same bytes
-/// in, same bytes out. The pipeline relies on this for its byte-identical
-/// archive gate (see roadmap stage F).
-[[nodiscard]] auto compressFrame(std::unique_ptr<EncodedFrame> frame)
-    -> Result<std::unique_ptr<CompressedFrame>>;
+/// The output is deterministic for a fixed zstd build, level and input: same
+/// bytes in, same bytes out. The pipeline relies on this for its
+/// byte-identical archive gate (see roadmap stage F).
+[[nodiscard]] auto compressFrame(std::unique_ptr<EncodedFrame> frame,
+                                 int qualityZstdLevel) -> Result<std::unique_ptr<CompressedFrame>>;
 
 class ArchiveWriter {
 public:

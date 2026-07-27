@@ -32,6 +32,13 @@ constexpr std::uint8_t kIdCodecZstd = 1;
 constexpr std::uint8_t kSequenceCodecPackedZstd = 1;
 constexpr std::uint8_t kQualityCodecZstd = 1;
 constexpr std::size_t kCodecMemoryReserve = std::size_t{16} * 1024 * 1024;
+// ID/sequence streams always compress at this level (throughput-oriented; the
+// ratio/level curve flattens early on these streams). Only the quality stream
+// gets a configurable level (ArchiveOptions::qualityZstdLevel, stage I).
+constexpr int kStreamZstdLevel = 1;
+// Accepted range for the configurable quality level (matches the CLI check).
+constexpr int kMinZstdLevel = 1;
+constexpr int kMaxZstdLevel = 19;
 
 using Bytes = std::vector<std::uint8_t>;
 
@@ -334,9 +341,10 @@ void appendPackedSequence(Bytes& output, std::string_view sequence) {
     return sequence;
 }
 
-[[nodiscard]] auto compress(std::span<const std::uint8_t> input) -> Result<Bytes> {
+[[nodiscard]] auto compress(std::span<const std::uint8_t> input, int level) -> Result<Bytes> {
     Bytes output(ZSTD_compressBound(input.size()));
-    const auto result = ZSTD_compress(output.data(), output.size(), input.data(), input.size(), 1);
+    const auto result =
+        ZSTD_compress(output.data(), output.size(), input.data(), input.size(), level);
     if (ZSTD_isError(result) != 0U) {
         return makeError<Bytes>(ErrorCode::kInternalError,
                                 std::string("Zstd compression failed: ") +
@@ -635,8 +643,8 @@ auto encodeFrame(std::span<const ReadRecord> records,
     return frame;
 }
 
-auto compressFrame(std::unique_ptr<EncodedFrame> frame)
-    -> Result<std::unique_ptr<CompressedFrame>> {
+auto compressFrame(std::unique_ptr<EncodedFrame> frame,
+                   int qualityZstdLevel) -> Result<std::unique_ptr<CompressedFrame>> {
     if (frame == nullptr) {
         return makeError<std::unique_ptr<CompressedFrame>>(ErrorCode::kUsageError,
                                                            "FQC v2 encoded frame is null");
@@ -652,15 +660,16 @@ auto compressFrame(std::unique_ptr<EncodedFrame> frame)
     // One stream at a time, releasing the raw stream immediately afterwards:
     // the resident peak stays at raw x3 + one ZSTD_compressBound scratch
     // (already covered per-frame by estimateCompressionPeak) instead of
-    // raw x3 + bound x3.
-    auto ids = compress(frame->rawIds);
+    // raw x3 + bound x3. ID/sequence stay at kStreamZstdLevel; only quality
+    // uses the caller-configured level (stage I).
+    auto ids = compress(frame->rawIds, kStreamZstdLevel);
     if (!ids) {
         return makeError<std::unique_ptr<CompressedFrame>>(ids.error().code, ids.error().message);
     }
     compressed->ids = std::move(*ids);
     Bytes().swap(frame->rawIds);
 
-    auto sequences = compress(frame->rawSequences);
+    auto sequences = compress(frame->rawSequences, kStreamZstdLevel);
     if (!sequences) {
         return makeError<std::unique_ptr<CompressedFrame>>(sequences.error().code,
                                                            sequences.error().message);
@@ -668,7 +677,7 @@ auto compressFrame(std::unique_ptr<EncodedFrame> frame)
     compressed->sequences = std::move(*sequences);
     Bytes().swap(frame->rawSequences);
 
-    auto qualities = compress(frame->rawQualities);
+    auto qualities = compress(frame->rawQualities, qualityZstdLevel);
     if (!qualities) {
         return makeError<std::unique_ptr<CompressedFrame>>(qualities.error().code,
                                                            qualities.error().message);
@@ -695,6 +704,9 @@ auto ArchiveWriter::ensureHeader() -> VoidResult {
     if (options_.maxFrameBytes == 0 || options_.memoryLimitBytes <= kCodecMemoryReserve) {
         return makeVoidError(ErrorCode::kUsageError,
                              "FQC v2 frame and memory limits must be positive");
+    }
+    if (options_.qualityZstdLevel < kMinZstdLevel || options_.qualityZstdLevel > kMaxZstdLevel) {
+        return makeVoidError(ErrorCode::kUsageError, "FQC v2 quality zstd level out of range");
     }
     if (!validProfile(static_cast<std::uint8_t>(metadata_.profile))) {
         return makeVoidError(ErrorCode::kUsageError, "invalid FQC v2 dataset profile");
@@ -728,7 +740,7 @@ auto ArchiveWriter::writeFrame(std::span<const ReadRecord> records) -> VoidResul
     if (!encoded) {
         return makeVoidError(encoded.error().code, encoded.error().message);
     }
-    auto compressed = compressFrame(std::move(*encoded));
+    auto compressed = compressFrame(std::move(*encoded), options_.qualityZstdLevel);
     if (!compressed) {
         return makeVoidError(compressed.error().code, compressed.error().message);
     }
