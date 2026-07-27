@@ -61,15 +61,17 @@ fq-compressor 并发流水线练手路线。定位：业余练手 C++ 并发流�
 
 ### E. 可观测性与可靠 benchmark 平台 ★★（硬依赖，排第一）
 
-- 状态：未开始
+- 状态：完成（commit 8af51ed）
 - 动机：阶段 D 复盘教训二"并发优化前先 profiling"；WSL2 波动 ±20-85% 使单次数字不可信；下文"贯穿"节承诺的计数器在 `mpmc_queue.h` 中至今未实现——E 是补旧账 + 建底座。F 的预期收益可能就在环境噪声量级内，没有 E 则 F/G/H 全部无法可信验证。
 - 练手点（新并发知识，不与 A-D 重复）：**原子操作与内存序**——`memory_order_relaxed` 统计计数器的唯一正当用例；低侵入观测（计数不拖慢热路径）。
 - 做法：
   1. `MpmcQueue` 加 relaxed 原子计数器：push/pop 次数、阻塞等待次数、高水位，run 结束打印。
   2. 分段计时：reader/encoder/writer 各 stage 用 `steady_clock` 累计墙钟占比（按帧采样，不在 push/pop 热循环内取时钟），直接产出 Amdahl 证据，替代复盘里的间接推断。
   3. benchmark 脚本加固（`tests/e2e/test_performance.sh` 基础上，已有 median-of-3/jsonl/round-trip cmp/SLA）：warmup 轮、`FQC_PERF_REPEATS` 提到 ≥5、方差/极差报告、**同状态 A/B 模式**（两个二进制路径对比，把阶段 D 复盘"切代码同状态重跑"方法论工具化）、结果归档 `perf-baselines/YYYY-MM-DD-stage-x/`。
-- 验证：计数器自身 tsan 干净；同二进制同配置连跑方差量化报告（证明平台能区分"代码差异"与"环境噪声"的阈值）；热路径开销可忽略（release 下吞吐回退 <2%）。
+- 验证（实测）：clang-debug/tsan 9/9 无竞争；A/B 同窗口（基线 vs 阶段E，64MiB random ×5）压缩比 2.9588/2.8403 完全一致，压缩 delta +5.0%/0%、解压 0%/+6.6%——spread 区间高度重叠，差异在噪声内，无可见回退（✓ <2% 门槛）。同二进制 A/B delta 0-3%，平台可区分代码差异与环境噪声的阈值 ≈ ±5%（64MiB 配置）。基线归档 `perf-baselines/2026-07-27-stage-e/`。
 - 陷阱：计数器别用 seq_cst 默认序（拖慢热路径）；A/B 模式禁止跨时比基线（复盘教训三）。
+- 意外收获：极差报告上线即抓到 `date +%s.%N`（CLOCK_REALTIME）在 WSL2 对时回跳产生的负时长样本——旧 median 一直静默吸收它；计时源已改 `/proc/uptime`（CLOCK_BOOTTIME）。
+- 首批 Amdahl 证据（64MiB random，wall 536ms）：reader parse 121ms（23%）、writer zstd+io 109ms（20%）、encoder 并行后 ~101ms/worker——串行两端合计 ~43%，为 F/H 的排序提供量化依据。注意 profile 采样（≤5 万条）在主线程完成、不计入 reader 段，小输入时 reader 占比被低估。
 
 ### F. zstd 下沉到 encoder worker ★★★
 
@@ -113,7 +115,7 @@ fq-compressor 并发流水线练手路线。定位：业余练手 C++ 并发流�
 
 每阶段给队列加 `memory_order_relaxed` 原子计数器（push/pop 次数、阻塞次数、高水位），测试时打印。并发调优无观测即盲调。计数器用 relaxed 序，别拖慢热路径。
 
-注：计数器在 A-D 阶段未兑现（`mpmc_queue.h` 无计数器），由阶段 E 统一补上并工具化。
+注：计数器在 A-D 阶段未兑现（`mpmc_queue.h` 无计数器），已由阶段 E（commit 8af51ed）统一补上并工具化。
 
 ## 优先级
 
@@ -144,7 +146,7 @@ A -> B -> C -> D（已完成，同步底座与多级流水线）-> E -> F -> I -
 | B | 完成 | bafcd79 |
 | C | 完成 | 965c084 |
 | D | 完成 | abca33e |
-| E | 未开始 | — |
+| E | 完成 | 8af51ed |
 | F | 未开始 | — |
 | I（番外） | 未开始 | — |
 | G | 未开始 | — |
