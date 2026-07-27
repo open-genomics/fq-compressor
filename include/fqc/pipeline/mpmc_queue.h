@@ -5,14 +5,25 @@
 #pragma once
 
 #include <array>
+#include <atomic>
 #include <condition_variable>
 #include <cstddef>
+#include <cstdint>
 #include <mutex>
 #include <optional>
 #include <stop_token>
 #include <utility>
 
 namespace fqc::pipeline {
+
+/// Advisory counters snapshot, see `MpmcQueue::stats`.
+struct QueueStats {
+    std::uint64_t pushes = 0;     // successful push() calls
+    std::uint64_t pops = 0;       // successful pop() calls (item dequeued)
+    std::uint64_t pushWaits = 0;  // push() calls that had to block (queue full)
+    std::uint64_t popWaits = 0;   // pop() calls that had to block (queue empty)
+    std::size_t highWater = 0;    // max items held simultaneously
+};
 
 /// Multi-producer multi-consumer bounded ring buffer.
 ///
@@ -46,12 +57,25 @@ public:
     /// producers.
     auto push(T item, std::stop_token st = {}) -> bool {
         std::unique_lock lock(m_);
+        // Count "had to block" by evaluating the wait predicate once up front;
+        // the lock is held continuously, so the predicate can't change before
+        // wait() re-checks it.
+        if (!st.stop_requested() && isFullLocked()) {
+            counters_.pushWaits.fetch_add(1, std::memory_order_relaxed);
+        }
         cvNotFull_.wait(lock, st, [&] { return st.stop_requested() || !isFullLocked(); });
         if (st.stop_requested()) {
             return false;
         }
         storage_[head_] = std::move(item);
         head_ = (head_ + 1) & kMask;
+        counters_.pushes.fetch_add(1, std::memory_order_relaxed);
+        // Every writer holds the mutex, so a plain max-store can't lose
+        // updates -- no CAS loop needed for the high-water mark.
+        const std::size_t occupancy = (head_ - tail_) & kMask;
+        if (occupancy > counters_.highWater.load(std::memory_order_relaxed)) {
+            counters_.highWater.store(occupancy, std::memory_order_relaxed);
+        }
         lock.unlock();
         // One item added -> wake exactly one waiter. With multiple consumers
         // blocked on pop, notify_one hands the item to whichever wakes first;
@@ -65,6 +89,9 @@ public:
     /// drained after `close()`. Safe for concurrent consumers.
     [[nodiscard]] auto pop(std::stop_token st = {}) -> std::optional<T> {
         std::unique_lock lock(m_);
+        if (!st.stop_requested() && !closed_ && isEmptyLocked()) {
+            counters_.popWaits.fetch_add(1, std::memory_order_relaxed);
+        }
         cvNotEmpty_.wait(
             lock, st, [&] { return st.stop_requested() || closed_ || !isEmptyLocked(); });
         if (st.stop_requested() || isEmptyLocked()) {
@@ -72,6 +99,7 @@ public:
         }
         T item = std::move(storage_[tail_]);
         tail_ = (tail_ + 1) & kMask;
+        counters_.pops.fetch_add(1, std::memory_order_relaxed);
         lock.unlock();
         cvNotFull_.notify_one();
         return item;
@@ -85,6 +113,22 @@ public:
             closed_ = true;
         }
         cvNotEmpty_.notify_all();
+    }
+
+    /// Advisory counters. Call after producers/consumers have joined for a
+    /// consistent snapshot; calling mid-flight yields a racy (but still
+    /// individually atomic) approximation. Updates are `memory_order_relaxed`:
+    /// every bump is performed by the lock holder, and the stats are never
+    /// used for synchronization -- the one legitimate relaxed-atomics use
+    /// case, statistics that must not fence the hot path (see roadmap stage E).
+    [[nodiscard]] auto stats() const -> QueueStats {
+        return {
+            .pushes = counters_.pushes.load(std::memory_order_relaxed),
+            .pops = counters_.pops.load(std::memory_order_relaxed),
+            .pushWaits = counters_.pushWaits.load(std::memory_order_relaxed),
+            .popWaits = counters_.popWaits.load(std::memory_order_relaxed),
+            .highWater = counters_.highWater.load(std::memory_order_relaxed),
+        };
     }
 
 private:
@@ -104,6 +148,16 @@ private:
     std::size_t head_ = 0;
     std::size_t tail_ = 0;
     bool closed_ = false;
+    // Own cache line: producers/consumers bump these on every operation, so
+    // keep counter traffic off the mutex/head/tail lines.
+    struct alignas(64) Counters {
+        std::atomic<std::uint64_t> pushes{0};
+        std::atomic<std::uint64_t> pops{0};
+        std::atomic<std::uint64_t> pushWaits{0};
+        std::atomic<std::uint64_t> popWaits{0};
+        std::atomic<std::size_t> highWater{0};
+    };
+    Counters counters_;
     std::array<T, Capacity> storage_;
 };
 

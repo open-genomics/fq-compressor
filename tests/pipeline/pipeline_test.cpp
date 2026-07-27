@@ -182,3 +182,26 @@ TEST(CompressPipelineTest, ParallelEncodingIsDeterministic) {
 
     EXPECT_EQ(out1.str(), out2.str());
 }
+
+TEST(CompressPipelineTest, StageTimingsAndQueueStatsArePopulated) {
+    // On the success path every frame flows reader -> queue1 -> encoder ->
+    // queue2 -> writer exactly once, so all four queue counters must equal
+    // the writer's frame count.
+    constexpr int kRecordCount = 500;
+    std::istringstream input(makeFastq(kRecordCount));
+    std::ostringstream output;
+
+    ArchiveWriter writer(output, {.profile = DatasetProfile::kIllumina});
+    CompressPipeline pipeline(128, false, 4);
+
+    auto result = pipeline.run(input, nullptr, {}, writer);
+    ASSERT_TRUE(result.has_value());
+    ASSERT_GT(result->frameCount, 1U);
+    EXPECT_EQ(result->queue1Stats.pushes, result->frameCount);
+    EXPECT_EQ(result->queue1Stats.pops, result->frameCount);
+    EXPECT_EQ(result->queue2Stats.pushes, result->frameCount);
+    EXPECT_EQ(result->queue2Stats.pops, result->frameCount);
+    EXPECT_GT(result->queue1Stats.highWater, 0U);
+    EXPECT_GT(result->timings.wallNs, 0U);
+    EXPECT_GT(result->timings.encoderEncodeNs, 0U);
+}

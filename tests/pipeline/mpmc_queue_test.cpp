@@ -243,3 +243,92 @@ TEST(MpmcQueueTest, CloseWakesAllBlockedConsumers) {
         t.join();                   // hangs if close didn't wake every blocked consumer
     EXPECT_EQ(returned.load(), 1);  // the one pushed item, consumed exactly once
 }
+
+TEST(MpmcQueueTest, StatsCountPushPopAndHighWater) {
+    MpmcQueue<int, 8> queue;
+    queue.push(1);
+    queue.push(2);
+    queue.push(3);  // occupancy peaks at 3
+    EXPECT_EQ(*queue.pop(), 1);
+    queue.push(4);  // occupancy back to 3, must not raise the mark
+
+    const auto stats = queue.stats();
+    EXPECT_EQ(stats.pushes, 4U);
+    EXPECT_EQ(stats.pops, 1U);
+    EXPECT_EQ(stats.highWater, 3U);
+    EXPECT_EQ(stats.pushWaits, 0U);
+    EXPECT_EQ(stats.popWaits, 0U);
+}
+
+TEST(MpmcQueueTest, StatsCountBlockedPush) {
+    MpmcQueue<int, 2> queue;  // holds Capacity-1 = 1 item
+    queue.push(1);
+
+    std::thread producer([&] { EXPECT_TRUE(queue.push(2)); });
+    // Poll until the producer is observed blocked on the full queue; bounded
+    // so a broken wait-predicate can't hang the test.
+    for (int i = 0; i < 100000 && queue.stats().pushWaits == 0; ++i) {
+        std::this_thread::yield();
+    }
+    EXPECT_EQ(queue.stats().pushWaits, 1U);
+
+    EXPECT_EQ(*queue.pop(), 1);
+    producer.join();
+
+    const auto stats = queue.stats();
+    EXPECT_EQ(stats.pushes, 2U);
+    EXPECT_EQ(stats.pops, 1U);
+    EXPECT_EQ(stats.highWater, 1U);
+}
+
+TEST(MpmcQueueTest, StatsCountBlockedPop) {
+    MpmcQueue<int, 4> queue;
+    std::optional<int> consumed;
+    std::thread consumer([&] { consumed = queue.pop(); });
+    for (int i = 0; i < 100000 && queue.stats().popWaits == 0; ++i) {
+        std::this_thread::yield();
+    }
+    EXPECT_EQ(queue.stats().popWaits, 1U);
+
+    queue.push(7);
+    consumer.join();
+    ASSERT_TRUE(consumed.has_value());
+    EXPECT_EQ(*consumed, 7);
+
+    const auto stats = queue.stats();
+    EXPECT_EQ(stats.pops, 1U);
+    EXPECT_EQ(stats.popWaits, 1U);
+}
+
+TEST(MpmcQueueTest, StatsStressPushesEqualPops) {
+    constexpr std::size_t kProducers = 2;
+    constexpr std::size_t kPerProducer = 1000;
+    constexpr std::size_t kTotal = kProducers * kPerProducer;
+    MpmcQueue<std::size_t, 8> queue;
+
+    std::vector<std::thread> producers;
+    for (std::size_t p = 0; p < kProducers; ++p) {
+        producers.emplace_back([&, p] {
+            for (std::size_t i = 0; i < kPerProducer; ++i) {
+                queue.push(p * kPerProducer + i);
+            }
+        });
+    }
+    std::size_t consumed = 0;
+    std::thread consumer([&] {
+        while (queue.pop().has_value())
+            ++consumed;
+    });
+
+    for (auto& t : producers)
+        t.join();
+    queue.close();
+    consumer.join();
+
+    ASSERT_EQ(consumed, kTotal);
+    const auto stats = queue.stats();
+    EXPECT_EQ(stats.pushes, kTotal);
+    EXPECT_EQ(stats.pops, kTotal);
+    EXPECT_GT(stats.highWater, 0U);
+    EXPECT_LE(stats.highWater, 7U);  // Capacity-1 usable slots
+}

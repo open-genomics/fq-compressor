@@ -8,6 +8,7 @@
 #include "fqc/common/types.h"
 #include "fqc/io/compressed_stream.h"
 #include "fqc/io/fastq_parser.h"
+#include "fqc/log.h"
 #include "fqc/pipeline/compress_pipeline.h"
 
 #include <algorithm>
@@ -128,6 +129,43 @@ private:
 [[nodiscard]] auto maxFrameBytesFor(std::size_t memoryLimitBytes) noexcept -> std::size_t {
     return std::min(format::kDefaultMaxFrameBytes,
                     (memoryLimitBytes - kEngineMemoryReserveBytes) / 4);
+}
+
+[[nodiscard]] constexpr auto nsToMs(std::uint64_t ns) -> double {
+    return static_cast<double>(ns) / 1e6;
+}
+
+/// Stage-E observability report: per-stage wall-clock breakdown (Amdahl
+/// evidence) plus queue counter snapshots. Emitted at info level, so `-q`
+/// suppresses it (benchmarks) and an interactive run prints it.
+void logPipelineObservability(const pipeline::PipelineStats& stats) {
+    const auto& t = stats.timings;
+    FQC_LOG_INFO(
+        "pipeline stages (ms): reader parse={:.1f} push={:.1f} | encoder pop={:.1f} "
+        "encode={:.1f} push={:.1f} | writer pop={:.1f} zstd+io={:.1f} | wall={:.1f}",
+        nsToMs(t.readerParseNs),
+        nsToMs(t.readerPushNs),
+        nsToMs(t.encoderPopNs),
+        nsToMs(t.encoderEncodeNs),
+        nsToMs(t.encoderPushNs),
+        nsToMs(t.writerPopNs),
+        nsToMs(t.writerCompressNs),
+        nsToMs(t.wallNs));
+    const auto& q1 = stats.queue1Stats;
+    const auto& q2 = stats.queue2Stats;
+    FQC_LOG_INFO(
+        "pipeline queues: q1 pushes={} pops={} pushWaits={} popWaits={} highWater={} | "
+        "q2 pushes={} pops={} pushWaits={} popWaits={} highWater={}",
+        q1.pushes,
+        q1.pops,
+        q1.pushWaits,
+        q1.popWaits,
+        q1.highWater,
+        q2.pushes,
+        q2.pops,
+        q2.pushWaits,
+        q2.popWaits,
+        q2.highWater);
 }
 
 [[nodiscard]] auto targetFrameBytesFor(const CompressionRequest& request) noexcept -> std::size_t {
@@ -315,6 +353,7 @@ auto ArchiveEngine::compress(const CompressionRequest& request) const -> Result<
     if (!pipelineResult) {
         return makeError<OperationStats>(pipelineResult.error());
     }
+    logPipelineObservability(*pipelineResult);
     if (auto result = writer.finish(); !result) {
         return makeError<OperationStats>(result.error());
     }

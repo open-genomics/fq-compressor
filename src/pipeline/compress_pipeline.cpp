@@ -9,6 +9,8 @@
 #include "fqc/pipeline/mpmc_queue.h"
 #include "fqc/pipeline/reorder_buffer.h"
 
+#include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <istream>
@@ -48,6 +50,13 @@ struct OrderedFrame {
     std::unique_ptr<format::EncodedFrame> frame;
 };
 
+using Clock = std::chrono::steady_clock;
+
+[[nodiscard]] auto nanosSince(Clock::time_point start) -> std::uint64_t {
+    return static_cast<std::uint64_t>(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - start).count());
+}
+
 }  // namespace
 
 CompressPipeline::CompressPipeline(std::size_t targetFrameBytes,
@@ -74,6 +83,20 @@ auto CompressPipeline::run(std::istream& primary,
     PipelineStats stats;
     std::uint64_t logicalBytes = 0;
 
+    // Stage-E observability: per-stage wall-clock accumulators. Each thread
+    // collects `steady_clock` samples in locals and merges once at exit with a
+    // relaxed fetch_add (N encoders => N merges total), keeping clock reads
+    // out of the synchronization hot path. Relaxed is sufficient: the values
+    // are advisory stats, never used for synchronization.
+    const auto wallStart = Clock::now();
+    std::atomic<std::uint64_t> readerParseNs{0};
+    std::atomic<std::uint64_t> readerPushNs{0};
+    std::atomic<std::uint64_t> encoderPopNs{0};
+    std::atomic<std::uint64_t> encoderEncodeNs{0};
+    std::atomic<std::uint64_t> encoderPushNs{0};
+    std::atomic<std::uint64_t> writerPopNs{0};
+    std::atomic<std::uint64_t> writerCompressNs{0};
+
     // Cooperative cancellation. Any stage, on failure, calls request_stop();
     // the other stages' blocked push/pop wakes through the stop_token CV wait
     // and exits. Normal end-of-production chains: reader closes queue1, each
@@ -90,6 +113,9 @@ auto CompressPipeline::run(std::istream& primary,
     // stop_source. The main thread reads these only after the matching join()
     // below, whose happens-before edge makes the access safe.
     std::jthread reader([&] {
+        std::uint64_t parseNs = 0;
+        std::uint64_t pushNs = 0;
+
         io::FastqParser parser(primary);
         std::optional<io::FastqParser> mateParser;
         if (mate != nullptr) {
@@ -109,7 +135,9 @@ auto CompressPipeline::run(std::istream& primary,
                 return true;
             }
             InputFrame in{frameId++, std::move(frame)};
+            const auto pushStart = Clock::now();
             bool ok = queue1.push(std::move(in), stopToken);
+            pushNs += nanosSince(pushStart);
             frame.clear();
             retainedBytes = 0;
             return ok;
@@ -135,7 +163,9 @@ auto CompressPipeline::run(std::istream& primary,
         }
 
         while (!stopToken.stop_requested()) {
+            const auto parseStart = Clock::now();
             auto pair = io::readRecordPair(parser, mateParser ? &*mateParser : nullptr);
+            parseNs += nanosSince(parseStart);
             if (!pair) {
                 readerError = pair.error();
                 stopSource.request_stop();
@@ -158,6 +188,8 @@ auto CompressPipeline::run(std::istream& primary,
             pushFrame();
         }
         queue1.close();
+        readerParseNs.store(parseNs, std::memory_order_relaxed);
+        readerPushNs.store(pushNs, std::memory_order_relaxed);
     });
 
     // Stage 2: N encoder workers compete for frames off queue1, encode each
@@ -166,12 +198,19 @@ auto CompressPipeline::run(std::istream& primary,
     // not close queue2 -- multiple producers mean the main thread closes it
     // once every encoder has joined.
     auto encoderLoop = [&] {
+        std::uint64_t popNs = 0;
+        std::uint64_t encodeNs = 0;
+        std::uint64_t pushNs = 0;
         while (!stopToken.stop_requested()) {
+            const auto popStart = Clock::now();
             auto in = queue1.pop(stopToken);
+            popNs += nanosSince(popStart);
             if (!in.has_value()) {
                 break;
             }
+            const auto encodeStart = Clock::now();
             auto encoded = format::encodeFrame(in->records, writer.options());
+            encodeNs += nanosSince(encodeStart);
             if (!encoded) {
                 {
                     std::lock_guard lk(encoderErrorMutex);
@@ -183,10 +222,16 @@ auto CompressPipeline::run(std::istream& primary,
                 break;
             }
             OrderedFrame out{in->frameId, std::move(*encoded)};
-            if (!queue2.push(std::move(out), stopToken)) {
+            const auto pushStart = Clock::now();
+            const bool pushed = queue2.push(std::move(out), stopToken);
+            pushNs += nanosSince(pushStart);
+            if (!pushed) {
                 break;
             }
         }
+        encoderPopNs.fetch_add(popNs, std::memory_order_relaxed);
+        encoderEncodeNs.fetch_add(encodeNs, std::memory_order_relaxed);
+        encoderPushNs.fetch_add(pushNs, std::memory_order_relaxed);
     };
 
     std::vector<std::jthread> encoders;
@@ -199,9 +244,13 @@ auto CompressPipeline::run(std::istream& primary,
     // write to disk + update stats. ArchiveWriter and the reorder buffer are
     // owned by this single thread -- no race on output_/stats_/checksum.
     std::jthread compressor([&] {
+        std::uint64_t popNs = 0;
+        std::uint64_t compressNs = 0;
         ReorderBuffer<std::unique_ptr<format::EncodedFrame>> reorder;
         while (!stopToken.stop_requested()) {
+            const auto popStart = Clock::now();
             auto out = queue2.pop(stopToken);
+            popNs += nanosSince(popStart);
             if (!out.has_value()) {
                 break;
             }
@@ -209,7 +258,9 @@ auto CompressPipeline::run(std::istream& primary,
             for (auto& frame : ready) {
                 stats.recordCount += frame->recordCount;
                 stats.frameCount += 1;
+                const auto writeStart = Clock::now();
                 auto result = writer.writeEncodedFrame(std::move(frame));
+                compressNs += nanosSince(writeStart);
                 if (!result) {
                     writerError = result.error();
                     stopSource.request_stop();
@@ -220,6 +271,8 @@ auto CompressPipeline::run(std::istream& primary,
                 break;
             }
         }
+        writerPopNs.store(popNs, std::memory_order_relaxed);
+        writerCompressNs.store(compressNs, std::memory_order_relaxed);
     });
 
     reader.join();
@@ -231,6 +284,19 @@ auto CompressPipeline::run(std::istream& primary,
     queue2.close();
     compressor.join();
 
+    // All workers joined, so the relaxed loads below see the final values.
+    stats.timings = {
+        .readerParseNs = readerParseNs.load(std::memory_order_relaxed),
+        .readerPushNs = readerPushNs.load(std::memory_order_relaxed),
+        .encoderPopNs = encoderPopNs.load(std::memory_order_relaxed),
+        .encoderEncodeNs = encoderEncodeNs.load(std::memory_order_relaxed),
+        .encoderPushNs = encoderPushNs.load(std::memory_order_relaxed),
+        .writerPopNs = writerPopNs.load(std::memory_order_relaxed),
+        .writerCompressNs = writerCompressNs.load(std::memory_order_relaxed),
+        .wallNs = nanosSince(wallStart),
+    };
+    stats.queue1Stats = queue1.stats();
+    stats.queue2Stats = queue2.stats();
     stats.logicalBytes = logicalBytes;
 
     if (writerError.has_value()) {

@@ -7,6 +7,7 @@
 #include "fqc/common/error.h"
 #include "fqc/common/types.h"
 #include "fqc/format/archive.h"
+#include "fqc/pipeline/mpmc_queue.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -15,10 +16,28 @@
 
 namespace fqc::pipeline {
 
+/// Wall-clock breakdown per pipeline stage (roadmap stage E). Each thread
+/// accumulates `steady_clock` samples in locals and merges with one relaxed
+/// fetch_add at exit, so the measurement stays off the synchronization hot
+/// path. Encoder fields are the sum across all N workers.
+struct StageTimings {
+    std::uint64_t readerParseNs = 0;     // reader: parse + accumulate records
+    std::uint64_t readerPushNs = 0;      // reader: queue1 push (incl. backpressure)
+    std::uint64_t encoderPopNs = 0;      // encoders: queue1 pop wait
+    std::uint64_t encoderEncodeNs = 0;   // encoders: encodeFrame
+    std::uint64_t encoderPushNs = 0;     // encoders: queue2 push
+    std::uint64_t writerPopNs = 0;       // writer: queue2 pop wait
+    std::uint64_t writerCompressNs = 0;  // writer: zstd x3 + frame write + checksum
+    std::uint64_t wallNs = 0;            // run() total wall clock
+};
+
 struct PipelineStats {
     std::size_t frameCount = 0;
     std::size_t recordCount = 0;
     std::uint64_t logicalBytes = 0;
+    StageTimings timings;
+    QueueStats queue1Stats;
+    QueueStats queue2Stats;
 };
 
 /// Concurrent pipeline: a reader thread parses FASTQ and accumulates bounded
