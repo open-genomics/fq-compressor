@@ -95,12 +95,13 @@ fq-compressor 并发流水线练手路线。定位：业余练手 C++ 并发流�
 
 ### G. 解压路径流水线化 + 泛型 stage 抽取 ★★★
 
-- 状态：未开始
+- 状态：完成（commit 6fae4a5）
 - 动机：解压纯顺序（`archive_engine.cpp:353-367`），98-122 MiB/s；帧解码（zstd 解压+decode）与 FASTQ 写出零重叠。reviews F-7 当年判"不做"理由是"吞吐非瓶颈"——在 E 有数据后重审。
 - 练手点：**抽象时机**——MPMC+ReorderBuffer 第二次出现、"pop-process-push 循环"第 4-6 次手写，满足设计原则 4"第三个重复模式再抽泛型"；泛型 stage 的最小接口设计（In/Out/Handler + close/stop 语义），不造 pipeline 框架。
-- 做法：`ArchiveReader::readFrame` 拆为"读帧头+载荷+预检"（reader 线程）与"zstd 解压+逻辑校验和+decodeRawStreams"（N decoder worker，乱序完成）；writer 线程 reorder 按帧 id 有序提交 → **滚动校验和 + writeFastqRecord**。`verify` 命令复用同一流水线（writer 换空 handler）——泛型 stage 的第一个复用者。
-- 验证：round-trip cmp（脚本已有）；全部现存归档 fixture 回归；tsan；E 平台量解压吞吐；滚动校验和尾值与顺序版一致。
-- 陷阱：①**滚动校验和（`advanceGlobalChecksum`）是逐帧链式顺序依赖，必须留在有序提交端**（per-frame 逻辑校验和独立，可在 worker 验）——本阶段最核心的正确性陷阱；②`vector<ReadRecord>` 大对象跨队列移动用 unique_ptr；③预检在 reader 端完成后再入队，内存有界不变量（2×4+N 帧）不破；④泛型只抽最小核，禁止顺带造 DAG/调度器。
+- 做法：`ArchiveReader::readFrame` 拆为"读帧头+载荷+预检"（reader 线程）与"zstd 解压+逻辑校验和+decodeRawStreams"（N decoder worker，乱序完成）；writer 线程 reorder 按帧 id 有序提交 → **滚动校验和 + writeFastqRecord**。`verify` 命令复用同一流水线（writer 换空 handler）——泛型 stage 的第一个复用者。落地形态：泛型面 = `RecordSink`（`std::function<VoidResult(vector<ReadRecord>)>`，逐帧按序、失败级联取消）；worker 循环保持手写。
+- 验证（实测）：新旧二进制解压同一归档**输出逐字节一致** ✓（滚动校验和尾值一致的最强形式）；round-trip cmp（16GiB/64MiB 两档）✓；archive_test 全部原样通过（readFrame 组合 API 行为不变）✓；tsan 10/10 ✓；A/B 解压 +4.2%/+2.0%（噪声内，64MiB 仅 ~2 帧）；解压 maxRSS +21-42%（~134MiB，在途多帧的预期代价）。
+- 陷阱复盘：①滚动校验和严格留在 writer 有序端 ✓（footer 校验在 join 后由 writer 侧累积值对比，严格性与顺序版一致）；②RawFrame/DecodedFrame 均 unique_ptr 跨队列 ✓；③预检在 readRawFrame 内完成后再入队 ✓；④泛型只抽 RecordSink，未造 DAG/调度器 ✓。额外发现并设计修正：footerData 不能由 writer 线程读（reader 写、跨线程无 join 屏障的共享会违反单写者不变量）——footer 校验整体移到主线程 join 后。
+- 故障路径新单测 8 个：footer 校验和/ totals 篡改、载荷翻转不可静默、截断、空归档、sink 失败取消无死锁。
 
 ### H. 并行解析（限未压缩普通文件）★★★★
 
@@ -150,5 +151,5 @@ A -> B -> C -> D（已完成，同步底座与多级流水线）-> E -> F -> I -
 | E | 完成 | 8af51ed |
 | F | 完成 | 3629f6d |
 | I（番外） | 完成 | 87562df |
-| G | 未开始 | — |
+| G | 完成 | 6fae4a5 |
 | H | 未开始 | — |
