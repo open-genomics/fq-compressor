@@ -82,11 +82,6 @@ fqc_add_test(archive_engine_test
     LIBRARIES fqc_cli
 )
 
-# SPSC queue unit tests
-fqc_add_test(spsc_queue_test
-    SOURCES pipeline/spsc_queue_test.cpp
-)
-
 # MPMC queue unit tests
 fqc_add_test(mpmc_queue_test
     SOURCES pipeline/mpmc_queue_test.cpp

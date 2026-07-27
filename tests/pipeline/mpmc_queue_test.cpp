@@ -5,6 +5,7 @@
 #include "fqc/pipeline/mpmc_queue.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cstddef>
 #include <optional>
 #include <stop_token>
@@ -220,4 +221,25 @@ TEST(MpmcQueueTest, StressMultiProducerMultiConsumer) {
     for (std::size_t i = 0; i < kTotal; ++i) {
         EXPECT_EQ(all[i], i) << "missing/duplicate at " << i;
     }
+}
+
+// Multiple consumers blocked on pop must all wake when close() is called --
+// otherwise consumers.clear() would hang on join. Exercises the notify_all
+// path in close() with several waiters.
+TEST(MpmcQueueTest, CloseWakesAllBlockedConsumers) {
+    MpmcQueue<int, 4> queue;
+    queue.push(42);
+    constexpr int kConsumers = 3;
+    std::atomic<int> returned{0};
+    std::vector<std::thread> consumers;
+    for (int i = 0; i < kConsumers; ++i) {
+        consumers.emplace_back([&] {
+            while (queue.pop().has_value())
+                ++returned;
+        });
+    }
+    queue.close();
+    for (auto& t : consumers)
+        t.join();                   // hangs if close didn't wake every blocked consumer
+    EXPECT_EQ(returned.load(), 1);  // the one pushed item, consumed exactly once
 }
