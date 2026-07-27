@@ -137,19 +137,22 @@ private:
 
 /// Stage-E observability report: per-stage wall-clock breakdown (Amdahl
 /// evidence) plus queue counter snapshots. Emitted at info level, so `-q`
-/// suppresses it (benchmarks) and an interactive run prints it.
+/// suppresses it (benchmarks) and an interactive run prints it. Since stage F
+/// the encoder section carries the zstd work (`zstd=`) and the writer section
+/// is pure frame assembly + I/O (`write=`).
 void logPipelineObservability(const pipeline::PipelineStats& stats) {
     const auto& t = stats.timings;
     FQC_LOG_INFO(
         "pipeline stages (ms): reader parse={:.1f} push={:.1f} | encoder pop={:.1f} "
-        "encode={:.1f} push={:.1f} | writer pop={:.1f} zstd+io={:.1f} | wall={:.1f}",
+        "encode={:.1f} zstd={:.1f} push={:.1f} | writer pop={:.1f} write={:.1f} | wall={:.1f}",
         nsToMs(t.readerParseNs),
         nsToMs(t.readerPushNs),
         nsToMs(t.encoderPopNs),
         nsToMs(t.encoderEncodeNs),
+        nsToMs(t.encoderCompressNs),
         nsToMs(t.encoderPushNs),
         nsToMs(t.writerPopNs),
-        nsToMs(t.writerCompressNs),
+        nsToMs(t.writerWriteNs),
         nsToMs(t.wallNs));
     const auto& q1 = stats.queue1Stats;
     const auto& q2 = stats.queue2Stats;

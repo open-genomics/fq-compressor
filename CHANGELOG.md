@@ -2,6 +2,14 @@
 
 ## [未发布]
 
+### 变更
+
+- **zstd 下沉到 encoder worker（路线图阶段 F）**：压缩流水线的 CPU 密集段全部迁入 worker 池，writer 退化为纯 I/O。
+  - format 层：新增 `CompressedFrame`（三路压缩后字节 + 帧头所需的 raw 尺寸 + 逻辑校验和）与 free 函数 `compressFrame`（纯计算、worker 线程安全；逐流压缩并立即释放对应 raw 流，常驻峰值保持 raw×3 + 单份 `ZSTD_compressBound` scratch）；`ArchiveWriter::writeEncodedFrame` 由 `writeCompressedFrame` 取代（只拼装帧头 + 写盘 + 更新校验和，不再做任何 CPU 密集工作）；`writeFrame` 重组为 encode → compress → write 三步，线上格式与 codec ID 完全不变。
+  - pipeline 层：queue2 载荷从 raw 流改为压缩后流（在途占用只降不升）；分段计时新增 `encoderCompressNs`，`writerCompressNs` 更名 `writerWriteNs`，观测日志措辞同步（encoder `zstd=` / writer `write=`）。
+  - 内存口径：`estimateCompressionPeak` 每帧已含 raw + compressBound，N 个 worker 并发持有 bound scratch 仍被在途 12 帧上界覆盖；实测 64 MiB 输入 maxRSS 上升 10–18%（bound scratch 从 writer×1 变为 worker×N），峰值 ~216 MiB 仍远低于 16 GiB 预算。
+  - 验证：**归档逐字节一致**——基线（阶段E）与阶段F 二进制同输入 .fqc 完全相等（illumina/ont × 16 GiB/64 MiB 两档内存限制，cmp 零差异），依据是同版本同参数 `ZSTD_compress` 输出确定 + reorder 保序 + 帧 id 由 writer 计数器派生；writer 段从 zstd+io 占 wall ~20% 降为 write ~5%（趋近纯 I/O）；A/B 同窗口吞吐 delta 在环境噪声内；clang-tsan 9/9 无竞争。
+
 ### 新增
 
 - **流水线可观测性（路线图阶段 E）**：

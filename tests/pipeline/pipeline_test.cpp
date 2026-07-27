@@ -204,4 +204,8 @@ TEST(CompressPipelineTest, StageTimingsAndQueueStatsArePopulated) {
     EXPECT_GT(result->queue1Stats.highWater, 0U);
     EXPECT_GT(result->timings.wallNs, 0U);
     EXPECT_GT(result->timings.encoderEncodeNs, 0U);
+    // Stage F: zstd lives in the encoder workers, so their compress section
+    // must be nonzero, and the writer's pure-I/O section still runs.
+    EXPECT_GT(result->timings.encoderCompressNs, 0U);
+    EXPECT_GT(result->timings.writerWriteNs, 0U);
 }

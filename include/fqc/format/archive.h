@@ -67,13 +67,32 @@ struct ArchiveStats {
 };
 
 /// A frame's three raw (pre-compression) logical streams plus the metadata the
-/// writer needs to emit it. Produced by `encodeFrame` (CPU-only, no I/O) and
-/// consumed by `ArchiveWriter::writeEncodedFrame` (zstd + write). Splitting the
-/// two lets the pipeline overlap encoding with compression/I/O.
+/// next stage needs. Produced by `encodeFrame` (CPU-only, no I/O) and consumed
+/// by `compressFrame` (zstd, also CPU-only). Splitting encode from compress
+/// keeps each pipeline stage's work item small and independently schedulable.
 struct EncodedFrame {
     std::vector<std::uint8_t> rawIds;
     std::vector<std::uint8_t> rawSequences;
     std::vector<std::uint8_t> rawQualities;
+    std::uint32_t recordCount = 0;
+    std::uint64_t totalBases = 0;
+    std::uint64_t checksum = 0;
+};
+
+/// A frame's three zstd-compressed streams plus everything the writer needs to
+/// emit the on-disk frame: raw sizes for the frame header, and the logical
+/// checksum computed over the *raw* streams (carried through from
+/// `encodeFrame`, so the end-to-end integrity story is unchanged). Produced by
+/// `compressFrame` (pure computation, safe on a worker thread) and consumed by
+/// `ArchiveWriter::writeCompressedFrame` (frame header + write, no CPU-heavy
+/// work left).
+struct CompressedFrame {
+    std::vector<std::uint8_t> ids;
+    std::vector<std::uint8_t> sequences;
+    std::vector<std::uint8_t> qualities;
+    std::uint64_t rawIdsSize = 0;
+    std::uint64_t rawSequencesSize = 0;
+    std::uint64_t rawQualitiesSize = 0;
     std::uint32_t recordCount = 0;
     std::uint64_t totalBases = 0;
     std::uint64_t checksum = 0;
@@ -84,6 +103,18 @@ struct EncodedFrame {
 [[nodiscard]] auto encodeFrame(std::span<const ReadRecord> records, const ArchiveOptions& options)
     -> Result<std::unique_ptr<EncodedFrame>>;
 
+/// Compress an `EncodedFrame`'s three raw streams with zstd (one
+/// `ZSTD_compress` call per stream, level 1). Takes ownership of the input and
+/// releases each raw stream right after compressing it, so the resident peak
+/// during the call stays at raw x3 + one `ZSTD_compressBound` scratch instead
+/// of raw x3 + bound x3. Pure computation -- safe to call on a worker thread.
+///
+/// The output is deterministic for a fixed zstd build and input: same bytes
+/// in, same bytes out. The pipeline relies on this for its byte-identical
+/// archive gate (see roadmap stage F).
+[[nodiscard]] auto compressFrame(std::unique_ptr<EncodedFrame> frame)
+    -> Result<std::unique_ptr<CompressedFrame>>;
+
 class ArchiveWriter {
 public:
     ArchiveWriter(std::ostream& output, ArchiveOptions options);
@@ -92,9 +123,12 @@ public:
     ArchiveWriter& operator=(const ArchiveWriter&) = delete;
 
     [[nodiscard]] auto writeFrame(std::span<const ReadRecord> records) -> VoidResult;
-    /// Compress (zstd x3) and write an `EncodedFrame` produced by `encodeFrame`,
-    /// then update stats/checksum. Owns `output_`, so call from a single thread.
-    [[nodiscard]] auto writeEncodedFrame(std::unique_ptr<EncodedFrame> frame) -> VoidResult;
+    /// Write a `CompressedFrame` produced by `compressFrame`: assemble the
+    /// frame header (raw/compressed sizes, logical checksum), write header +
+    /// three payloads, then update stats and the rolling checksum. No CPU-heavy
+    /// work remains here -- the writer is I/O-bound by design. Owns `output_`,
+    /// so call from a single thread.
+    [[nodiscard]] auto writeCompressedFrame(std::unique_ptr<CompressedFrame> frame) -> VoidResult;
     [[nodiscard]] auto finish() -> VoidResult;
 
     [[nodiscard]] auto metadata() const noexcept -> const ArchiveMetadata& {

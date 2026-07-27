@@ -12,8 +12,8 @@ v1 兼容、索引、随机访问、全局 read 重排序、第二套并行引�
 压缩路径（多帧并行编码流水线）：
   主线程    FASTQ/.gz/stdin -> FastqParser 采样 -> profile 判定 -> 打开输出
   reader    FastqParser 续读 + 保留字节帧累积器（每帧带递增帧 id）--[有界 MPMC 队列]-->
-  encoder   N 个 worker 并行：2-bit 打包 + measure + 逻辑校验和（CPU 密集，乱序完成）--[有界 MPMC 队列]-->
-  writer    reorder buffer 按帧 id 有序提交 -> zstd + xxh64 -> 带校验 FQC v2 帧 -> 文件/stdout
+  encoder   N 个 worker 并行：2-bit 打包 + measure + 逻辑校验和 + zstd×3（CPU 密集，乱序完成）--[有界 MPMC 队列]-->
+  writer    reorder buffer 按帧 id 有序提交 -> 帧头拼装 + 写盘（纯 I/O）-> 带校验 FQC v2 帧 -> 文件/stdout
 
 解压路径（纯顺序）：
   FQC v2/文件/stdin -> 校验头部 -> 有界帧解码 -> 逻辑校验和 -> 规范 FASTQ 写出 -> 文件/stdout
@@ -82,17 +82,21 @@ RSS 为 25–32 MiB（随机化短读长和长读长 fixture）。
 ## 执行架构
 
 压缩路径使用多帧并行编码流水线：reader 线程解析 FASTQ 并累积有界帧（每帧带递增帧 id），
-N 个 encoder worker 并行编码（2-bit 打包 + measure + 逻辑校验和，CPU 密集、乱序完成），
-writer 线程经 reorder buffer 按帧 id 有序提交后 zstd 压缩并写盘。两条有界 MPMC 队列（深度
-4）解耦三段，解析与编码、并行编码与压缩/IO 重叠执行。encoder 状态帧内局部，worker 间无需
-共享可变状态--每个 worker 编码自己的帧，附带一个单调帧 id 供 reorder buffer 恢复提交顺序。
-profile 采样在主线程先于流水线完成，采样读到的记录作为初始帧喂给 reader。解压路径保持纯顺序执行。
+N 个 encoder worker 并行编码并压缩（2-bit 打包 + measure + 逻辑校验和 + zstd×3，CPU 密集、
+乱序完成），writer 线程经 reorder buffer 按帧 id 有序提交后拼装帧头并写盘（纯 I/O）。两条有界
+MPMC 队列（深度 4）解耦三段，解析与编码、并行编码压缩与写盘 IO 重叠执行。encoder 状态帧内
+局部，worker 间无需共享可变状态--每个 worker 处理自己的帧，附带一个单调帧 id 供 reorder
+buffer 恢复提交顺序。profile 采样在主线程先于流水线完成，采样读到的记录作为初始帧喂给
+reader。解压路径保持纯顺序执行。
 
 在 8 核 x86_64 WSL2 主机上，64 MiB 随机化数据压缩/解压约 47-67/98-122 MiB/s（illumina/ont）。
-WSL2 状态波动极大（同代码同配置两次跑吞吐可差 20-85%），数字仅供粗略参考。N 个 encoder 并行
-未带来近线性提升：当前瓶颈在单线程 reader（解析）与单线程 writer（zstd+IO），编码本身占比小
-（Amdahl）。在尚未证实编码成为瓶颈的前提下引入 TBB DAG 或线程池，只会把 v2 已经干掉的重复
-状态、输出排序和在途内存风险重新请回来。
+WSL2 状态波动极大（同代码同配置两次跑吞吐可差 20-85%），数字仅供粗略参考。并行化沿瓶颈逐步
+推进：阶段 D 并行了 encoder（收益受 Amdahl 限制，当时瓶颈在 reader 与 writer 两端），阶段 F
+进而把 zstd 从 writer 下沉到 encoder worker——writer 段降为纯 I/O（实测仅占 wall 约 5%），
+且归档与下沉前逐字节一致（zstd 帧间独立 + reorder 保序 + 帧 id 由 writer 计数器派生）。当前
+串行段为 reader（解析）与 writer（写盘）；任何进一步并行都以阶段 E 的分段计时为据，在尚未
+证实某段成为瓶颈的前提下引入 TBB DAG 或线程池，只会把 v2 已经干掉的重复状态、输出排序和
+在途内存风险重新请回来。
 
 帧边界天然独立，是多帧并行编码的切分点。编解码器状态保持帧内局部或 worker 内局部。在途帧
 上界 = 两条队列深度（各 4）+ N 个 encoder（默认 4）= 12 帧，每帧由编码前内存预检约束，整体

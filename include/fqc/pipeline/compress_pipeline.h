@@ -19,16 +19,19 @@ namespace fqc::pipeline {
 /// Wall-clock breakdown per pipeline stage (roadmap stage E). Each thread
 /// accumulates `steady_clock` samples in locals and merges with one relaxed
 /// fetch_add at exit, so the measurement stays off the synchronization hot
-/// path. Encoder fields are the sum across all N workers.
+/// path. Encoder fields are the sum across all N workers. Since stage F the
+/// zstd work lives inside the encoder workers (`encoderCompressNs`), so the
+/// writer section should approach pure I/O (`writerWriteNs`).
 struct StageTimings {
-    std::uint64_t readerParseNs = 0;     // reader: parse + accumulate records
-    std::uint64_t readerPushNs = 0;      // reader: queue1 push (incl. backpressure)
-    std::uint64_t encoderPopNs = 0;      // encoders: queue1 pop wait
-    std::uint64_t encoderEncodeNs = 0;   // encoders: encodeFrame
-    std::uint64_t encoderPushNs = 0;     // encoders: queue2 push
-    std::uint64_t writerPopNs = 0;       // writer: queue2 pop wait
-    std::uint64_t writerCompressNs = 0;  // writer: zstd x3 + frame write + checksum
-    std::uint64_t wallNs = 0;            // run() total wall clock
+    std::uint64_t readerParseNs = 0;      // reader: parse + accumulate records
+    std::uint64_t readerPushNs = 0;       // reader: queue1 push (incl. backpressure)
+    std::uint64_t encoderPopNs = 0;       // encoders: queue1 pop wait
+    std::uint64_t encoderEncodeNs = 0;    // encoders: encodeFrame (2-bit pack+checksum)
+    std::uint64_t encoderCompressNs = 0;  // encoders: compressFrame (zstd x3, stage F)
+    std::uint64_t encoderPushNs = 0;      // encoders: queue2 push
+    std::uint64_t writerPopNs = 0;        // writer: queue2 pop wait
+    std::uint64_t writerWriteNs = 0;      // writer: frame header + write + checksum
+    std::uint64_t wallNs = 0;             // run() total wall clock
 };
 
 struct PipelineStats {
@@ -41,11 +44,12 @@ struct PipelineStats {
 };
 
 /// Concurrent pipeline: a reader thread parses FASTQ and accumulates bounded
-/// frames, N encoder workers encode frames in parallel, and a writer thread
-/// compresses and writes them in frame-id order (via a reorder buffer). Two
-/// bounded MPMC queues decouple the stages: parsing overlaps CPU-bound
-/// encoding, and parallel encoding overlaps compression/I/O. Frame boundaries
-/// are naturally independent (see ARCHITECTURE.md), so encoders need no shared
+/// frames, N encoder workers encode *and* zstd-compress frames in parallel
+/// (stage F: compression moved into the worker pool), and a writer thread
+/// emits them in frame-id order (via a reorder buffer). Two bounded MPMC
+/// queues decouple the stages: parsing overlaps CPU-bound encode/compress,
+/// and parallel CPU work overlaps the writer's pure I/O. Frame boundaries are
+/// naturally independent (see ARCHITECTURE.md), so encoders need no shared
 /// mutable state -- each encodes its own frame, tagged with a monotonic id the
 /// reorder buffer uses to restore in-order submission to the writer.
 class CompressPipeline {

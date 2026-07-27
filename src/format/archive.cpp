@@ -635,6 +635,50 @@ auto encodeFrame(std::span<const ReadRecord> records,
     return frame;
 }
 
+auto compressFrame(std::unique_ptr<EncodedFrame> frame)
+    -> Result<std::unique_ptr<CompressedFrame>> {
+    if (frame == nullptr) {
+        return makeError<std::unique_ptr<CompressedFrame>>(ErrorCode::kUsageError,
+                                                           "FQC v2 encoded frame is null");
+    }
+    auto compressed = std::make_unique<CompressedFrame>();
+    compressed->rawIdsSize = frame->rawIds.size();
+    compressed->rawSequencesSize = frame->rawSequences.size();
+    compressed->rawQualitiesSize = frame->rawQualities.size();
+    compressed->recordCount = frame->recordCount;
+    compressed->totalBases = frame->totalBases;
+    compressed->checksum = frame->checksum;
+
+    // One stream at a time, releasing the raw stream immediately afterwards:
+    // the resident peak stays at raw x3 + one ZSTD_compressBound scratch
+    // (already covered per-frame by estimateCompressionPeak) instead of
+    // raw x3 + bound x3.
+    auto ids = compress(frame->rawIds);
+    if (!ids) {
+        return makeError<std::unique_ptr<CompressedFrame>>(ids.error().code, ids.error().message);
+    }
+    compressed->ids = std::move(*ids);
+    Bytes().swap(frame->rawIds);
+
+    auto sequences = compress(frame->rawSequences);
+    if (!sequences) {
+        return makeError<std::unique_ptr<CompressedFrame>>(sequences.error().code,
+                                                           sequences.error().message);
+    }
+    compressed->sequences = std::move(*sequences);
+    Bytes().swap(frame->rawSequences);
+
+    auto qualities = compress(frame->rawQualities);
+    if (!qualities) {
+        return makeError<std::unique_ptr<CompressedFrame>>(qualities.error().code,
+                                                           qualities.error().message);
+    }
+    compressed->qualities = std::move(*qualities);
+    Bytes().swap(frame->rawQualities);
+
+    return compressed;
+}
+
 // =============================================================================
 // ArchiveWriter
 // =============================================================================
@@ -684,27 +728,22 @@ auto ArchiveWriter::writeFrame(std::span<const ReadRecord> records) -> VoidResul
     if (!encoded) {
         return makeVoidError(encoded.error().code, encoded.error().message);
     }
-    return writeEncodedFrame(std::move(*encoded));
+    auto compressed = compressFrame(std::move(*encoded));
+    if (!compressed) {
+        return makeVoidError(compressed.error().code, compressed.error().message);
+    }
+    return writeCompressedFrame(std::move(*compressed));
 }
 
-auto ArchiveWriter::writeEncodedFrame(std::unique_ptr<EncodedFrame> frame) -> VoidResult {
+auto ArchiveWriter::writeCompressedFrame(std::unique_ptr<CompressedFrame> frame) -> VoidResult {
     if (finished_) {
         return makeVoidError(ErrorCode::kFormatError, "FQC v2 writer is already finished");
     }
     if (frame == nullptr) {
-        return makeVoidError(ErrorCode::kUsageError, "FQC v2 encoded frame is null");
+        return makeVoidError(ErrorCode::kUsageError, "FQC v2 compressed frame is null");
     }
     if (auto headerResult = ensureHeader(); !headerResult) {
         return headerResult;
-    }
-
-    auto ids = compress(frame->rawIds);
-    auto sequences = compress(frame->rawSequences);
-    auto qualities = compress(frame->rawQualities);
-    if (!ids || !sequences || !qualities) {
-        const auto& error =
-            !ids ? ids.error() : (!sequences ? sequences.error() : qualities.error());
-        return makeVoidError(error.code, error.message);
     }
 
     Bytes frameHeader;
@@ -713,18 +752,18 @@ auto ArchiveWriter::writeEncodedFrame(std::unique_ptr<EncodedFrame> frame) -> Vo
     appendU32(frameHeader, kFrameHeaderSize);
     appendU32(frameHeader, static_cast<std::uint32_t>(stats_.frameCount));
     appendU32(frameHeader, frame->recordCount);
-    appendU64(frameHeader, frame->rawIds.size());
-    appendU64(frameHeader, ids->size());
-    appendU64(frameHeader, frame->rawSequences.size());
-    appendU64(frameHeader, sequences->size());
-    appendU64(frameHeader, frame->rawQualities.size());
-    appendU64(frameHeader, qualities->size());
+    appendU64(frameHeader, frame->rawIdsSize);
+    appendU64(frameHeader, frame->ids.size());
+    appendU64(frameHeader, frame->rawSequencesSize);
+    appendU64(frameHeader, frame->sequences.size());
+    appendU64(frameHeader, frame->rawQualitiesSize);
+    appendU64(frameHeader, frame->qualities.size());
     appendU64(frameHeader, frame->checksum);
 
     for (const auto bytes : {std::span<const std::uint8_t>(frameHeader),
-                             std::span<const std::uint8_t>(*ids),
-                             std::span<const std::uint8_t>(*sequences),
-                             std::span<const std::uint8_t>(*qualities)}) {
+                             std::span<const std::uint8_t>(frame->ids),
+                             std::span<const std::uint8_t>(frame->sequences),
+                             std::span<const std::uint8_t>(frame->qualities)}) {
         if (auto result = writeBytes(output_, bytes); !result) {
             return result;
         }
@@ -733,7 +772,8 @@ auto ArchiveWriter::writeEncodedFrame(std::unique_ptr<EncodedFrame> frame) -> Vo
     ++stats_.frameCount;
     stats_.recordCount += frame->recordCount;
     stats_.totalBases += frame->totalBases;
-    stats_.encodedBytes += frameHeader.size() + ids->size() + sequences->size() + qualities->size();
+    stats_.encodedBytes +=
+        frameHeader.size() + frame->ids.size() + frame->sequences.size() + frame->qualities.size();
     globalChecksum_ = advanceGlobalChecksum(globalChecksum_, frame->checksum);
     return {};
 }
