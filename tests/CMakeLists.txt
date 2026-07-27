@@ -97,6 +97,11 @@ fqc_add_test(pipeline_test
     SOURCES pipeline/pipeline_test.cpp
 )
 
+# Decompression pipeline integration tests
+fqc_add_test(decompress_pipeline_test
+    SOURCES pipeline/decompress_pipeline_test.cpp
+)
+
 add_test(
     NAME v2_cli_smoke_test
     COMMAND ${CMAKE_COMMAND} -E env

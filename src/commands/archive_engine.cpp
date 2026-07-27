@@ -10,6 +10,7 @@
 #include "fqc/io/fastq_parser.h"
 #include "fqc/log.h"
 #include "fqc/pipeline/compress_pipeline.h"
+#include "fqc/pipeline/decompress_pipeline.h"
 
 #include <algorithm>
 #include <atomic>
@@ -368,6 +369,15 @@ auto ArchiveEngine::compress(const CompressionRequest& request) const -> Result<
     return toOperationStats(writer.metadata(), writer.stats(), true, pipelineResult->logicalBytes);
 }
 
+[[nodiscard]] auto toArchiveStats(const pipeline::DecompressStats& stats) -> format::ArchiveStats {
+    return {
+        .frameCount = stats.frameCount,
+        .recordCount = stats.recordCount,
+        .totalBases = stats.totalBases,
+        .encodedBytes = stats.encodedBytes,
+    };
+}
+
 auto ArchiveEngine::decompress(const DecompressionRequest& request) const
     -> Result<OperationStats> {
     if (auto result = validateMemoryLimit(request.memoryLimitBytes); !result) {
@@ -386,27 +396,20 @@ auto ArchiveEngine::decompress(const DecompressionRequest& request) const
     if (!output) {
         return makeError<OperationStats>(output.error());
     }
-    format::ArchiveReader reader(
-        **input, maxFrameBytesFor(request.memoryLimitBytes), request.memoryLimitBytes);
-    auto metadata = reader.open();
-    if (!metadata) {
-        return makeError<OperationStats>(metadata.error());
-    }
     std::uint64_t logicalBytes = 0;
-    while (true) {
-        auto frame = reader.readFrame();
-        if (!frame) {
-            return makeError<OperationStats>(frame.error());
-        }
-        if (!frame->has_value()) {
-            break;
-        }
-        for (const auto& record : **frame) {
+    pipeline::DecompressPipeline pipelineEngine(maxFrameBytesFor(request.memoryLimitBytes),
+                                                request.memoryLimitBytes);
+    auto stats = pipelineEngine.run(**input, [&](std::vector<ReadRecord> records) -> VoidResult {
+        for (const auto& record : records) {
             logicalBytes += canonicalFastqBytes(record);
             if (auto result = writeFastqRecord(**output, record); !result) {
-                return makeError<OperationStats>(result.error());
+                return result;
             }
         }
+        return {};
+    });
+    if (!stats) {
+        return makeError<OperationStats>(stats.error());
     }
     (*output)->flush();
     if (!**output) {
@@ -416,7 +419,7 @@ auto ArchiveEngine::decompress(const DecompressionRequest& request) const
     if (auto result = outputTransaction.commit(request.forceOverwrite); !result) {
         return makeError<OperationStats>(result.error());
     }
-    return toOperationStats(*metadata, reader.stats(), false, logicalBytes);
+    return toOperationStats(stats->metadata, toArchiveStats(*stats), false, logicalBytes);
 }
 
 auto ArchiveEngine::verify(const std::filesystem::path& inputPath,
@@ -428,25 +431,21 @@ auto ArchiveEngine::verify(const std::filesystem::path& inputPath,
     if (!input) {
         return makeError<OperationStats>(input.error());
     }
-    format::ArchiveReader reader(**input, maxFrameBytesFor(memoryLimitBytes), memoryLimitBytes);
-    auto metadata = reader.open();
-    if (!metadata) {
-        return makeError<OperationStats>(metadata.error());
-    }
+    // Same pipeline as decompress with a counting-only sink: the full decode
+    // and validation path runs, nothing is written (generic-stage reuse).
     std::uint64_t logicalBytes = 0;
-    while (true) {
-        auto frame = reader.readFrame();
-        if (!frame) {
-            return makeError<OperationStats>(frame.error());
-        }
-        if (!frame->has_value()) {
-            break;
-        }
-        for (const auto& record : **frame) {
+    pipeline::DecompressPipeline pipelineEngine(maxFrameBytesFor(memoryLimitBytes),
+                                                memoryLimitBytes);
+    auto stats = pipelineEngine.run(**input, [&](std::vector<ReadRecord> records) -> VoidResult {
+        for (const auto& record : records) {
             logicalBytes += canonicalFastqBytes(record);
         }
+        return {};
+    });
+    if (!stats) {
+        return makeError<OperationStats>(stats.error());
     }
-    return toOperationStats(*metadata, reader.stats(), false, logicalBytes);
+    return toOperationStats(stats->metadata, toArchiveStats(*stats), false, logicalBytes);
 }
 
 }  // namespace fqc::commands

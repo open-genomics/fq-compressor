@@ -2,6 +2,15 @@
 
 ## [未发布]
 
+### 变更
+
+- **解压路径流水线化 + 泛型 RecordSink（路线图阶段 G）**：解压从纯顺序循环升级为与压缩路径镜像的三段流水线，zstd+decode 不再与 FASTQ 写盘串行。
+  - format 层拆分：`ArchiveReader::readFrame` 拆为 `readRawFrame`（I/O + 全部边界/内存预检，footer 结构解析后暂存）与 free `decodeRawFrame`（zstd 解压 + 逻辑校验和验证 + 记录解码，纯计算、worker 线程安全）；`readFrame` 保留为组合 API 且行为不变（archive_test 全部原样通过）；新增 `RawFrame`/`DecodedFrame`/`ArchiveFooter` 类型与 `footer()` 访问器；`advanceGlobalChecksum` 提升为公开函数（顺序依赖，调用方必须按帧序应用）。
+  - 新 `DecompressPipeline`（reader → decoder×N → writer(reorder 按序提交)）：**滚动全局校验和严格留在 writer 有序端**（链式顺序依赖，本阶段头号正确性陷阱）；footer 校验（totals + 全局校验和）在 join 后由 writer 侧有序累积值对比，严格性与顺序版一致；内存预检在 `readRawFrame` 内完成后再入队，在途包络 = 2×4+N 与压缩路径同型。
+  - 泛型 stage 落地为 `RecordSink`（`std::function<VoidResult(std::vector<ReadRecord>)>`：逐帧严格按帧序、writer 线程调用、失败经 stop_source 级联取消）：decompress sink = 写 FASTQ，verify sink = 仅计数——同一流水线的第一个复用者。worker 循环保持手写，未造 pipeline 框架（"最小核"纪律）。
+  - 验证：新旧二进制解压同一归档输出**逐字节一致**（滚动校验和尾值一致的最强形式）；篡改 footer 全局校验和 → kChecksumError、篡改 footer totals → kFormatError、载荷字节翻转不可静默通过、截断归档报错、sink 失败取消无死锁、空归档正常；e2e round-trip cmp 通过（16 GiB / 64 MiB 两档）；clang-debug / clang-tsan 10/10。
+  - 性能：A/B 同窗口解压 +4.2%/+2.0%（spread 重叠、噪声内——64 MiB 输入仅 ~2 帧限制重叠收益，多帧/大输入场景才有明显收益）；解压 maxRSS +21–42%（~134 MiB，顺序版持有 1 个解码帧 → 流水线在途多帧的预期代价，远低于 16 GiB 预算）。
+
 ### 新增
 
 - **质量流 per-stream zstd level（路线图阶段 I 番外）**：`compress --quality-level N`（1–19）允许质量流单独提升 zstd 档位，ID/序列流保持 level 1。zstd 帧自描述，解码零改动、codec ID 不变、线上格式零破坏；默认 level=1 与阶段 F 归档逐字节一致。

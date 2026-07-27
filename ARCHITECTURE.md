@@ -15,8 +15,10 @@ v1 兼容、索引、随机访问、全局 read 重排序、第二套并行引�
   encoder   N 个 worker 并行：2-bit 打包 + measure + 逻辑校验和 + zstd×3（CPU 密集，乱序完成）--[有界 MPMC 队列]-->
   writer    reorder buffer 按帧 id 有序提交 -> 帧头拼装 + 写盘（纯 I/O）-> 带校验 FQC v2 帧 -> 文件/stdout
 
-解压路径（纯顺序）：
-  FQC v2/文件/stdin -> 校验头部 -> 有界帧解码 -> 逻辑校验和 -> 规范 FASTQ 写出 -> 文件/stdout
+解压路径（多帧并行解码流水线）：
+  reader    ArchiveReader 校验头部 + readRawFrame 读帧（I/O + 内存预检，每帧带递增帧 id）--[有界 MPMC 队列]-->
+  decoder   N 个 worker 并行：zstd 解压 + 逻辑校验和 + 记录解码（CPU 密集，乱序完成）--[有界 MPMC 队列]-->
+  writer    reorder buffer 按帧 id 有序提交 -> 滚动全局校验和（顺序依赖，仅此端）-> 规范 FASTQ 写出 -> 文件/stdout
 ```
 
 内部编排的入口是 `include/fqc/commands/archive_engine.h`。`src/main.cpp` 里的 CLI 只做三件事：
@@ -87,7 +89,16 @@ N 个 encoder worker 并行编码并压缩（2-bit 打包 + measure + 逻辑校�
 MPMC 队列（深度 4）解耦三段，解析与编码、并行编码压缩与写盘 IO 重叠执行。encoder 状态帧内
 局部，worker 间无需共享可变状态--每个 worker 处理自己的帧，附带一个单调帧 id 供 reorder
 buffer 恢复提交顺序。profile 采样在主线程先于流水线完成，采样读到的记录作为初始帧喂给
-reader。解压路径保持纯顺序执行。
+reader。
+
+解压路径（阶段 G 起）是压缩路径的镜像：reader 线程用 `ArchiveReader::readRawFrame` 做纯 I/O
+读帧（帧头 + 载荷 + 内存预检，每帧带递增帧 id），N 个 decoder worker 并行 `decodeRawFrame`
+（zstd 解压 + 逻辑校验和验证 + 记录解码，CPU 密集、乱序完成），writer 线程经 reorder buffer
+按帧 id 有序提交后做滚动全局校验和（链式顺序依赖，只在这一端累积）再交给 RecordSink。
+`decompress` 的 sink 写 FASTQ，`verify` 的 sink 只计数——同一条流水线的两种复用。footer 校验
+（totals + 全局校验和）在流水线 join 后由 writer 侧有序累积值对比，严格性与顺序版一致。
+`ArchiveReader::readFrame` 保留为组合 API（readRawFrame + decodeRawFrame + 顺序累积），行为
+不变。
 
 在 8 核 x86_64 WSL2 主机上，64 MiB 随机化数据压缩/解压约 47-67/98-122 MiB/s（illumina/ont）。
 WSL2 状态波动极大（同代码同配置两次跑吞吐可差 20-85%），数字仅供粗略参考。并行化沿瓶颈逐步

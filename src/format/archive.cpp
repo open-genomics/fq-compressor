@@ -372,8 +372,8 @@ void appendPackedSequence(Bytes& output, std::string_view sequence) {
     return XXH64(qualities.data(), qualities.size(), checksum);
 }
 
-[[nodiscard]] auto advanceGlobalChecksum(std::uint64_t current,
-                                         std::uint64_t frameChecksum) -> std::uint64_t {
+[[nodiscard]] auto advanceGlobalChecksumImpl(std::uint64_t current,
+                                             std::uint64_t frameChecksum) -> std::uint64_t {
     Bytes encoded;
     encoded.reserve(8);
     appendU64(encoded, frameChecksum);
@@ -688,6 +688,41 @@ auto compressFrame(std::unique_ptr<EncodedFrame> frame,
     return compressed;
 }
 
+auto advanceGlobalChecksum(std::uint64_t current, std::uint64_t frameChecksum) -> std::uint64_t {
+    return advanceGlobalChecksumImpl(current, frameChecksum);
+}
+
+auto decodeRawFrame(const RawFrame& frame) -> Result<DecodedFrame> {
+    auto ids = decompress(frame.ids, frame.rawIdsSize);
+    if (!ids) {
+        return makeError<DecodedFrame>(ids.error());
+    }
+    auto sequences = decompress(frame.sequences, frame.rawSequencesSize);
+    if (!sequences) {
+        return makeError<DecodedFrame>(sequences.error());
+    }
+    auto qualities = decompress(frame.qualities, frame.rawQualitiesSize);
+    if (!qualities) {
+        return makeError<DecodedFrame>(qualities.error());
+    }
+    const auto checksum = logicalChecksum(*ids, *sequences, *qualities);
+    if (checksum != frame.checksum) {
+        return makeError<DecodedFrame>(ErrorCode::kChecksumError, "FQC v2 frame checksum mismatch");
+    }
+    auto records = decodeRawStreams(*ids, *sequences, *qualities, frame.recordCount);
+    if (!records) {
+        return makeError<DecodedFrame>(records.error());
+    }
+    DecodedFrame decoded;
+    decoded.recordCount = frame.recordCount;
+    for (const auto& record : *records) {
+        decoded.totalBases += record.sequence.size();
+    }
+    decoded.checksum = checksum;
+    decoded.records = std::move(*records);
+    return decoded;
+}
+
 // =============================================================================
 // ArchiveWriter
 // =============================================================================
@@ -786,7 +821,7 @@ auto ArchiveWriter::writeCompressedFrame(std::unique_ptr<CompressedFrame> frame)
     stats_.totalBases += frame->totalBases;
     stats_.encodedBytes +=
         frameHeader.size() + frame->ids.size() + frame->sequences.size() + frame->qualities.size();
-    globalChecksum_ = advanceGlobalChecksum(globalChecksum_, frame->checksum);
+    globalChecksum_ = advanceGlobalChecksumImpl(globalChecksum_, frame->checksum);
     return {};
 }
 
@@ -881,37 +916,103 @@ auto ArchiveReader::open() -> Result<ArchiveMetadata> {
 }
 
 auto ArchiveReader::readFrame() -> Result<std::optional<std::vector<ReadRecord>>> {
+    auto raw = readRawFrame();
+    if (!raw) {
+        return makeError<std::optional<std::vector<ReadRecord>>>(raw.error());
+    }
+    if (!raw->has_value()) {
+        // Footer reached: readRawFrame has structurally parsed and stashed it;
+        // validation happens against this reader's accumulated state.
+        const auto& footerData = *footer_;
+        if (footerData.frameCount != stats_.frameCount ||
+            footerData.recordCount != stats_.recordCount ||
+            footerData.totalBases != stats_.totalBases) {
+            return makeError<std::optional<std::vector<ReadRecord>>>(
+                ErrorCode::kFormatError, "FQC v2 footer totals disagree");
+        }
+        if (footerData.globalChecksum != globalChecksum_) {
+            return makeError<std::optional<std::vector<ReadRecord>>>(
+                ErrorCode::kChecksumError, "FQC v2 global checksum mismatch");
+        }
+        return std::optional<std::vector<ReadRecord>>{};
+    }
+
+    auto decoded = decodeRawFrame(**raw);
+    if (!decoded) {
+        return makeError<std::optional<std::vector<ReadRecord>>>(decoded.error());
+    }
+    stats_.recordCount += decoded->recordCount;
+    stats_.totalBases += decoded->totalBases;
+    globalChecksum_ = advanceGlobalChecksumImpl(globalChecksum_, decoded->checksum);
+    return std::optional<std::vector<ReadRecord>>(std::move(decoded->records));
+}
+
+auto ArchiveReader::readRawFrame() -> Result<std::optional<RawFrame>> {
     if (!opened_) {
         auto result = open();
         if (!result) {
-            return makeError<std::optional<std::vector<ReadRecord>>>(result.error());
+            return makeError<std::optional<RawFrame>>(result.error());
         }
     }
     if (finished_) {
-        return std::optional<std::vector<ReadRecord>>{};
+        return std::optional<RawFrame>{};
     }
 
     std::array<std::uint8_t, 4> magicBytes{};
     if (auto result = readExact(input_, magicBytes); !result) {
-        return makeError<std::optional<std::vector<ReadRecord>>>(result.error());
+        return makeError<std::optional<RawFrame>>(result.error());
     }
     Cursor magicCursor(magicBytes);
     auto magic = magicCursor.readU32();
     if (!magic) {
-        return makeError<std::optional<std::vector<ReadRecord>>>(magic.error());
+        return makeError<std::optional<RawFrame>>(magic.error());
     }
     if (*magic == kFooterMagic) {
-        return readFooter(magicBytes);
+        std::array<std::uint8_t, kFooterSize> footer{};
+        std::copy(magicBytes.begin(), magicBytes.end(), footer.begin());
+        if (auto result = readExact(input_, std::span(footer).subspan(4)); !result) {
+            return makeError<std::optional<RawFrame>>(result.error());
+        }
+        Cursor cursor(footer);
+        auto footerMagic = cursor.readU32();
+        auto size = cursor.readU32();
+        auto frameCount = cursor.readU64();
+        auto recordCount = cursor.readU64();
+        auto totalBases = cursor.readU64();
+        auto checksum = cursor.readU64();
+        (void)footerMagic;
+        if (!size || !frameCount || !recordCount || !totalBases || !checksum ||
+            *size != kFooterSize) {
+            return makeError<std::optional<RawFrame>>(ErrorCode::kFormatError,
+                                                      "invalid FQC v2 footer");
+        }
+        if (input_.peek() != std::char_traits<char>::eof()) {
+            return makeError<std::optional<RawFrame>>(ErrorCode::kFormatError,
+                                                      "trailing bytes after FQC v2 footer");
+        }
+        if (input_.bad()) {
+            return makeError<std::optional<RawFrame>>(
+                ErrorCode::kIOError, "failed while checking the end of the FQC v2 archive");
+        }
+        footer_ = ArchiveFooter{
+            .frameCount = *frameCount,
+            .recordCount = *recordCount,
+            .totalBases = *totalBases,
+            .globalChecksum = *checksum,
+        };
+        stats_.encodedBytes += footer.size();
+        finished_ = true;
+        return std::optional<RawFrame>{};
     }
     if (*magic != kFrameMagic) {
-        return makeError<std::optional<std::vector<ReadRecord>>>(ErrorCode::kFormatError,
-                                                                 "invalid FQC v2 frame marker");
+        return makeError<std::optional<RawFrame>>(ErrorCode::kFormatError,
+                                                  "invalid FQC v2 frame marker");
     }
 
     std::array<std::uint8_t, kFrameHeaderSize> header{};
     std::copy(magicBytes.begin(), magicBytes.end(), header.begin());
     if (auto result = readExact(input_, std::span(header).subspan(4)); !result) {
-        return makeError<std::optional<std::vector<ReadRecord>>>(result.error());
+        return makeError<std::optional<RawFrame>>(result.error());
     }
     Cursor cursor(header);
     auto marker = cursor.readU32();
@@ -929,11 +1030,11 @@ auto ArchiveReader::readFrame() -> Result<std::optional<std::vector<ReadRecord>>
     if (!headerSize || !frameId || !recordCount || !rawIdsSize || !idsSize || !rawSequencesSize ||
         !sequencesSize || !rawQualitiesSize || !qualitiesSize || !storedChecksum ||
         *headerSize != kFrameHeaderSize || *frameId != stats_.frameCount || *recordCount == 0) {
-        return makeError<std::optional<std::vector<ReadRecord>>>(ErrorCode::kFormatError,
-                                                                 "invalid FQC v2 frame header");
+        return makeError<std::optional<RawFrame>>(ErrorCode::kFormatError,
+                                                  "invalid FQC v2 frame header");
     }
     if (metadata_.paired && *recordCount % 2 != 0) {
-        return makeError<std::optional<std::vector<ReadRecord>>>(
+        return makeError<std::optional<RawFrame>>(
             ErrorCode::kFormatError, "paired FQC v2 frame contains an incomplete pair");
     }
     for (const auto size : {*rawIdsSize,
@@ -943,8 +1044,8 @@ auto ArchiveReader::readFrame() -> Result<std::optional<std::vector<ReadRecord>>
                             *rawQualitiesSize,
                             *qualitiesSize}) {
         if (size > maxFrameBytes_ || size > std::numeric_limits<std::size_t>::max()) {
-            return makeError<std::optional<std::vector<ReadRecord>>>(
-                ErrorCode::kFormatError, "FQC v2 frame exceeds configured size limit");
+            return makeError<std::optional<RawFrame>>(ErrorCode::kFormatError,
+                                                      "FQC v2 frame exceeds configured size limit");
         }
     }
 
@@ -956,86 +1057,42 @@ auto ArchiveReader::readFrame() -> Result<std::optional<std::vector<ReadRecord>>
                                                 static_cast<std::size_t>(*qualitiesSize),
                                                 *recordCount);
     if (!peakMemory) {
-        return makeError<std::optional<std::vector<ReadRecord>>>(peakMemory.error());
+        return makeError<std::optional<RawFrame>>(peakMemory.error());
     }
     if (*peakMemory > memoryLimitBytes_) {
-        return makeError<std::optional<std::vector<ReadRecord>>>(
-            ErrorCode::kFormatError, "FQC v2 frame exceeds configured memory limit");
+        return makeError<std::optional<RawFrame>>(ErrorCode::kFormatError,
+                                                  "FQC v2 frame exceeds configured memory limit");
     }
 
-    auto ids = readCompressed(*idsSize, *rawIdsSize);
-    auto sequences = readCompressed(*sequencesSize, *rawSequencesSize);
-    auto qualities = readCompressed(*qualitiesSize, *rawQualitiesSize);
-    if (!ids || !sequences || !qualities) {
-        const auto& error =
-            !ids ? ids.error() : (!sequences ? sequences.error() : qualities.error());
-        return makeError<std::optional<std::vector<ReadRecord>>>(error);
-    }
-    const auto checksum = logicalChecksum(*ids, *sequences, *qualities);
-    if (checksum != *storedChecksum) {
-        return makeError<std::optional<std::vector<ReadRecord>>>(ErrorCode::kChecksumError,
-                                                                 "FQC v2 frame checksum mismatch");
-    }
-    auto records = decodeRawStreams(*ids, *sequences, *qualities, *recordCount);
-    if (!records) {
-        return makeError<std::optional<std::vector<ReadRecord>>>(records.error());
+    // I/O only: payload bytes are read verbatim; zstd decompress, checksum and
+    // record decoding happen in decodeRawFrame (possibly on a worker thread).
+    RawFrame frame;
+    frame.rawIdsSize = static_cast<std::size_t>(*rawIdsSize);
+    frame.rawSequencesSize = static_cast<std::size_t>(*rawSequencesSize);
+    frame.rawQualitiesSize = static_cast<std::size_t>(*rawQualitiesSize);
+    frame.recordCount = *recordCount;
+    frame.checksum = *storedChecksum;
+    frame.ids.resize(static_cast<std::size_t>(*idsSize));
+    frame.sequences.resize(static_cast<std::size_t>(*sequencesSize));
+    frame.qualities.resize(static_cast<std::size_t>(*qualitiesSize));
+    for (const auto payload :
+         {std::span(frame.ids), std::span(frame.sequences), std::span(frame.qualities)}) {
+        if (auto result = readExact(input_, payload); !result) {
+            return makeError<std::optional<RawFrame>>(result.error());
+        }
     }
 
     ++stats_.frameCount;
-    stats_.recordCount += records->size();
-    for (const auto& record : *records) {
-        stats_.totalBases += record.sequence.size();
-    }
     stats_.encodedBytes += kFrameHeaderSize + *idsSize + *sequencesSize + *qualitiesSize;
-    globalChecksum_ = advanceGlobalChecksum(globalChecksum_, checksum);
-    return std::optional<std::vector<ReadRecord>>(std::move(*records));
+    return std::optional<RawFrame>(std::move(frame));
 }
 
-auto ArchiveReader::readCompressed(std::uint64_t compressedSize,
-                                   std::uint64_t rawSize) -> Result<Bytes> {
-    Bytes encoded(static_cast<std::size_t>(compressedSize));
-    if (auto result = readExact(input_, encoded); !result) {
-        return makeError<Bytes>(result.error());
+auto ArchiveReader::footer() const -> Result<ArchiveFooter> {
+    if (!footer_.has_value()) {
+        return makeError<ArchiveFooter>(ErrorCode::kUsageError,
+                                        "FQC v2 footer has not been reached yet");
     }
-    return decompress(encoded, static_cast<std::size_t>(rawSize));
-}
-
-auto ArchiveReader::readFooter(std::span<const std::uint8_t> magicBytes)
-    -> Result<std::optional<std::vector<ReadRecord>>> {
-    std::array<std::uint8_t, kFooterSize> footer{};
-    std::copy(magicBytes.begin(), magicBytes.end(), footer.begin());
-    if (auto result = readExact(input_, std::span(footer).subspan(4)); !result) {
-        return makeError<std::optional<std::vector<ReadRecord>>>(result.error());
-    }
-    Cursor cursor(footer);
-    auto magic = cursor.readU32();
-    auto size = cursor.readU32();
-    auto frameCount = cursor.readU64();
-    auto recordCount = cursor.readU64();
-    auto totalBases = cursor.readU64();
-    auto checksum = cursor.readU64();
-    (void)magic;
-    if (!size || !frameCount || !recordCount || !totalBases || !checksum || *size != kFooterSize ||
-        *frameCount != stats_.frameCount || *recordCount != stats_.recordCount ||
-        *totalBases != stats_.totalBases) {
-        return makeError<std::optional<std::vector<ReadRecord>>>(ErrorCode::kFormatError,
-                                                                 "FQC v2 footer totals disagree");
-    }
-    if (*checksum != globalChecksum_) {
-        return makeError<std::optional<std::vector<ReadRecord>>>(ErrorCode::kChecksumError,
-                                                                 "FQC v2 global checksum mismatch");
-    }
-    if (input_.peek() != std::char_traits<char>::eof()) {
-        return makeError<std::optional<std::vector<ReadRecord>>>(
-            ErrorCode::kFormatError, "trailing bytes after FQC v2 footer");
-    }
-    if (input_.bad()) {
-        return makeError<std::optional<std::vector<ReadRecord>>>(
-            ErrorCode::kIOError, "failed while checking the end of the FQC v2 archive");
-    }
-    stats_.encodedBytes += footer.size();
-    finished_ = true;
-    return std::optional<std::vector<ReadRecord>>{};
+    return *footer_;
 }
 
 }  // namespace fqc::format

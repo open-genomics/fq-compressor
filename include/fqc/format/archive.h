@@ -121,6 +121,57 @@ struct CompressedFrame {
 [[nodiscard]] auto compressFrame(std::unique_ptr<EncodedFrame> frame,
                                  int qualityZstdLevel) -> Result<std::unique_ptr<CompressedFrame>>;
 
+/// A frame's three still-compressed payloads plus the header fields decoding
+/// needs. Produced by `ArchiveReader::readRawFrame` (I/O + all bounds and
+/// memory prechecks, no CPU-heavy work) and consumed by `decodeRawFrame`
+/// (pure computation, safe on a worker thread). Sizes are pre-validated
+/// against the reader's configured limits, so they fit `std::size_t`.
+struct RawFrame {
+    std::vector<std::uint8_t> ids;        // zstd-compressed
+    std::vector<std::uint8_t> sequences;  // zstd-compressed
+    std::vector<std::uint8_t> qualities;  // zstd-compressed
+    std::size_t rawIdsSize = 0;
+    std::size_t rawSequencesSize = 0;
+    std::size_t rawQualitiesSize = 0;
+    std::uint32_t recordCount = 0;
+    std::uint64_t checksum = 0;  // expected logical checksum over the raw streams
+};
+
+/// A fully decoded and verified frame. `checksum` is the per-frame logical
+/// checksum (verified against the header during decoding); the *rolling*
+/// global checksum is order-dependent and must be accumulated by the caller
+/// in frame order (see roadmap stage G).
+struct DecodedFrame {
+    std::vector<ReadRecord> records;
+    std::uint32_t recordCount = 0;
+    std::uint64_t totalBases = 0;
+    std::uint64_t checksum = 0;
+};
+
+/// Footer fields as parsed from the stream. Structural checks (size, trailing
+/// bytes) happen on the reading side; *validation* (totals and global
+/// checksum against accumulated state) is the caller's job, because the
+/// accumulated state lives wherever decoding happened (single thread or the
+/// ordered end of a pipeline).
+struct ArchiveFooter {
+    std::uint64_t frameCount = 0;
+    std::uint64_t recordCount = 0;
+    std::uint64_t totalBases = 0;
+    std::uint64_t globalChecksum = 0;
+};
+
+/// Decompress and verify a `RawFrame`: zstd-decompress each stream (checking
+/// the declared raw sizes), verify the logical checksum, and decode the raw
+/// streams into validated records. Pure computation, no shared state -- safe
+/// to call on a worker thread.
+[[nodiscard]] auto decodeRawFrame(const RawFrame& frame) -> Result<DecodedFrame>;
+
+/// One step of the archive's rolling global checksum. Order-dependent: apply
+/// strictly in ascending frame-id order (the sequential reader does this
+/// internally; a pipeline must do it on its ordered end).
+[[nodiscard]] auto advanceGlobalChecksum(std::uint64_t current,
+                                         std::uint64_t frameChecksum) -> std::uint64_t;
+
 class ArchiveWriter {
 public:
     ArchiveWriter(std::ostream& output, ArchiveOptions options);
@@ -171,7 +222,24 @@ public:
     ArchiveReader& operator=(const ArchiveReader&) = delete;
 
     [[nodiscard]] auto open() -> Result<ArchiveMetadata>;
+
+    /// Sequential all-in-one frame read: composed of `readRawFrame` +
+    /// `decodeRawFrame` + in-order stats/rolling-checksum accumulation +
+    /// footer validation. Returns nullopt once the footer has been reached
+    /// and validated.
     [[nodiscard]] auto readFrame() -> Result<std::optional<std::vector<ReadRecord>>>;
+
+    /// I/O-only half of `readFrame`: reads one frame header + its compressed
+    /// payloads with every bounds/memory precheck applied (no zstd, no
+    /// decode). Returns nullopt once the footer is reached; the parsed
+    /// (structurally checked, not yet validated) footer is then available
+    /// via `footer()`. Designed for pipeline readers: the CPU-heavy half
+    /// runs on decoder workers, footer validation on the ordered end.
+    [[nodiscard]] auto readRawFrame() -> Result<std::optional<RawFrame>>;
+
+    /// The parsed footer. Error if the footer has not been reached yet.
+    /// Validation against accumulated stats/checksum is the caller's job.
+    [[nodiscard]] auto footer() const -> Result<ArchiveFooter>;
 
     [[nodiscard]] auto metadata() const noexcept -> const ArchiveMetadata& {
         return metadata_;
@@ -186,16 +254,12 @@ public:
     }
 
 private:
-    [[nodiscard]] auto readCompressed(std::uint64_t compressedSize,
-                                      std::uint64_t rawSize) -> Result<std::vector<std::uint8_t>>;
-    [[nodiscard]] auto readFooter(std::span<const std::uint8_t> magicBytes)
-        -> Result<std::optional<std::vector<ReadRecord>>>;
-
     std::istream& input_;
     std::size_t maxFrameBytes_;
     std::size_t memoryLimitBytes_;
     ArchiveMetadata metadata_;
     ArchiveStats stats_;
+    std::optional<ArchiveFooter> footer_;
     std::uint64_t globalChecksum_ = 0;
     bool opened_ = false;
     bool finished_ = false;
