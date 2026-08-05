@@ -225,6 +225,42 @@ TEST(ParallelParsePipelineTest, WorkerBeyondFileSizeEmitsOnlyMarker) {
     EXPECT_EQ(readAllRecords(archive), parseFastqRecords(fastq));
 }
 
+TEST(ParallelParsePipelineTest, MalformedRecordInAlignmentZoneFailsLoudly) {
+    // r1 carries a non-IUPAC sequence. With two workers the chunk boundary
+    // lands inside r0, so r1's header sits in worker 1's alignment zone: the
+    // scan must accept it (structure mirrors the parser, content validation
+    // stays in encodeFrame) so the run fails exactly like the sequential
+    // path -- the old IUPAC pre-check silently skipped the record.
+    std::string fastq = "@r0\n" + std::string(3000, 'A') + "\n+\n" + std::string(3000, 'I') + "\n";
+    fastq += "@r1\n" + std::string(50, 'A') + "Z" + std::string(49, 'A') + "\n+\n" +
+        std::string(100, 'I') + "\n";
+    fastq += "@r2\n" + std::string(100, 'C') + "\n+\n" + std::string(100, 'I') + "\n";
+    TempFastqFile file(fastq);
+
+    std::ostringstream output(std::ios::binary);
+    ArchiveWriter writer(output, {.profile = DatasetProfile::kIllumina});
+    ParallelParsePipeline pipeline(file.path(), file.size(), 1 << 20, 0, 2);
+    auto result = pipeline.run({}, writer);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, ErrorCode::kUsageError);
+}
+
+TEST(ParallelParsePipelineTest, TruncatedTailInAlignmentZoneFailsLoudly) {
+    // A record cut mid-body at EOF, header inside the last chunk's alignment
+    // zone: the scan returns it and the parser raises the same unexpected-EOF
+    // error the sequential path would, instead of dropping the tail.
+    std::string fastq = "@r0\n" + std::string(3000, 'A') + "\n+\n" + std::string(3000, 'I') + "\n";
+    fastq += "@trunc\n" + std::string(30, 'A');  // no '+' line: cut mid-record
+    TempFastqFile file(fastq);
+
+    std::ostringstream output(std::ios::binary);
+    ArchiveWriter writer(output, {.profile = DatasetProfile::kIllumina});
+    ParallelParsePipeline pipeline(file.path(), file.size(), 1 << 20, 0, 2);
+    auto result = pipeline.run({}, writer);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, ErrorCode::kFormatError);
+}
+
 // =============================================================================
 // findFirstRecordStart unit tests
 // =============================================================================
@@ -263,6 +299,41 @@ TEST(FindFirstRecordStartTest, AtQualityLineIsNotARecordStart) {
     // Must skip the false candidate and land on record 1's header.
     EXPECT_GT(*found, qualityStart);
     EXPECT_EQ(fastq.substr(static_cast<std::size_t>(*found), 7), "@read_1");
+}
+
+TEST(FindFirstRecordStartTest, MalformedSequenceCandidateIsAccepted) {
+    // Content validation lives in encodeFrame, not in alignment: a record
+    // with a non-IUPAC sequence must still be found, so the pipeline fails
+    // as loudly as the sequential path instead of skipping the record.
+    const std::string fastq = "@ok\nACGT\n+\nIIII\n@bad\nACZT\n+\nIIII\n";
+    const auto badPos = static_cast<std::uint64_t>(fastq.find("@bad"));
+    std::istringstream input(fastq);
+    input.seekg(static_cast<std::streamoff>(badPos));
+    EXPECT_EQ(fqc::pipeline::findFirstRecordStart(input, badPos), badPos);
+}
+
+TEST(FindFirstRecordStartTest, TruncatedMidBodyCandidateIsReturned) {
+    // Header + partial sequence + EOF: the record starts here, so return its
+    // offset and let the parser raise the sequential path's error instead of
+    // dropping the tail silently.
+    const std::string fastq = "@ok\nACGTACGT\n+\nIIIIIIII\n@trunc\nACG";
+    const std::uint64_t truncPos = static_cast<std::uint64_t>(fastq.find("@trunc"));
+    // Start the scan inside record 0 so it walks into the truncated record.
+    const std::uint64_t base = static_cast<std::uint64_t>(fastq.find('\n')) + 3;
+    std::istringstream input(fastq);
+    input.seekg(static_cast<std::streamoff>(base));
+    EXPECT_EQ(fqc::pipeline::findFirstRecordStart(input, base), truncPos);
+}
+
+TEST(FindFirstRecordStartTest, BareAtLineAtEofYieldsNullopt) {
+    // Nothing after a final '@' line: it may be the file's last '@'-starting
+    // quality line, which the previous chunk already parsed -- stay
+    // conservative rather than failing a valid file spuriously.
+    const std::string fastq = "@ok\nA\n+\n@\n";
+    const std::uint64_t qualityStart = static_cast<std::uint64_t>(fastq.find("\n+\n")) + 3;
+    std::istringstream input(fastq);
+    input.seekg(static_cast<std::streamoff>(qualityStart));
+    EXPECT_FALSE(fqc::pipeline::findFirstRecordStart(input, qualityStart).has_value());
 }
 
 TEST(FindFirstRecordStartTest, TruncatedTailYieldsNullopt) {

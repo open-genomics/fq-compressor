@@ -23,7 +23,6 @@
 #include <span>
 #include <stop_token>
 #include <string>
-#include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -62,12 +61,6 @@ void trimRight(std::string& str) {
     }
 }
 
-[[nodiscard]] auto isIupacSequence(std::string_view sequence) -> bool {
-    // Mirrors the format layer's validIupacBase charset.
-    constexpr std::string_view kIupacBases = "ACGTRYSWKMBDHVNacgtryswkmbdhvn";
-    return !sequence.empty() && sequence.find_first_not_of(kIupacBases) == std::string_view::npos;
-}
-
 /// Reads one raw line, advancing the absolute `offset` past the delimiter.
 /// Trims '\r' like the parser does. Returns false at EOF.
 [[nodiscard]] auto readRawLine(std::istream& input,
@@ -98,16 +91,30 @@ auto findFirstRecordStart(std::istream& input,
         if (l0.empty() || l0[0] != '@') {
             continue;
         }
-        // Candidate record start. Validate the 4-line structure; a '@'
-        // quality line fails because the next physical line (the real header)
-        // is never pure IUPAC and the 3rd line is never '+'.
+        // Candidate record start. The check mirrors FastqParser's STRUCTURAL
+        // acceptance only ('+' line, equal lengths) and deliberately not
+        // encodeFrame's content validation: rejecting a candidate on content
+        // here would silently skip a record that the sequential path parses
+        // and then rejects loudly. A '@' quality line still fails because a
+        // well-formed sequence line never starts with '+' (stage H trap 1).
         const std::uint64_t afterL0 = offset;
-        const bool have4 = readRawLine(input, l1, offset) && readRawLine(input, l2, offset) &&
-            readRawLine(input, l3, offset);
+        const bool haveL1 = readRawLine(input, l1, offset);
+        const bool have4 =
+            haveL1 && readRawLine(input, l2, offset) && readRawLine(input, l3, offset);
         if (!have4) {
-            return std::nullopt;  // truncated tail: owned by the previous chunk
+            // EOF during the structural check. With nothing (or one blank
+            // line) after the '@' line this is indistinguishable from the
+            // file's final '@'-starting quality line, which the previous
+            // chunk already parsed -- stay conservative. Any other shape is
+            // a record truncated mid-body: it starts in this chunk, so hand
+            // it to the parser, which raises the same error the sequential
+            // path would, instead of dropping the record silently.
+            if (!haveL1 || l1.empty()) {
+                return std::nullopt;
+            }
+            return lineStart;
         }
-        if (!l2.empty() && l2[0] == '+' && l1.size() == l3.size() && isIupacSequence(l1)) {
+        if (!l2.empty() && l2[0] == '+' && l1.size() == l3.size()) {
             return lineStart;
         }
         // False alarm: rewind to right after l0 and resume scanning there
@@ -203,6 +210,8 @@ auto ParallelParsePipeline::run(std::span<const ReadRecord> initialRecords,
         const std::uint64_t chunkEnd =
             (workerIndex + 1 == parallelism_) ? fileSize_ : chunkBegin + step;
 
+        // One stream per worker, shared by boundary alignment and parsing.
+        std::ifstream file;
         std::uint64_t recordStart = chunkBegin;
         if (chunkBegin >= fileSize_) {
             recordStart = fileSize_;  // empty chunk: nothing starts here
@@ -210,7 +219,7 @@ auto ParallelParsePipeline::run(std::span<const ReadRecord> initialRecords,
             // Chunks after the first must boundary-align; worker 0 starts
             // exactly at the sample end, which is already a record boundary
             // (sampling consumed whole records on the main thread).
-            std::ifstream file(inputPath_, std::ios::binary);
+            file.open(inputPath_, std::ios::binary);
             if (!file) {
                 recordError(
                     Error{ErrorCode::kIOError, "failed to open input for parallel parsing"});
@@ -229,37 +238,45 @@ auto ParallelParsePipeline::run(std::span<const ReadRecord> initialRecords,
         }
 
         if (recordStart < chunkEnd && !stopToken.stop_requested()) {
-            std::ifstream file(inputPath_, std::ios::binary);
+            if (file.is_open()) {
+                file.clear();  // findFirstRecordStart may have left eof behind
+            } else {
+                file.open(inputPath_, std::ios::binary);
+            }
             if (!file) {
                 recordError(
                     Error{ErrorCode::kIOError, "failed to open input for parallel parsing"});
                 stopSource.request_stop();
             } else {
                 file.seekg(static_cast<std::streamoff>(recordStart));
-                const std::uint64_t parseBase = recordStart;
-                io::FastqParser parser(file);
-                // Parse every record that STARTS inside [chunkBegin, chunkEnd);
-                // a record straddling the boundary belongs to this worker,
-                // the next worker's alignment skips it.
-                while (recordStart < chunkEnd && !stopToken.stop_requested()) {
-                    const auto parseStart = Clock::now();
-                    auto record = parser.readRecord();
-                    parseNs += nanosSince(parseStart);
-                    if (!record) {
-                        recordError(record.error());
-                        stopSource.request_stop();
+                if (!file) {
+                    recordError(
+                        Error{ErrorCode::kIOError, "failed to seek input for parallel parsing"});
+                    stopSource.request_stop();
+                }
+            }
+            const std::uint64_t parseBase = recordStart;
+            io::FastqParser parser(file);
+            // Parse every record that STARTS inside [chunkBegin, chunkEnd);
+            // a record straddling the boundary belongs to this worker,
+            // the next worker's alignment skips it.
+            while (file && recordStart < chunkEnd && !stopToken.stop_requested()) {
+                const auto parseStart = Clock::now();
+                auto record = parser.readRecord();
+                parseNs += nanosSince(parseStart);
+                if (!record) {
+                    recordError(record.error());
+                    stopSource.request_stop();
+                    break;
+                }
+                if (!record->has_value()) {
+                    break;  // EOF (last chunk)
+                }
+                recordStart = parseBase + parser.bytesConsumed();
+                localLogical += canonicalFastqBytes(**record);
+                if (auto closed = accumulator.append(std::move(**record))) {
+                    if (!pushItem(ParseItem{workerIndex, localId++, false, std::move(*closed)})) {
                         break;
-                    }
-                    if (!record->has_value()) {
-                        break;  // EOF (last chunk)
-                    }
-                    recordStart = parseBase + parser.bytesConsumed();
-                    localLogical += canonicalFastqBytes(**record);
-                    if (auto closed = accumulator.append(std::move(**record))) {
-                        if (!pushItem(
-                                ParseItem{workerIndex, localId++, false, std::move(*closed)})) {
-                            break;
-                        }
                     }
                 }
             }

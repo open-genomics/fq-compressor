@@ -5,7 +5,7 @@
 ### 新增
 
 - **并行解析（路线图阶段 H，压缩吞吐 +47.7%）**：未压缩普通文件输入时，解析从单线程串行升级为数据并行——K 个 parser worker 各自打开独立 ifstream，按字节块切分 `[sampleEnd, fileSize)`，经边界对齐协议解析各自块内起始的记录，帧按 `(chunkId, localId)` 两级标记，由新组件 `ChunkOrderer` 在 writer 端按字典序重组（`ReorderBuffer` 的两级推广）；encoder/writer 段与顺序路径同源。`compress --parse-workers N`（默认 4，0 = 强制顺序）。
-  - **边界对齐协议**：候选行首 `@` + 4 行结构回验（`+` 行、seq 长度==qual 长度、纯 IUPAC），失败回退一行续扫--质量行以 `@` 起始（Q31）不会误判（含对抗 fixture 测试）。
+  - **边界对齐协议**：候选行首 `@` + 结构回验（`+` 行、seq 长度==qual 长度，与 `FastqParser` 的结构性接受规则完全镜像；内容校验统一留给 `encodeFrame`），失败回退一行续扫——质量行以 `@` 起始（Q31）不会误判（含对抗 fixture 测试）。
   - **采样连续性**：profile 采样保持在主线程，采样记录作为 worker 0 的累积器种子（不是独立块），`FastqParser` 新增 `bytesConsumed()` 精确记录采样终点偏移。
   - **退化纪律**：gzip/stdin/双端输入自动走原顺序路径（gzip 流式不可随机切块、stdin 不可寻址、双端锁步复杂度爆炸）；`--parse-workers 1` 的并行机器用于分帧一致性门禁。
   - 分派探测复用 `io::detectCompressionFormat`（magic 嗅探），新增 `--parse-workers` CLI（0–64）。
@@ -16,6 +16,10 @@
 - **分帧核算从 capacity 口径改为 size 口径**：`FrameAccumulator::retainedBytes` 改用字符串 size 而非 capacity——libc++ `getline` 的字符串 capacity 取决于行相对 streambuf 缓冲相位的位置（跨界行 capacity 更大），capacity 口径使帧边界依赖于流的缓冲相位，跨路径（顺序 vs 并行）分帧不可复现。size 口径下分帧是纯内容函数，`--parse-workers 0` 与 `--parse-workers 1` 归档逐字节一致。保守性不变：内存预检 `estimateCompressionPeak` 仍按 capacity 核算；线上格式不变、旧归档完全可读。新归档与旧二进制不再逐字节一致（分帧规则变化，非格式变化）。→ 详见 [docs/postmortems/2026-07-28-getline-capacity-framing.md](docs/postmortems/2026-07-28-getline-capacity-framing.md)
 - 共享 `FrameAccumulator` 组件：顺序 reader 与并行 parser worker 的分帧规则单一来源（防漂移）。
 
+### 修复
+
+- **并行边界对齐不再静默丢弃畸形记录（数据丢失）**：对齐扫描原以"纯 IUPAC"做候选预检，比 `FastqParser` 更严——畸形记录（非 IUPAC 序列等）的 header 若落在非首 chunk 的对齐区会被拒为候选、对齐跳到下一条记录，导致该记录无人解析，产出缺记录的合法归档（顺序路径对同一输入响亮报错）。修复：候选检查只镜像解析器的结构性规则（`+` 行、长度相等），内容校验统一由 `encodeFrame` 承担；被 EOF 截断在 body 中的候选同样返回其偏移，让 parser 报出与顺序路径一致的错误。残留保守边界：`@` 行后紧跟 EOF/单个空行的情形维持 nullopt（无法与合法文件末尾以 `@` 起始的质量行区分，宁可漏报畸形也不误伤合法输入）。→ 详见 [docs/postmortems/2026-08-04-parallel-alignment-silent-skip.md](docs/postmortems/2026-08-04-parallel-alignment-silent-skip.md)
+- 并行 worker 每个文件只开一个 ifstream（对齐与解析复用同一流），并补齐 parse 段 `seekg` 失败检查。
 
 ### 变更
 

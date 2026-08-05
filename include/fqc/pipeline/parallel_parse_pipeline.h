@@ -21,12 +21,17 @@ namespace fqc::pipeline {
 /// Scans forward from the stream's current position for the first structurally
 /// valid FASTQ record start and returns its absolute offset (`baseOffset` is
 /// the absolute offset of the current position). A candidate is a line
-/// starting with '@' that passes the 4-line structural check: third line
-/// starts with '+', sequence length == quality length, sequence is pure
-/// IUPAC. A line starting with '@' is NOT sufficient on its own -- quality
-/// lines may legitimately start with '@' (Phred+33, Q31), so failed
-/// candidates rewind one line and scanning continues (stage H trap 1).
-/// Returns `std::nullopt` if no valid start exists before EOF.
+/// starting with '@' that passes the parser-level structural check: third
+/// line starts with '+', sequence length == quality length. Content
+/// validation (IUPAC charset, etc.) deliberately stays in encodeFrame: a
+/// candidate rejected HERE on content would silently skip a record that the
+/// sequential path parses and rejects loudly. A line starting with '@' is
+/// NOT sufficient on its own -- quality lines may legitimately start with
+/// '@' (Phred+33, Q31), so failed candidates rewind one line and scanning
+/// continues (stage H trap 1). A candidate truncated by EOF mid-body is
+/// still returned, so the owning worker's parser raises the same error the
+/// sequential path would. Returns `std::nullopt` if no record starts before
+/// EOF.
 [[nodiscard]] auto findFirstRecordStart(std::istream& input,
                                         std::uint64_t baseOffset) -> std::optional<std::uint64_t>;
 
