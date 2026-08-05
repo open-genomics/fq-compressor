@@ -19,6 +19,7 @@
 ### 修复
 
 - **并行边界对齐不再静默丢弃畸形记录（数据丢失）**：对齐扫描原以"纯 IUPAC"做候选预检，比 `FastqParser` 更严——畸形记录（非 IUPAC 序列等）的 header 若落在非首 chunk 的对齐区会被拒为候选、对齐跳到下一条记录，导致该记录无人解析，产出缺记录的合法归档（顺序路径对同一输入响亮报错）。修复：候选检查只镜像解析器的结构性规则（`+` 行、长度相等），内容校验统一由 `encodeFrame` 承担；被 EOF 截断在 body 中的候选同样返回其偏移，让 parser 报出与顺序路径一致的错误。残留保守边界：`@` 行后紧跟 EOF/单个空行的情形维持 nullopt（无法与合法文件末尾以 `@` 起始的质量行区分，宁可漏报畸形也不误伤合法输入）。→ 详见 [docs/postmortems/2026-08-04-parallel-alignment-silent-skip.md](docs/postmortems/2026-08-04-parallel-alignment-silent-skip.md)
+- **gzip 输入底层 I/O 错误不再静默截断**：`GzipStreamBuf` 在底层流读失败（badbit）时原先以 EOF 收尾，解析器会把截断当正常结束；现在 decompress 无产出且未到 gzip 结尾时抛错，流经 istream badbit 由解析器上报 `kIOError`。
 - 并行 worker 每个文件只开一个 ifstream（对齐与解析复用同一流），并补齐 parse 段 `seekg` 失败检查。
 
 ### 变更

@@ -214,7 +214,14 @@ GzipStreamBuf::int_type GzipStreamBuf::underflow() {
 
     std::size_t decompressed = decompress();
     if (decompressed == 0) {
-        return traits_type::eof();
+        if (streamEnd_) {
+            return traits_type::eof();
+        }
+        // decompress() yields nothing without reaching the gzip end only
+        // when it stalled -- the underlying source failed (badbit) or the
+        // stream is corrupt. Throw so the istream sets badbit and the
+        // parser surfaces an I/O error instead of silently truncating.
+        throw std::runtime_error("gzip decompression stalled: input error or corrupt stream");
     }
 
     setg(outputBuffer_.data(), outputBuffer_.data(), outputBuffer_.data() + decompressed);

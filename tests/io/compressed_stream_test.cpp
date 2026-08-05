@@ -208,6 +208,23 @@ TEST_F(CompressedStreamTest, ReadsConcatenatedGzipMembers) {
 // GzipStreamBuf Tests
 // =============================================================================
 
+/// Serves a fixed byte range once, then simulates a hard I/O failure: the
+/// next refill throws, which istreams translate into badbit without eofbit.
+class FailingSourceBuf : public std::streambuf {
+public:
+    explicit FailingSourceBuf(std::string data) : data_(std::move(data)) {
+        setg(data_.data(), data_.data(), data_.data() + data_.size());
+    }
+
+protected:
+    int_type underflow() override {
+        throw std::runtime_error("simulated I/O failure");
+    }
+
+private:
+    std::string data_;
+};
+
 class GzipStreamBufTest : public ::testing::Test {
 protected:
     void SetUp() override {
@@ -277,6 +294,50 @@ TEST_F(GzipStreamBufTest, MoveSemantics) {
     std::stringstream buffer;
     buffer << stream.rdbuf();
     EXPECT_EQ(buffer.str(), testData);
+}
+
+TEST_F(GzipStreamBufTest, UnderlyingFailureSurfacesInsteadOfSilentEof) {
+    // A source stream that dies mid-stream must surface as an error, not as
+    // a clean EOF that silently truncates the decompressed payload.
+    std::string testData(256 * 1024, '\0');
+    std::mt19937 rng(7);
+    for (char& c : testData) {
+        c = static_cast<char>(rng());
+    }
+    auto compressedPath = tempDir_ / "failing.gz";
+    {
+        auto plainPath = tempDir_ / "failing_plain.txt";
+        std::ofstream file(plainPath, std::ios::binary);
+        file << testData;
+        std::string cmd = "gzip -c " + plainPath.string() + " > " + compressedPath.string();
+        ASSERT_EQ(system(cmd.c_str()), 0);
+    }
+    std::string compressed;
+    {
+        std::ifstream in(compressedPath, std::ios::binary);
+        std::ostringstream ss;
+        ss << in.rdbuf();
+        compressed = ss.str();
+    }
+    ASSERT_GT(compressed.size(), std::size_t{64} * 1024);
+    compressed.resize(compressed.size() / 2);  // cut the source mid-stream
+
+    FailingSourceBuf sourceBuf(compressed);
+    std::istream source(&sourceBuf);
+    GzipStreamBuf gzipBuf(source);
+    std::istream stream(&gzipBuf);
+
+    std::string decoded;
+    char chunk[4096];
+    while (stream.read(chunk, sizeof(chunk)) || stream.gcount() > 0) {
+        decoded.append(chunk, static_cast<std::size_t>(stream.gcount()));
+        if (stream.bad()) {
+            break;
+        }
+    }
+    EXPECT_TRUE(stream.bad());
+    EXPECT_LT(decoded.size(), testData.size());
+    EXPECT_EQ(testData.compare(0, decoded.size(), decoded), 0);
 }
 
 TEST_F(GzipStreamBufTest, MoveAssignmentPreservesBufferedOutput) {
