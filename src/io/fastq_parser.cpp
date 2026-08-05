@@ -124,6 +124,9 @@ auto FastqParser::readLine(std::string& line) -> bool {
         return false;
     }
     ++lineNumber_;
+    // Count raw bytes before trimRight strips '\r'. getline consumes the '\n'
+    // delimiter unless it stopped at EOF (eofbit set after extracting content).
+    bytesConsumed_ += line.size() + (stream_.eof() ? 0 : 1);
     trimRight(line);
     return true;
 }

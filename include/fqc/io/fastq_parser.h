@@ -31,6 +31,15 @@ public:
         return recordNumber_;
     }
 
+    /// Raw bytes consumed so far, including line delimiters (and any `\r`
+    /// later trimmed). Exact for plain uncompressed streams -- use it to
+    /// resume parsing from the same byte offset (stage H parallel parsing).
+    /// For gzip streams it counts *decompressed* bytes, which do not map to
+    /// file offsets.
+    [[nodiscard]] auto bytesConsumed() const noexcept -> std::uint64_t {
+        return bytesConsumed_;
+    }
+
 private:
     [[nodiscard]] auto readLine(std::string& line) -> bool;
     static void trimRight(std::string& str);
@@ -41,6 +50,7 @@ private:
     std::istream& stream_;
     std::uint64_t lineNumber_ = 0;
     std::uint64_t recordNumber_ = 0;
+    std::uint64_t bytesConsumed_ = 0;
     bool eof_ = false;
     bool streamError_ = false;
 };

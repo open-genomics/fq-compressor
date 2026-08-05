@@ -11,8 +11,10 @@
 #include "fqc/log.h"
 #include "fqc/pipeline/compress_pipeline.h"
 #include "fqc/pipeline/decompress_pipeline.h"
+#include "fqc/pipeline/parallel_parse_pipeline.h"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cctype>
 #include <chrono>
@@ -175,6 +177,33 @@ void logPipelineObservability(const pipeline::PipelineStats& stats) {
 [[nodiscard]] auto targetFrameBytesFor(const CompressionRequest& request) noexcept -> std::size_t {
     return std::min(request.targetFrameBytes,
                     (request.memoryLimitBytes - kEngineMemoryReserveBytes) / 8);
+}
+
+/// Stage-H dispatch probe: returns the file size only when `path` is a
+/// regular, uncompressed file (parallel parsing needs random access to
+/// *uncompressed* bytes). Gzip/bzip2/xz/zstd input and anything that fails to
+/// stat/probe yields 0, which routes to the sequential reader.
+[[nodiscard]] auto uncompressedRegularFileSize(const std::filesystem::path& path) -> std::uint64_t {
+    std::error_code error;
+    if (!std::filesystem::is_regular_file(path, error) || error) {
+        return 0;
+    }
+    const auto size = std::filesystem::file_size(path, error);
+    if (error) {
+        return 0;
+    }
+    std::ifstream probe(path, std::ios::binary);
+    if (!probe) {
+        return 0;
+    }
+    std::array<std::uint8_t, 8> magic{};
+    probe.read(reinterpret_cast<char*>(magic.data()), static_cast<std::streamsize>(magic.size()));
+    const auto bytesRead = probe.gcount();
+    if (io::detectCompressionFormat({magic.data(), static_cast<std::size_t>(bytesRead)}) !=
+        io::CompressionFormat::kNone) {
+        return 0;
+    }
+    return size;
 }
 
 [[nodiscard]] auto validateOutput(const std::filesystem::path& inputPath,
@@ -351,10 +380,30 @@ auto ArchiveEngine::compress(const CompressionRequest& request) const -> Result<
                                   .maxFrameBytes = maxFrameBytesFor(request.memoryLimitBytes),
                                   .memoryLimitBytes = request.memoryLimitBytes,
                                   .qualityZstdLevel = request.qualityZstdLevel});
-    pipeline::CompressPipeline pipelineEngine(targetFrameBytesFor(request), request.paired());
-    std::istream* mateStream = mateStreamPtr ? mateStreamPtr.get() : nullptr;
-    auto pipelineResult = pipelineEngine.run(
-        **primaryStream, mateStream, std::span<const ReadRecord>{sample}, writer);
+
+    // Stage-H dispatch: parallel parsing engages only for an uncompressed
+    // regular file with workers > 0 (gzip is a pure inflate stream, stdin is
+    // not seekable, paired lock-step doesn't parallelize -- roadmap scope
+    // discipline). Parallel parsing resumes at the sample's exact byte
+    // offset, so sampling stays on the main thread for both paths.
+    std::uint64_t inputFileSize = 0;
+    if (request.parseWorkers > 0 && !request.paired() && request.inputPath != "-") {
+        inputFileSize = uncompressedRegularFileSize(request.inputPath);
+    }
+    Result<pipeline::PipelineStats> pipelineResult;
+    if (inputFileSize > 0) {
+        pipeline::ParallelParsePipeline parallelEngine(request.inputPath,
+                                                       inputFileSize,
+                                                       targetFrameBytesFor(request),
+                                                       primary.bytesConsumed(),
+                                                       request.parseWorkers);
+        pipelineResult = parallelEngine.run(std::span<const ReadRecord>{sample}, writer);
+    } else {
+        pipeline::CompressPipeline pipelineEngine(targetFrameBytesFor(request), request.paired());
+        std::istream* mateStream = mateStreamPtr ? mateStreamPtr.get() : nullptr;
+        pipelineResult = pipelineEngine.run(
+            **primaryStream, mateStream, std::span<const ReadRecord>{sample}, writer);
+    }
     if (!pipelineResult) {
         return makeError<OperationStats>(pipelineResult.error());
     }

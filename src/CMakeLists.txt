@@ -19,6 +19,7 @@ set(FQC_CORE_SOURCES
     io/compressed_stream.cpp
     pipeline/compress_pipeline.cpp
     pipeline/decompress_pipeline.cpp
+    pipeline/parallel_parse_pipeline.cpp
 )
 
 # Command sources

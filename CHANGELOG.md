@@ -2,6 +2,21 @@
 
 ## [未发布]
 
+### 新增
+
+- **并行解析（路线图阶段 H，压缩吞吐 +47.7%）**：未压缩普通文件输入时，解析从单线程串行升级为数据并行——K 个 parser worker 各自打开独立 ifstream，按字节块切分 `[sampleEnd, fileSize)`，经边界对齐协议解析各自块内起始的记录，帧按 `(chunkId, localId)` 两级标记，由新组件 `ChunkOrderer` 在 writer 端按字典序重组（`ReorderBuffer` 的两级推广）；encoder/writer 段与顺序路径同源。`compress --parse-workers N`（默认 4，0 = 强制顺序）。
+  - **边界对齐协议**：候选行首 `@` + 4 行结构回验（`+` 行、seq 长度==qual 长度、纯 IUPAC），失败回退一行续扫--质量行以 `@` 起始（Q31）不会误判（含对抗 fixture 测试）。
+  - **采样连续性**：profile 采样保持在主线程，采样记录作为 worker 0 的累积器种子（不是独立块），`FastqParser` 新增 `bytesConsumed()` 精确记录采样终点偏移。
+  - **退化纪律**：gzip/stdin/双端输入自动走原顺序路径（gzip 流式不可随机切块、stdin 不可寻址、双端锁步复杂度爆炸）；`--parse-workers 1` 的并行机器用于分帧一致性门禁。
+  - 分派探测复用 `io::detectCompressionFormat`（magic 嗅探），新增 `--parse-workers` CLI（0–64）。
+  - 实测（A/B 同窗口，64 MiB random ×5）：illumina 压缩 **+47.7%**（100.75 → 148.84 MiB/s，spread 区间不重叠，reader 并行 4 路直击 Amdahl 确认的瓶颈）；ont -1.3%（长读解析占比小，噪声内）；解压路径未动。压缩比代价 2.9588 → 2.9572（块尾关帧的切分开销）。
+
+### 变更
+
+- **分帧核算从 capacity 口径改为 size 口径**：`FrameAccumulator::retainedBytes` 改用字符串 size 而非 capacity——libc++ `getline` 的字符串 capacity 取决于行相对 streambuf 缓冲相位的位置（跨界行 capacity 更大），capacity 口径使帧边界依赖于流的缓冲相位，跨路径（顺序 vs 并行）分帧不可复现。size 口径下分帧是纯内容函数，`--parse-workers 0` 与 `--parse-workers 1` 归档逐字节一致。保守性不变：内存预检 `estimateCompressionPeak` 仍按 capacity 核算；线上格式不变、旧归档完全可读。新归档与旧二进制不再逐字节一致（分帧规则变化，非格式变化）。→ 详见 [docs/postmortems/2026-07-28-getline-capacity-framing.md](docs/postmortems/2026-07-28-getline-capacity-framing.md)
+- 共享 `FrameAccumulator` 组件：顺序 reader 与并行 parser worker 的分帧规则单一来源（防漂移）。
+
+
 ### 变更
 
 - **解压路径流水线化 + 泛型 RecordSink（路线图阶段 G）**：解压从纯顺序循环升级为与压缩路径镜像的三段流水线，zstd+decode 不再与 FASTQ 写盘串行。

@@ -28,6 +28,10 @@ struct CompressionRequest {
     std::size_t memoryLimitBytes = kDefaultMemoryLimitBytes;
     std::size_t targetFrameBytes = format::kDefaultTargetFrameBytes;
     int qualityZstdLevel = 1;
+    /// Parser workers for stage-H parallel parsing; 0 forces the sequential
+    /// reader. Parallel parsing only engages on uncompressed regular files
+    /// (gzip/stdin/paired always use the sequential path regardless).
+    std::size_t parseWorkers = 4;
     bool forceOverwrite = false;
 
     [[nodiscard]] auto paired() const noexcept -> bool {

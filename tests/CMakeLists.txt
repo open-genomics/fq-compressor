@@ -102,6 +102,21 @@ fqc_add_test(decompress_pipeline_test
     SOURCES pipeline/decompress_pipeline_test.cpp
 )
 
+# Frame accumulator unit tests
+fqc_add_test(frame_accumulator_test
+    SOURCES pipeline/frame_accumulator_test.cpp
+)
+
+# Chunk orderer unit tests
+fqc_add_test(chunk_orderer_test
+    SOURCES pipeline/chunk_orderer_test.cpp
+)
+
+# Parallel parse pipeline integration tests
+fqc_add_test(parallel_parse_pipeline_test
+    SOURCES pipeline/parallel_parse_pipeline_test.cpp
+)
+
 add_test(
     NAME v2_cli_smoke_test
     COMMAND ${CMAKE_COMMAND} -E env

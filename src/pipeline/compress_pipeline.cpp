@@ -6,6 +6,7 @@
 
 #include "fqc/format/archive.h"
 #include "fqc/io/fastq_parser.h"
+#include "fqc/pipeline/frame_accumulator.h"
 #include "fqc/pipeline/mpmc_queue.h"
 #include "fqc/pipeline/reorder_buffer.h"
 
@@ -26,11 +27,6 @@
 namespace fqc::pipeline {
 
 namespace {
-
-[[nodiscard]] auto retainedRecordBytes(const ReadRecord& record) noexcept -> std::size_t {
-    return sizeof(ReadRecord) + record.id.capacity() + 1 + record.comment.capacity() + 1 +
-        record.sequence.capacity() + 1 + record.quality.capacity() + 1;
-}
 
 /// A parsed frame queued from reader to an encoder worker. `frameId` is the
 /// monotonic order in which the reader closed the frame; encoders complete out
@@ -126,32 +122,22 @@ auto CompressPipeline::run(std::istream& primary,
         }
 
         std::uint64_t frameId = 0;
-        std::vector<ReadRecord> frame;
-        std::size_t retainedBytes = 0;
+        // Shared framing rules (stage H): identical to the parallel path's
+        // accumulator, which is what makes byte-identical framing comparable.
+        FrameAccumulator accumulator(targetFrameBytes_, paired_);
 
-        auto frameFull = [&] {
-            return retainedBytes >= targetFrameBytes_ && (!paired_ || frame.size() % 2 == 0);
-        };
-
-        auto pushFrame = [&] -> bool {
-            if (frame.empty()) {
-                return true;
-            }
-            InputFrame in{frameId++, std::move(frame)};
+        auto pushFrame = [&](std::vector<ReadRecord> closed) -> bool {
+            InputFrame in{frameId++, std::move(closed)};
             const auto pushStart = Clock::now();
             bool ok = queue1.push(std::move(in), stopToken);
             pushNs += nanosSince(pushStart);
-            frame.clear();
-            retainedBytes = 0;
             return ok;
         };
 
         auto append = [&](ReadRecord record) -> bool {
             logicalBytes += canonicalFastqBytes(record);
-            retainedBytes += retainedRecordBytes(record);
-            frame.push_back(std::move(record));
-            if (frameFull()) {
-                return pushFrame();
+            if (auto closed = accumulator.append(std::move(record))) {
+                return pushFrame(std::move(*closed));
             }
             return true;
         };
@@ -188,7 +174,9 @@ auto CompressPipeline::run(std::istream& primary,
         }
 
         if (!stopToken.stop_requested()) {
-            pushFrame();
+            if (auto tail = accumulator.finish()) {
+                pushFrame(std::move(*tail));
+            }
         }
         queue1.close();
         readerParseNs.store(parseNs, std::memory_order_relaxed);

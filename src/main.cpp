@@ -37,6 +37,7 @@ struct CompressOptions {
     std::string profile = "auto";
     std::uint64_t frameMiB = 64;
     int qualityLevel = 1;
+    std::uint64_t parseWorkers = 4;
     bool force = false;
 };
 
@@ -137,6 +138,13 @@ int main(int argc, char* argv[]) {
                      "zstd level for the quality stream (ID/sequence stay at 1)")
         ->default_val(1)
         ->check(CLI::Range(1, 19));
+    compressCommand
+        ->add_option("--parse-workers",
+                     compress.parseWorkers,
+                     "parser workers for parallel parsing of uncompressed regular "
+                     "files (0 = sequential reader)")
+        ->default_val(4)
+        ->check(CLI::Range(0, 64));
     compressCommand->add_flag("-f,--force", compress.force, "Overwrite an existing output");
 
     auto* decompressCommand =
@@ -184,6 +192,7 @@ int main(int argc, char* argv[]) {
                                            .memoryLimitBytes = *memoryLimit,
                                            .targetFrameBytes = *targetFrameBytes,
                                            .qualityZstdLevel = compress.qualityLevel,
+                                           .parseWorkers = compress.parseWorkers,
                                            .forceOverwrite = compress.force});
             if (!result) {
                 return reportError(result);
