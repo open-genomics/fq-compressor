@@ -142,11 +142,11 @@ auto CompressPipeline::run(std::istream& primary,
             return true;
         };
 
-        for (auto& record : initialRecords) {
+        for (const auto& record : initialRecords) {
             if (stopToken.stop_requested()) {
                 break;
             }
-            if (!append(std::move(record))) {
+            if (!append(record)) {
                 break;
             }
         }
