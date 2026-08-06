@@ -135,6 +135,29 @@ if(NOT DEFINED CMAKE_TOOLCHAIN_FILE)
 endif()
 
 # =============================================================================
+# libc++ Experimental Stop-Token / jthread Enable
+# =============================================================================
+# libc++ < 19 still gates std::jthread and std::stop_token behind an
+# "experimental" guard: <__config> defines _LIBCPP_HAS_NO_EXPERIMENTAL_STOP_TOKEN
+# unless _LIBCPP_ENABLE_EXPERIMENTAL is set, and clang-18 (Ubuntu 24.04's
+# packaged toolchain) does not advertise __has_feature(experimental_library).
+# The guard then strips std::jthread/std::stop_token even under -std=c++23,
+# breaking the pipeline's cooperative-cancellation code. Define the enable
+# macro explicitly when building against libc++. No-op on libstdc++ (no such
+# macro) and on libc++ >= 19 (which auto-defines _LIBCPP_ENABLE_EXPERIMENTAL).
+include(CheckCXXSourceCompiles)
+check_cxx_source_compiles([[
+#include <version>
+#ifndef _LIBCPP_VERSION
+#error not libc++
+#endif
+int main() { return 0; }
+]] FQC_USING_LIBCXX)
+if(FQC_USING_LIBCXX)
+    add_compile_definitions(_LIBCPP_ENABLE_EXPERIMENTAL)
+endif()
+
+# =============================================================================
 # Find Dependencies (handled by Conan)
 # =============================================================================
 
