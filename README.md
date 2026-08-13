@@ -7,7 +7,7 @@
 
 **把 FASTQ 压成小而可校验的归档，内存可控，管道友好。**
 
-[![CI 状态](https://github.com/LessUp/fq-compressor/actions/workflows/ci.yml/badge.svg)](https://github.com/LessUp/fq-compressor/actions/workflows/ci.yml)
+[![CI 状态](https://github.com/open-genomics/fq-compressor/actions/workflows/ci.yml/badge.svg)](https://github.com/open-genomics/fq-compressor/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 ![C++23](https://img.shields.io/badge/C%2B%2B-23-blue.svg)
 ![CMake 3.28+](https://img.shields.io/badge/CMake-3.28%2B-blue.svg)
@@ -30,7 +30,7 @@ FASTQ 文件大、传输贵、存档要防静默损坏。fq-compressor 针对这
 ### 源码构建
 
 ```bash
-git clone https://github.com/LessUp/fq-compressor.git
+git clone https://github.com/open-genomics/fq-compressor.git
 cd fq-compressor
 ./scripts/build.sh clang-release
 ```

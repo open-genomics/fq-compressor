@@ -27,8 +27,8 @@ class FQCompressorConan(ConanFile):
     name = "fqcompressor"
     package_type = "application"
     license = "MIT"  # Project-authored code; vendored third-party code keeps its own license
-    author = "LessUp <jiashuai.mail@gmail.com>"
-    url = "https://github.com/LessUp/fq-compressor"
+    author = "open-genomics <jiashuai.mail@gmail.com>"
+    url = "https://github.com/open-genomics/fq-compressor"
     description = "High-performance sequential FASTQ compressor"
     topics = ("bioinformatics", "fastq", "compression", "genomics", "archival")
     settings = "os", "compiler", "build_type", "arch"

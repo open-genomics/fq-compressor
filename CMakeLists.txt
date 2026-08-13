@@ -22,7 +22,7 @@ project(FQCompressor
     LANGUAGES CXX
     VERSION ${FQC_VERSION_CORE}
     DESCRIPTION "High-performance sequential FASTQ compressor"
-    HOMEPAGE_URL "https://github.com/LessUp/fq-compressor"
+    HOMEPAGE_URL "https://github.com/open-genomics/fq-compressor"
 )
 
 # =============================================================================
