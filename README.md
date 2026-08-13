@@ -1,5 +1,10 @@
 # fq-compressor
 
+
+> **Format family**: `fqc-sequential/v2` — command `fqc`, extension `.fqc`,
+> magic `46 51 43 56 32 0D 0A 1A`. This is distinct from the Rust implementation's
+> `fqc-indexed/v2` format family.
+
 **把 FASTQ 压成小而可校验的归档，内存可控，管道友好。**
 
 [![CI 状态](https://github.com/LessUp/fq-compressor/actions/workflows/ci.yml/badge.svg)](https://github.com/LessUp/fq-compressor/actions/workflows/ci.yml)

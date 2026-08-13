@@ -66,6 +66,11 @@ fqc_add_test(archive_test
     SOURCES format/archive_test.cpp
 )
 
+# fqc-sequential/v2 format contract tests
+fqc_add_test(format_contract_test
+    SOURCES format/format_contract_test.cpp
+)
+
 # FASTQ parser tests
 fqc_add_test(fastq_parser_test
     SOURCES io/fastq_parser_test.cpp

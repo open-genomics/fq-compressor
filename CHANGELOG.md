@@ -4,6 +4,7 @@
 
 ### 新增
 
+- **fqc-sequential/v2 格式规范**：建立仓库内 `openspec/` 格式契约，记录 magic、版本、header/frame/footer 结构、checksum 覆盖和 rejection 行为。添加格式契约测试 (`tests/format/format_contract_test.cpp`) 和冻结 fixture 目录 (`tests/fixtures/sequential-v2/`)。标注该实现为 `fqc-sequential/v2` 格式族（与 Rust `fqc-indexed/v2` 通过 magic 区分）。
 - **并行解析（路线图阶段 H，压缩吞吐 +47.7%）**：未压缩普通文件输入时，解析从单线程串行升级为数据并行——K 个 parser worker 各自打开独立 ifstream，按字节块切分 `[sampleEnd, fileSize)`，经边界对齐协议解析各自块内起始的记录，帧按 `(chunkId, localId)` 两级标记，由新组件 `ChunkOrderer` 在 writer 端按字典序重组（`ReorderBuffer` 的两级推广）；encoder/writer 段与顺序路径同源。`compress --parse-workers N`（默认 4，0 = 强制顺序）。
   - **边界对齐协议**：候选行首 `@` + 结构回验（`+` 行、seq 长度==qual 长度，与 `FastqParser` 的结构性接受规则完全镜像；内容校验统一留给 `encodeFrame`），失败回退一行续扫——质量行以 `@` 起始（Q31）不会误判（含对抗 fixture 测试）。
   - **采样连续性**：profile 采样保持在主线程，采样记录作为 worker 0 的累积器种子（不是独立块），`FastqParser` 新增 `bytesConsumed()` 精确记录采样终点偏移。
