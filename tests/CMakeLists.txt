@@ -79,6 +79,16 @@ target_compile_definitions(frozen_fixture_test PRIVATE
     FQC_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/sequential-v2"
 )
 
+# Cross-family magic recognition (indexed reject)
+fqc_add_test(format_family_test
+    SOURCES format/format_family_test.cpp
+    LIBRARIES fqc_cli
+)
+target_compile_definitions(format_family_test PRIVATE
+    FQC_FOREIGN_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/foreign-indexed-v2"
+    FQC_SEQUENTIAL_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/sequential-v2"
+)
+
 # FASTQ parser tests
 fqc_add_test(fastq_parser_test
     SOURCES io/fastq_parser_test.cpp

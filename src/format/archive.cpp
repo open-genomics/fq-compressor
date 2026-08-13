@@ -22,6 +22,9 @@ namespace fqc::format {
 namespace {
 
 constexpr std::array<std::uint8_t, 8> kArchiveMagic = {'F', 'Q', 'C', 'V', '2', '\r', '\n', 0x1A};
+// Indexed family magic (Rust open-genomics/fq-compressor-rust): PNG-style 89 F Q C ...
+constexpr std::array<std::uint8_t, 8> kIndexedFamilyMagic = {
+    0x89, 'F', 'Q', 'C', '\r', '\n', 0x1A, '\n'};
 constexpr std::uint32_t kFrameMagic = 0x324D5246U;
 constexpr std::uint32_t kFooterMagic = 0x32444E45U;
 constexpr std::uint16_t kGlobalHeaderSize = 32;
@@ -869,12 +872,28 @@ auto ArchiveReader::open() -> Result<ArchiveMetadata> {
         return makeError<ArchiveMetadata>(ErrorCode::kUsageError,
                                           "FQC v2 frame and memory limits must be positive");
     }
-    std::array<std::uint8_t, kGlobalHeaderSize> header{};
-    if (auto result = readExact(input_, header); !result) {
-        return makeError<ArchiveMetadata>(result.error());
+    // Fixed 8-byte magic dispatch before version/header/checksum parsing.
+    std::array<std::uint8_t, 8> magicBytes{};
+    if (auto result = readExact(input_, magicBytes); !result) {
+        return makeError<ArchiveMetadata>(ErrorCode::kFormatError,
+                                          "truncated FQC magic header (need 8 bytes)");
     }
-    if (!std::equal(kArchiveMagic.begin(), kArchiveMagic.end(), header.begin())) {
-        return makeError<ArchiveMetadata>(ErrorCode::kFormatError, "not an FQC v2 archive");
+    if (std::equal(kIndexedFamilyMagic.begin(), kIndexedFamilyMagic.end(), magicBytes.begin())) {
+        return makeError<ArchiveMetadata>(
+            ErrorCode::kUnsupportedCodec,
+            "unsupported FQC format family: fqc-indexed/v2 "
+            "(magic 89 46 51 43 0D 0A 1A 0A); use open-genomics/fq-compressor-rust");
+    }
+    if (!std::equal(kArchiveMagic.begin(), kArchiveMagic.end(), magicBytes.begin())) {
+        return makeError<ArchiveMetadata>(
+            ErrorCode::kFormatError,
+            "unknown FQC magic header (not an fqc-sequential/v2 archive)");
+    }
+
+    std::array<std::uint8_t, kGlobalHeaderSize> header{};
+    std::copy(magicBytes.begin(), magicBytes.end(), header.begin());
+    if (auto result = readExact(input_, std::span(header).subspan(kArchiveMagic.size())); !result) {
+        return makeError<ArchiveMetadata>(result.error());
     }
     Cursor cursor(header);
     auto magic = cursor.readBytes(kArchiveMagic.size());

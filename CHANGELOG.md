@@ -4,6 +4,7 @@
 
 ### 新增
 
+- **跨族 magic 识别**：打开归档时先做 8-byte magic 分派；遇到 Rust `fqc-indexed/v2`（`89 46 51 43 0D 0A 1A 0A`）返回明确的 unsupported format family 错误并指向 `open-genomics/fq-compressor-rust`；未知 magic 与截断 magic 分开报错（`verify`/`decompress` 均覆盖，不创建输出）。
 - **fqc-sequential/v2 格式规范**：建立仓库内 `openspec/` 格式契约，记录 magic、版本、header/frame/footer 结构、checksum 覆盖和 rejection 行为。添加格式契约测试 (`tests/format/format_contract_test.cpp`)、冻结 SE/PE 归档 fixture (`tests/fixtures/sequential-v2/`，含生成 commit、命令与 SHA-256 manifest) 及解码兼容测试 (`tests/format/frozen_fixture_test.cpp`，逐记录比对冻结归档与 FASTQ 期望)。标注该实现为 `fqc-sequential/v2` 格式族（与 Rust `fqc-indexed/v2` 通过 magic 区分）。
 - **并行解析（路线图阶段 H，压缩吞吐 +47.7%）**：未压缩普通文件输入时，解析从单线程串行升级为数据并行——K 个 parser worker 各自打开独立 ifstream，按字节块切分 `[sampleEnd, fileSize)`，经边界对齐协议解析各自块内起始的记录，帧按 `(chunkId, localId)` 两级标记，由新组件 `ChunkOrderer` 在 writer 端按字典序重组（`ReorderBuffer` 的两级推广）；encoder/writer 段与顺序路径同源。`compress --parse-workers N`（默认 4，0 = 强制顺序）。
   - **边界对齐协议**：候选行首 `@` + 结构回验（`+` 行、seq 长度==qual 长度，与 `FastqParser` 的结构性接受规则完全镜像；内容校验统一留给 `encodeFrame`），失败回退一行续扫——质量行以 `@` 起始（Q31）不会误判（含对抗 fixture 测试）。

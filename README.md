@@ -3,7 +3,9 @@
 
 > **Format family**: `fqc-sequential/v2` — command `fqc`, extension `.fqc`,
 > magic `46 51 43 56 32 0D 0A 1A`. This is distinct from the Rust implementation's
-> `fqc-indexed/v2` format family.
+> `fqc-indexed/v2` (magic `89 46 51 43 0D 0A 1A 0A`). Readers reject the other
+> family's magic with an explicit unsupported-format-family error; extension
+> alone cannot select a decoder.
 
 **把 FASTQ 压成小而可校验的归档，内存可控，管道友好。**
 
