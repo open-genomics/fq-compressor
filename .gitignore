@@ -115,6 +115,9 @@ docs/.site/
 *.fqc
 *.fqc.idx
 
+# 冻结格式 fixture 是 decoder 兼容契约，必须入库
+!tests/fixtures/**/*.fqc
+
 # OpenSpec - AI tool directories (configure per-project as needed)
 # Most projects should track OpenSpec skills/commands for consistency
 # Uncomment to ignore all AI tool configs:

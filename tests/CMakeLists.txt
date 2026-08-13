@@ -71,6 +71,14 @@ fqc_add_test(format_contract_test
     SOURCES format/format_contract_test.cpp
 )
 
+# Frozen fixture decoder compatibility tests
+fqc_add_test(frozen_fixture_test
+    SOURCES format/frozen_fixture_test.cpp
+)
+target_compile_definitions(frozen_fixture_test PRIVATE
+    FQC_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/sequential-v2"
+)
+
 # FASTQ parser tests
 fqc_add_test(fastq_parser_test
     SOURCES io/fastq_parser_test.cpp

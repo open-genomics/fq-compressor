@@ -11,11 +11,14 @@
 
 ## 2. Fixtures and tests
 
-- [x] 2.1 用可信 commit/version 生成 SE fixtures、inputs 和 manifest
-  - input_se.fastq committed; MANIFEST.md documents generator command and constants
-  - Frozen archive pending build environment (Conan not available)
+- [x] 2.1 用可信 commit/version 生成 SE/PE fixtures、inputs 和 manifest
+  - input_se.fastq / frozen_se.fqc / input_r1.fastq / input_r2.fastq / frozen_pe.fqc committed
+  - MANIFEST.md documents generator commit (a53d21c), version 0.3.0-rc1, commands, SHA-256
+  - Built locally with Conan 2.31.2 (pip user install), clang 18.1.3 + libc++ 19
 - [x] 2.2 添加 frozen decoder compatibility 和 metadata tests
   - format_contract_test.cpp: verifies kArchiveVersion = 2 and structural sizes
+  - frozen_fixture_test.cpp: decodes both frozen archives, compares records/metadata
+    against committed FASTQ expectations (FQC_FIXTURE_DIR compile definition)
   - Existing archive_test.cpp covers round-trip, rejection, checksum, truncation
 - [x] 2.3 添加 magic/header/frame/footer truncation 和 checksum corruption matrix
   - Already covered by existing archive_test.cpp
@@ -35,7 +38,8 @@
 
 ## 4. Verification
 
-- [x] 4.1 ./scripts/lint.sh format-check - passed
-- [x] 4.2 Full build/test skipped (Conan not available); code verified from source
-- [x] 4.3 Fixture input and manifest committed; frozen archive pending build
+- [x] 4.1 ./scripts/lint.sh format-check - passed (first pass); clang-format
+  unavailable in final pass environment, new test file follows repo style manually
+- [x] 4.2 ./scripts/build.sh clang-debug && ./scripts/test.sh clang-debug - 15/15 passed
+- [x] 4.3 Frozen SE/PE archives generated, round-trip cmp byte-identical, committed with SHA-256
 - [x] 4.4 git diff --check, scope audit, verification.md - passed
