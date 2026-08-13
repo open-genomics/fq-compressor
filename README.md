@@ -22,7 +22,7 @@
 FASTQ 文件大、传输贵、存档要防静默损坏。fq-compressor 针对这三点：
 
 * **体积小** — 2-bit 打包碱基 + Zstd，随机合成数据压缩比约 2.8–2.9×。
-* **可校验** — 全局头、逻辑帧、footer 三层 XXH64，`verify` 不解压即可完整校验。
+* **可校验** — 全局头、逻辑帧、footer 三层 XXH64。`verify` **完整解码**并验证全部结构、逻辑内容与 footer，但不写 FASTQ；CPU/内存成本与 `decompress` 同量级，不是常数时间元数据检查。XXH64 用于发现随机损坏，不提供对恶意篡改的密码学认证。
 * **内存有界** — 默认 16 GiB 预算，最低 64 MiB；逐帧保守估算峰值，不会 OOM。
 
 不支持随机访问、按区间提取、有损压缩、非 FASTQ 输入。详见 [已知限制](#已知限制)。
@@ -48,7 +48,7 @@ fqc=./build/clang-release/src/fqc
 ```bash
 $fqc compress   -i reads.fastq.gz -o reads.fqc    # 压缩
 $fqc decompress -i reads.fqc        -o out.fastq   # 解压
-$fqc verify     reads.fqc                          # 校验，不写输出
+$fqc verify     reads.fqc                          # 完整解码校验，不写 FASTQ
 ```
 
 双端测序：
@@ -77,7 +77,7 @@ WSL2 下 wall-clock 波动较大，同机重跑结果可能低于上表，仅供
 * **内存有界** — 逐帧保守峰值估算后再分配。
 * **管道友好** — 支持 stdin/stdout；普通文件先写临时文件，成功后原子替换。
 * **双端相邻** — R1/R2 成对存储，帧边界不拆开配对。
-* **多层校验** — XXH64 覆盖全局头、每个逻辑帧、结尾 footer。
+* **多层校验** — XXH64 覆盖全局头、每个逻辑帧、结尾 footer（完整性检测，非密码学认证）。
 
 机制细节见 [ARCHITECTURE.md](ARCHITECTURE.md)。
 
