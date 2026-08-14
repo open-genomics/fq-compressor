@@ -57,3 +57,49 @@ jobs:
 
       - name: Format check
         run: ./scripts/lint.sh format-check
+
+  sanitizer:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install toolchain
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq clang-18 libc++-18-dev libc++abi-18-dev ninja-build
+          sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-18 100
+          sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-18 100
+          pip install conan --quiet
+
+      - name: Cache Conan
+        uses: actions/cache@v5
+        with:
+          path: ~/.conan2
+          key: conan-${{ hashFiles('conanfile.py') }}
+
+      - name: Conan install (clang-asan)
+        env:
+          # 与 build-and-test 相同的 clang/libc++ 工具链。--build=gtest* 强制
+          # GTest 与项目同工具链从源码构建，避免预编译包混链在 gtest 静态注册
+          # 阶段触发 libc++ 容器注解误报（见 docs/postmortems/2026-07-13-*）
+          CC: clang
+          CXX: clang++
+        run: |
+          conan profile detect --force
+          conan install . --output-folder=build/clang-asan --build=missing \
+            --build=gtest* \
+            -s build_type=Debug \
+            -s compiler=clang \
+            -s compiler.version=18 \
+            -s compiler.libcxx=libc++ \
+            -s compiler.cppstd=23
+
+      - name: Build (clang-asan)
+        run: ./scripts/build.sh clang-asan
+
+      - name: Test (clang-asan)
+        env:
+          # LeakSanitizer 在进程退出时需要 ptrace，部分受限环境不可用；泄漏检测
+          # 保留为发布机检查项（postmortem 2026-07-13），此处 ASan/UBSan 仍启用
+          ASAN_OPTIONS: detect_leaks=0
+        run: ./scripts/test.sh clang-asan

@@ -101,9 +101,9 @@ C++23（GCC 14+ / Clang 18+）· CMake 3.28+ + Ninja · Conan 2.x · Zstd · xxH
 
 ## 质量
 
-CI（`.github/workflows/ci.yml`，ubuntu-24.04 + clang-18）覆盖：clang-debug 构建、全部测试（单元 + 集成 + 端到端）、clang-format 检查。校验失败即报错，exit code 约定见 [AGENTS.md](AGENTS.md)。
+CI（`.github/workflows/ci.yml`，ubuntu-24.04 + clang-18）覆盖：clang-debug 构建、全部测试（单元 + 集成 + 端到端）、clang-format 检查，以及 `clang-asan`（ASan+UBSan）构建与测试门禁。校验失败即报错，exit code 约定见 [AGENTS.md](AGENTS.md)。
 
-本地另有 `clang-release` / `clang-asan` / `clang-tsan` preset。注意两点环境限制：受管环境下 LeakSanitizer 需 `ASAN_OPTIONS=detect_leaks=0`；ASan preset 的项目代码带 `-fsanitize=address` 而 Conan 预编译的 GTest 不带，两者混编会在 gtest 静态注册阶段触发 libc++ 容器注解误报（heap-buffer-overflow），跑 ASan 前需用带 sanitizer 标志的 profile `--build=gtest*` 重建依赖。详见 `docs/postmortems/2026-07-13-sanitizer-env-limitations.md`。
+本地另有 `clang-release` / `clang-asan` / `clang-tsan` preset。注意两点环境限制：LeakSanitizer 在部分受限环境不可用，CI 与本地均以 `ASAN_OPTIONS=detect_leaks=0` 运行（泄漏检测保留为发布机检查项）；ASan preset 的 GTest 需与项目同工具链从源码构建（CI 用 `--build=gtest*`），避免预编译包混链在 gtest 静态注册阶段触发 libc++ 容器注解误报（heap-buffer-overflow）。详见 `docs/postmortems/2026-07-13-sanitizer-env-limitations.md`。
 
 ## 文档
 

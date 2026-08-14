@@ -15,6 +15,7 @@
 
 ### 变更
 
+- **CI 新增 ASan+UBSan 门禁**：`sanitizer` job 与 build-and-test 并行，用 `clang-asan` preset 构建并跑全部测试；GTest 以 `--build=gtest*` 强制与项目同工具链从源码构建，避免预编译包混链误报；LeakSanitizer 因 ptrace 环境限制保持禁用（发布机检查项）。
 - **文档：修正 `verify` 语义**：README/ARCHITECTURE 不再声称“不解压即可完整校验”；明确
   `verify` 完整解码并校验但不写 FASTQ，成本与 decompress 同量级；XXH64 为完整性检测而非密码学认证。
 - **分帧核算从 capacity 口径改为 size 口径**：`FrameAccumulator::retainedBytes` 改用字符串 size 而非 capacity——libc++ `getline` 的字符串 capacity 取决于行相对 streambuf 缓冲相位的位置（跨界行 capacity 更大），capacity 口径使帧边界依赖于流的缓冲相位，跨路径（顺序 vs 并行）分帧不可复现。size 口径下分帧是纯内容函数，`--parse-workers 0` 与 `--parse-workers 1` 归档逐字节一致。保守性不变：内存预检 `estimateCompressionPeak` 仍按 capacity 核算；线上格式不变、旧归档完全可读。新归档与旧二进制不再逐字节一致（分帧规则变化，非格式变化）。→ 详见 [docs/postmortems/2026-07-28-getline-capacity-framing.md](docs/postmortems/2026-07-28-getline-capacity-framing.md)
