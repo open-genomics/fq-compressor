@@ -99,7 +99,10 @@ jobs:
 
       - name: Test (clang-asan)
         env:
-          # LeakSanitizer 在进程退出时需要 ptrace，部分受限环境不可用；泄漏检测
-          # 保留为发布机检查项（postmortem 2026-07-13），此处 ASan/UBSan 仍启用
-          ASAN_OPTIONS: detect_leaks=0
+          # 1) LeakSanitizer 在进程退出时需要 ptrace，部分受限环境不可用；泄漏检测
+          #    保留为发布机检查项（postmortem 2026-07-13）。
+          # 2) alloc_dealloc_mismatch 关闭：异常对象在项目代码（ASan 插桩）中经
+          #    operator new 分配，由未插桩的系统 libc++18 用 free 释放，触发
+          #    系统性误报（本地 libc++19 不触发）；其余 ASan/UBSan 检查保持启用。
+          ASAN_OPTIONS: detect_leaks=0:alloc_dealloc_mismatch=0
         run: ./scripts/test.sh clang-asan

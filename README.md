@@ -103,7 +103,7 @@ C++23（GCC 14+ / Clang 18+）· CMake 3.28+ + Ninja · Conan 2.x · Zstd · xxH
 
 CI（`.github/workflows/ci.yml`，ubuntu-24.04 + clang-18）覆盖：clang-debug 构建、全部测试（单元 + 集成 + 端到端）、clang-format 检查，以及 `clang-asan`（ASan+UBSan）构建与测试门禁。校验失败即报错，exit code 约定见 [AGENTS.md](AGENTS.md)。
 
-本地另有 `clang-release` / `clang-asan` / `clang-tsan` preset。注意两点环境限制：LeakSanitizer 在部分受限环境不可用，CI 与本地均以 `ASAN_OPTIONS=detect_leaks=0` 运行（泄漏检测保留为发布机检查项）；ASan preset 的 GTest 需与项目同工具链从源码构建（CI 用 `--build=gtest*`），避免预编译包混链在 gtest 静态注册阶段触发 libc++ 容器注解误报（heap-buffer-overflow）。详见 `docs/postmortems/2026-07-13-sanitizer-env-limitations.md`。
+本地另有 `clang-release` / `clang-asan` / `clang-tsan` preset。注意环境限制：LeakSanitizer 在部分受限环境不可用，CI 与本地均以 `ASAN_OPTIONS=detect_leaks=0` 运行（泄漏检测保留为发布机检查项）；ASan 下系统 libc++18 未插桩，异常对象释放会触发 alloc-dealloc-mismatch 误报，CI 以 `alloc_dealloc_mismatch=0` 关闭该子检查（其余 ASan/UBSan 检查保持）；ASan preset 的 GTest 需与项目同工具链从源码构建（CI 用 `--build=gtest*`），避免预编译包混链在 gtest 静态注册阶段触发 libc++ 容器注解误报（heap-buffer-overflow）。详见 `docs/postmortems/2026-07-13-sanitizer-env-limitations.md`。
 
 ## 文档
 

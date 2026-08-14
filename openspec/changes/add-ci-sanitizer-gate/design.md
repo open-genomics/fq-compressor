@@ -28,3 +28,17 @@ deterministic. Leak detection stays a release-machine check.
 
 vptr sub-check is already disabled in the `clang-asan` preset
 (`-fno-sanitize=vptr`), so the Clang-21 runtime symbol gap does not affect CI.
+
+## Revision 1: alloc-dealloc-mismatch false positive (2026-08-14)
+
+First CI run of the `sanitizer` job failed with `alloc-dealloc-mismatch
+(operator new vs free)` on three tests that throw exceptions (fastq_parser,
+compressed_stream, v2_cli_smoke). Root cause: exception objects are allocated
+through ASan-instrumented `operator new` in project code and released with
+`free` by the **non-instrumented system libc++18**; local libc++19 releases
+with `operator delete` and does not trigger it. Not a project bug.
+
+Fix: run with `ASAN_OPTIONS=detect_leaks=0:alloc_dealloc_mismatch=0`, keeping
+all other ASan/UBSan checks enabled. `alloc_dealloc_mismatch` is a
+library-ABI mismatch detector; disabling it does not weaken heap/stack/UB
+coverage.
