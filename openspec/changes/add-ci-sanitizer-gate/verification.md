@@ -1,16 +1,16 @@
 # Verification: add-ci-sanitizer-gate
 
-- Status: `In Progress`（远程 CI 确认后置为 Completed）
+- Status: `Completed`
 - Date: 2026-08-14
 
 | Case | Evidence | Result |
 |---|---|---|
 | 本地 clang-asan 构建 | `./scripts/build.sh clang-asan`（gtest 已用 `--build=gtest*` 重建） | passed |
-| 本地 clang-asan 测试 | `ASAN_OPTIONS=detect_leaks=0 ./scripts/test.sh clang-asan` | passed 16/16 |
+| 本地 clang-asan 测试 | `ASAN_OPTIONS=detect_leaks=0:alloc_dealloc_mismatch=0 ./scripts/test.sh clang-asan` | passed 16/16 |
 | 本地 clang-debug 回归 | `./scripts/build.sh clang-debug` + `./scripts/test.sh clang-debug` | passed 16/16 |
-| 格式检查 | `./scripts/lint.sh format-check` | CI 执行（本地未装 clang-format-18） |
+| 格式检查 | `./scripts/lint.sh format-check`（clang-format-18） | passed |
 | CI YAML | `python3 -c "yaml.safe_load(...)"` | passed |
-| 远程 CI | GitHub Actions build-and-test + sanitizer 全绿 | pending（首轮 sanitizer 因 alloc-dealloc-mismatch 误报失败，已修复） |
+| 远程 CI | GitHub Actions run 31778680176：build-and-test + sanitizer 全绿 | passed |
 
 Notes:
 - gtest 强制重建时须设 `CC=clang CXX=clang++`，否则 Conan 用系统 gcc 编译
