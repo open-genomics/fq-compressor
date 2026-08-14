@@ -886,8 +886,7 @@ auto ArchiveReader::open() -> Result<ArchiveMetadata> {
     }
     if (!std::equal(kArchiveMagic.begin(), kArchiveMagic.end(), magicBytes.begin())) {
         return makeError<ArchiveMetadata>(
-            ErrorCode::kFormatError,
-            "unknown FQC magic header (not an fqc-sequential/v2 archive)");
+            ErrorCode::kFormatError, "unknown FQC magic header (not an fqc-sequential/v2 archive)");
     }
 
     std::array<std::uint8_t, kGlobalHeaderSize> header{};

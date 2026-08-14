@@ -65,7 +65,8 @@ struct DecodedArchive {
         if (!frame || !frame->has_value()) {
             break;
         }
-        decoded.records.insert(decoded.records.end(), std::make_move_iterator((*frame)->begin()),
+        decoded.records.insert(decoded.records.end(),
+                               std::make_move_iterator((*frame)->begin()),
                                std::make_move_iterator((*frame)->end()));
     }
     EXPECT_TRUE(reader.finished());
