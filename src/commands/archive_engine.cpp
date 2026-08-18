@@ -39,6 +39,12 @@ namespace {
 
 constexpr std::size_t kEngineMemoryReserveBytes = std::size_t{16} * 1024 * 1024;
 constexpr std::size_t kMinimumMemoryLimitBytes = std::size_t{64} * 1024 * 1024;
+constexpr std::size_t kIlluminaMaxReadLength = 1'000;
+constexpr std::size_t kIlluminaMaxAverageLength = 500;
+constexpr std::initializer_list<std::string_view> kOntHeaderNeedles = {
+    "runid=", " ch=", "channel="};
+constexpr std::initializer_list<std::string_view> kHifiHeaderNeedles = {"/ccs", "hifi"};
+constexpr std::initializer_list<std::string_view> kClrHeaderNeedles = {"pacbio", "subread"};
 
 class OutputTransaction {
 public:
@@ -108,11 +114,13 @@ private:
     bool committed_ = false;
 };
 
+[[nodiscard]] auto asciiLower(char character) -> char {
+    return static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
+}
+
 [[nodiscard]] auto lowerCopy(std::string_view value) -> std::string {
     std::string result(value);
-    std::ranges::transform(result, result.begin(), [](unsigned char character) {
-        return static_cast<char>(std::tolower(character));
-    });
+    std::ranges::transform(result, result.begin(), asciiLower);
     return result;
 }
 
@@ -122,18 +130,26 @@ private:
                                [value](std::string_view needle) { return value.contains(needle); });
 }
 
-/// ENA/SRA/DDBJ archive-generated FASTQ rewrites headers to `@<run>.<spot>`.
-/// Native ONT `runid=` / channel tags are gone; short Illumina runs still hit
-/// the length rule first, so this only fires for long reads.
+/// Archive-generated FASTQ IDs look like `DRR171398.1` / `ERR123.1` / `SRR…`.
 [[nodiscard]] auto looksLikeInsdcRunId(std::string_view id) -> bool {
-    if (id.size() < 4) {
+    if (id.size() < 4 || !std::isdigit(static_cast<unsigned char>(id[3]))) {
         return false;
     }
-    const auto prefix = lowerCopy(id.substr(0, 3));
-    if (prefix != "srr" && prefix != "err" && prefix != "drr") {
+    const char first = asciiLower(id[0]);
+    const char second = asciiLower(id[1]);
+    const char third = asciiLower(id[2]);
+    return (first == 's' || first == 'e' || first == 'd') && second == 'r' && third == 'r';
+}
+
+[[nodiscard]] auto looksLikeClrHeader(std::string_view id, std::string_view header) -> bool {
+    if (containsAny(header, kClrHeaderNeedles)) {
+        return true;
+    }
+    if (id.empty() || id.front() != 'm') {
         return false;
     }
-    return std::isdigit(static_cast<unsigned char>(id[3])) != 0;
+    const auto slashes = static_cast<std::size_t>(std::ranges::count(id, '/'));
+    return slashes >= 2 && !containsAny(header, kHifiHeaderNeedles);
 }
 
 [[nodiscard]] auto validateMemoryLimit(std::size_t memoryLimitBytes) -> VoidResult {
@@ -294,20 +310,25 @@ auto detectProfile(std::span<const ReadRecord> records) -> Result<format::Datase
     std::size_t maxLength = 0;
     for (const auto& record : records) {
         const auto header = lowerCopy(record.id + " " + record.comment);
-        ontHeaders += containsAny(header, {"runid=", " ch=", "channel="}) ? 1U : 0U;
-        insdcRunIds += looksLikeInsdcRunId(record.id) ? 1U : 0U;
-        hifiHeaders += containsAny(header, {"/ccs", "hifi"}) ? 1U : 0U;
-        const auto slashCount = static_cast<std::size_t>(std::ranges::count(record.id, '/'));
-        clrHeaders += (containsAny(header, {"pacbio", "subread"}) ||
-                       (!record.id.empty() && record.id.front() == 'm' && slashCount >= 2 &&
-                        !header.contains("/ccs")))
-            ? 1U
-            : 0U;
+        if (containsAny(header, kOntHeaderNeedles)) {
+            ++ontHeaders;
+        }
+        if (looksLikeInsdcRunId(record.id)) {
+            ++insdcRunIds;
+        }
+        if (containsAny(header, kHifiHeaderNeedles)) {
+            ++hifiHeaders;
+        }
+        if (looksLikeClrHeader(record.id, header)) {
+            ++clrHeaders;
+        }
         totalBases += record.sequence.size();
         maxLength = std::max(maxLength, record.sequence.size());
     }
 
     const auto majority = (records.size() + 1) / 2;
+    // Markers first so `/ccs` beats an SRR accession. Length before INSDC so
+    // short ENA Illumina stays Illumina. Unmarked long reads fail closed.
     if (hifiHeaders >= majority) {
         return format::DatasetProfile::kPacBioHiFi;
     }
@@ -318,7 +339,7 @@ auto detectProfile(std::span<const ReadRecord> records) -> Result<format::Datase
         return format::DatasetProfile::kPacBioClr;
     }
     const auto averageLength = totalBases / records.size();
-    if (maxLength <= 1'000 && averageLength <= 500) {
+    if (maxLength <= kIlluminaMaxReadLength && averageLength <= kIlluminaMaxAverageLength) {
         return format::DatasetProfile::kIllumina;
     }
     if (insdcRunIds >= majority) {

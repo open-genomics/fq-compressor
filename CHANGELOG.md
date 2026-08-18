@@ -9,7 +9,7 @@
 
 ### 变更
 
-- **ENA 转写长读可 auto 识别为 ONT**：`detectProfile` 在 Illumina 长度规则之后，把多数 ID 为 `SRR`/`ERR`/`DRR` + 数字的长读判为 `ont`（档案生成 FASTQ 会丢掉 `runid=`）。短读 ENA 头仍按长度走 Illumina；无 accession 的模糊长读继续拒绝。
+- **ENA 转写长读可 auto 识别为 ONT**：`detectProfile` 在 Illumina 长度规则之后，把多数 ID 为 `SRR`/`ERR`/`DRR` + 数字的长读判为 `ont`（档案生成 FASTQ 会丢掉 `runid=`）。短读 ENA 头仍按长度走 Illumina；无 accession 的模糊长读继续拒绝。单测覆盖 `ERR` 前缀，以及 `/ccs` 优先于 `SRR` accession。
 
 ### 新增
 

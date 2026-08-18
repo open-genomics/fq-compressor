@@ -110,7 +110,7 @@ FQC v2（本仓库，单独列出，**不可与上表直接横比**，见脚注 
 4. **反转案例**：fqzcomp 在 HiSeq WES 上 8.5× 表现正常，但在 NovaSeq WGS 上 7.7× 反输 gzip -6 的 8.6×——质量值已 2-bit 分箱后，order-N 上下文建模无冗余可吃，模型开销反而拖累。另注意 fqzcomp 会把 N 碱基的质量分置 0（轻微有损）【外部实测】。
 5. uBAM/uCRAM 按 read name 排序输出，不保原始顺序；SPRING 可选保留原序【外部实测】。
 6. Petagene 为商业闭源，机制未公开；以其保序模式与吞吐特征推断含重排/专用编码【推断】。
-7. 【本地】FQC 的 2.9588×/2.8403× 出自 64 MiB **随机合成数据**（`tests/e2e/test_performance.sh`，README.md:57-62，docs/postmortems/2026-07-26-stage-d-parallel-encode-no-speedup.md:85），与外部真实 WES/WGS 不是同一数据集，**只表征量级，不可直接横比**。真实生物语料压缩比尚未测量（README.md:86）。
+7. 【本地】FQC 的 2.9588×/2.8403× 出自 64 MiB **随机合成数据**（`tests/e2e/test_performance.sh`，README 性能表，docs/postmortems/2026-07-26-stage-d-parallel-encode-no-speedup.md:85），与外部真实 WES/WGS 不是同一数据集，**只表征量级，不可直接横比**。公开切片实测见 `docs/real-corpus.md`（Illumina WXS 前 200k 条 4.15×，人类 MinION 前 4k 条 1.96×）。
 8. 【本地】吞吐出自 WSL2（Ryzen 7 5800H），同机波动可达 ±20–85%（docs/postmortems/2026-07-26-stage-d-parallel-encode-no-speedup.md:55）。
 
 ## 6. FQC 定位与差距分析

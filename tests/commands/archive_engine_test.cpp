@@ -2,9 +2,11 @@
 
 #include "fqc/io/fastq_parser.h"
 
+#include <cstddef>
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <unistd.h>
@@ -18,6 +20,12 @@ namespace {
 constexpr std::string_view kShortFastq =
     "@short_1 1:N:0:ACGT\nACGTNacgt\n+\n!#IJKLMNO\n"
     "@short_2 2:N:0:TGCA\nTGCARYSWK\n+\nJKLMNOPQR\n";
+
+[[nodiscard]] auto profileOf(std::string_view id, std::string_view comment, std::size_t bases)
+    -> Result<format::DatasetProfile> {
+    return detectProfile(std::vector{ReadRecord{std::string(id), std::string(comment),
+                                                std::string(bases, 'A'), std::string(bases, 'I')}});
+}
 
 class ArchiveEngineTest : public ::testing::Test {
 protected:
@@ -98,49 +106,42 @@ TEST_F(ArchiveEngineTest, InterleavesPairedFilesAndKeepsPairsAtomic) {
               "@pair/1\nACGT\n+\nIIII\n@pair/2\nTGCA\n+\nJJJJ\n");
 }
 
-TEST_F(ArchiveEngineTest, DetectsAllProfilesAndRejectsAmbiguousLongReads) {
-    std::vector<ReadRecord> shortReads = {
-        {"read", "", "ACGT", "IIII"},
-    };
-    auto shortProfile = detectProfile(shortReads);
-    ASSERT_TRUE(shortProfile);
-    EXPECT_EQ(*shortProfile, format::DatasetProfile::kIllumina);
-
-    std::vector<ReadRecord> ontReads = {
-        {"abc", "runid=123 ch=7", std::string(2'000, 'A'), std::string(2'000, 'I')},
-    };
-    ASSERT_EQ(detectProfile(ontReads).value(), format::DatasetProfile::kOnt);
-
-    std::vector<ReadRecord> hifiReads = {
-        {"m64011_220101_010101/42/ccs", "", std::string(2'000, 'A'), std::string(2'000, 'I')},
-    };
-    ASSERT_EQ(detectProfile(hifiReads).value(), format::DatasetProfile::kPacBioHiFi);
-
-    std::vector<ReadRecord> clrReads = {
-        {"m64011_220101_010101/42/0_2000", "", std::string(2'000, 'A'), std::string(2'000, 'I')},
-    };
-    ASSERT_EQ(detectProfile(clrReads).value(), format::DatasetProfile::kPacBioClr);
-
-    std::vector<ReadRecord> ambiguous = {
-        {"unknown", "", std::string(2'000, 'A'), std::string(2'000, 'I')},
-    };
-    auto ambiguousProfile = detectProfile(ambiguous);
-    ASSERT_FALSE(ambiguousProfile);
-    EXPECT_EQ(ambiguousProfile.error().code, ErrorCode::kUsageError);
+TEST_F(ArchiveEngineTest, DetectsShortReadsAsIllumina) {
+    ASSERT_EQ(profileOf("read", "", 4).value(), format::DatasetProfile::kIllumina);
 }
 
-TEST_F(ArchiveEngineTest, DetectsEnaRewrittenLongReadsAsOnt) {
-    std::vector<ReadRecord> enaOnt = {
-        {"DRR171398.1", "1/1", std::string(16'340, 'A'), std::string(16'340, 'I')},
-    };
-    auto ont = detectProfile(enaOnt);
-    ASSERT_TRUE(ont) << ont.error().message;
-    EXPECT_EQ(*ont, format::DatasetProfile::kOnt);
+TEST_F(ArchiveEngineTest, DetectsNativeOntHeader) {
+    ASSERT_EQ(profileOf("abc", "runid=123 ch=7", 2'000).value(), format::DatasetProfile::kOnt);
+}
 
-    std::vector<ReadRecord> enaShort = {
-        {"SRR2962693.1", "1/1", std::string(126, 'A'), std::string(126, 'I')},
-    };
-    ASSERT_EQ(detectProfile(enaShort).value(), format::DatasetProfile::kIllumina);
+TEST_F(ArchiveEngineTest, DetectsPacBioHifiHeader) {
+    ASSERT_EQ(profileOf("m64011_220101_010101/42/ccs", "", 2'000).value(),
+              format::DatasetProfile::kPacBioHiFi);
+}
+
+TEST_F(ArchiveEngineTest, DetectsPacBioClrHeader) {
+    ASSERT_EQ(profileOf("m64011_220101_010101/42/0_2000", "", 2'000).value(),
+              format::DatasetProfile::kPacBioClr);
+}
+
+TEST_F(ArchiveEngineTest, RejectsUnmarkedLongReads) {
+    auto ambiguous = profileOf("unknown", "", 2'000);
+    ASSERT_FALSE(ambiguous);
+    EXPECT_EQ(ambiguous.error().code, ErrorCode::kUsageError);
+}
+
+TEST_F(ArchiveEngineTest, DetectsEnaLongReadAccessionAsOnt) {
+    ASSERT_EQ(profileOf("DRR171398.1", "1/1", 16'340).value(), format::DatasetProfile::kOnt);
+    ASSERT_EQ(profileOf("ERR1234567.1", "1/1", 2'000).value(), format::DatasetProfile::kOnt);
+}
+
+TEST_F(ArchiveEngineTest, KeepsShortEnaAccessionAsIllumina) {
+    ASSERT_EQ(profileOf("SRR2962693.1", "1/1", 126).value(), format::DatasetProfile::kIllumina);
+}
+
+TEST_F(ArchiveEngineTest, PrefersHifiMarkerOverEnaAccession) {
+    ASSERT_EQ(profileOf("SRR2962693.1", "/ccs", 2'000).value(),
+              format::DatasetProfile::kPacBioHiFi);
 }
 
 TEST_F(ArchiveEngineTest, RejectsPairedCountMismatchAndTinyMemoryLimit) {

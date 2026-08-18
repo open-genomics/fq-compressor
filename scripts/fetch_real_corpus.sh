@@ -5,17 +5,20 @@ set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT="${FQC_CORPUS_DIR:-$ROOT/corpus}"
+readonly ILLUMINA_RECORDS=200000
+readonly ONT_RECORDS=4000
 mkdir -p "$OUT"
 
 fetch_head() {
     local url="$1"
     local dest="$2"
-    local lines="$3"
+    local records="$3"
+    local lines=$((records * 4))
     if [[ -s "$dest" ]]; then
         echo "exists: $dest"
         return 0
     fi
-    echo "fetch: $url -> $dest ($lines lines)"
+    echo "fetch: $url -> $dest ($records records)"
     curl -L --fail --retry 3 --retry-delay 2 "$url" | gzip -dc | head -n "$lines" >"$dest"
     local status=${PIPESTATUS[0]}
     if [[ "$status" -ne 0 && "$status" -ne 23 ]]; then
@@ -24,17 +27,17 @@ fetch_head() {
     fi
 }
 
-# Illumina WXS，R1 前 200k 条（800k 行）。约 54 MiB。
+# Illumina WXS R1，约 54 MiB。
 fetch_head \
     "https://ftp.sra.ebi.ac.uk/vol1/fastq/SRR296/003/SRR2962693/SRR2962693_1.fastq.gz" \
     "$OUT/SRR2962693_1.head200k.fastq" \
-    800000
+    "$ILLUMINA_RECORDS" || exit 1
 
-# 人类 MinION，前 4k 条（16k 行）。约 125 MiB。ENA 头无 runid=，靠长读 + DRR accession 识别。
+# 人类 MinION，约 125 MiB。ENA 头无 runid=，靠长读 + DRR accession 识别。
 fetch_head \
     "https://ftp.sra.ebi.ac.uk/vol1/fastq/DRR171/DRR171398/DRR171398_1.fastq.gz" \
     "$OUT/DRR171398_1.head4k.fastq" \
-    16000
+    "$ONT_RECORDS" || exit 1
 
 echo
 wc -l -c "$OUT"/*.fastq

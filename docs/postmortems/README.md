@@ -31,4 +31,3 @@ CHANGELOG 只记"做了什么"，这里记"为什么发生、如何定位、如�
 | 2026-07-26 | 阶段 D 多帧并行编码未提速（Amdahl） | low | closed |
 | 2026-07-28 | getline 容量伪影导致分帧不确定 | high | closed |
 | 2026-08-04 | 并行边界对齐静默丢弃畸形记录 | critical | closed |
-| 2026-08-04 | 并行边界对齐静默丢弃畸形记录 | critical | closed |
