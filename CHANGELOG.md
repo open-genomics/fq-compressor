@@ -2,6 +2,11 @@
 
 ## [未发布]
 
+### 文档
+
+- **路线图关账**：阶段 H 标为完成；README / ARCHITECTURE / 开发历程同步并行解析后的数据流与合成性能。
+- **真实语料验收**：新增 `docs/real-corpus.md` 与 `scripts/fetch_real_corpus.sh`。公开切片上 Illumina WXS 压缩比 4.15×（优于合成 2.96×），人类 MinION 1.96×（劣于合成，质量流近满字母表）；`--quality-level 7` 仍未过门槛；ENA 转写的 ONT 头行无 `runid=`，auto profile 需 `--profile ont`。
+
 ### 新增
 
 - **跨族 magic 识别**：打开归档时先做 8-byte magic 分派；遇到 Rust `fqc-indexed/v2`（`89 46 51 43 0D 0A 1A 0A`）返回明确的 unsupported format family 错误并指向 `open-genomics/fq-compressor-rust`；未知 magic 与截断 magic 分开报错（`verify`/`decompress` 均覆盖，不创建输出）。

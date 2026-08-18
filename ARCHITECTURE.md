@@ -9,11 +9,13 @@ v1 兼容、索引、随机访问、全局 read 重排序、第二套并行引�
 ## 数据流
 
 ```text
-压缩路径（多帧并行编码流水线）：
-  主线程    FASTQ/.gz/stdin -> FastqParser 采样 -> profile 判定 -> 打开输出
-  reader    FastqParser 续读 + 保留字节帧累积器（每帧带递增帧 id）--[有界 MPMC 队列]-->
+压缩路径（未压缩普通文件，阶段 H）：
+  主线程    FASTQ 采样 -> profile 判定 -> 打开输出
+  parser×K  按字节块切分，边界对齐到完整记录，帧标记 (chunkId, localId) --[有界 MPMC 队列]-->
   encoder   N 个 worker 并行：2-bit 打包 + measure + 逻辑校验和 + zstd×3（CPU 密集，乱序完成）--[有界 MPMC 队列]-->
-  writer    reorder buffer 按帧 id 有序提交 -> 帧头拼装 + 写盘（纯 I/O）-> 带校验 FQC v2 帧 -> 文件/stdout
+  writer    ChunkOrderer 按 (chunk, local) 字典序提交 -> 帧头拼装 + 写盘（纯 I/O）
+
+压缩路径（gzip / stdin / 双端）：单 reader 顺序解析 + 同上 encoder/writer；双端 R1/R2 锁步不并行切块。
 
 解压路径（多帧并行解码流水线）：
   reader    ArchiveReader 校验头部 + readRawFrame 读帧（I/O + 内存预检，每帧带递增帧 id）--[有界 MPMC 队列]-->
@@ -83,13 +85,13 @@ RSS 为 25–32 MiB（随机化短读长和长读长 fixture）。
 
 ## 执行架构
 
-压缩路径使用多帧并行编码流水线：reader 线程解析 FASTQ 并累积有界帧（每帧带递增帧 id），
+压缩路径使用多帧并行编码流水线。未压缩普通文件走阶段 H 的数据并行解析：K 个 parser
+各自打开独立 ifstream，按字节块切分并做记录边界对齐，帧以 `(chunkId, localId)` 标记，
+writer 用 `ChunkOrderer` 按字典序提交。gzip / stdin / 双端仍用单 reader 顺序解析。
 N 个 encoder worker 并行编码并压缩（2-bit 打包 + measure + 逻辑校验和 + zstd×3，CPU 密集、
-乱序完成），writer 线程经 reorder buffer 按帧 id 有序提交后拼装帧头并写盘（纯 I/O）。两条有界
-MPMC 队列（深度 4）解耦三段，解析与编码、并行编码压缩与写盘 IO 重叠执行。encoder 状态帧内
-局部，worker 间无需共享可变状态--每个 worker 处理自己的帧，附带一个单调帧 id 供 reorder
-buffer 恢复提交顺序。profile 采样在主线程先于流水线完成，采样读到的记录作为初始帧喂给
-reader。
+乱序完成），writer 拼装帧头并写盘（纯 I/O）。两条有界 MPMC 队列（深度 4）解耦三段。
+encoder 状态帧内局部，worker 间无需共享可变状态。profile 采样在主线程先于流水线完成，
+采样记录作为 worker 0（并行路径）或顺序 reader 的累积器种子。
 
 解压路径（阶段 G 起）是压缩路径的镜像：reader 线程用 `ArchiveReader::readRawFrame` 做纯 I/O
 读帧（帧头 + 载荷 + 内存预检，每帧带递增帧 id），N 个 decoder worker 并行 `decodeRawFrame`
@@ -100,14 +102,13 @@ reader。
 `ArchiveReader::readFrame` 保留为组合 API（readRawFrame + decodeRawFrame + 顺序累积），行为
 不变。
 
-在 8 核 x86_64 WSL2 主机上，64 MiB 随机化数据压缩/解压约 47-67/98-122 MiB/s（illumina/ont）。
-WSL2 状态波动极大（同代码同配置两次跑吞吐可差 20-85%），数字仅供粗略参考。并行化沿瓶颈逐步
-推进：阶段 D 并行了 encoder（收益受 Amdahl 限制，当时瓶颈在 reader 与 writer 两端），阶段 F
-进而把 zstd 从 writer 下沉到 encoder worker——writer 段降为纯 I/O（实测仅占 wall 约 5%），
-且归档与下沉前逐字节一致（zstd 帧间独立 + reorder 保序 + 帧 id 由 writer 计数器派生）。当前
-串行段为 reader（解析）与 writer（写盘）；任何进一步并行都以阶段 E 的分段计时为据，在尚未
-证实某段成为瓶颈的前提下引入 TBB DAG 或线程池，只会把 v2 已经干掉的重复状态、输出排序和
-在途内存风险重新请回来。
+在 8 核 x86_64 WSL2 主机上，阶段 H 后 64 MiB 随机短读压缩约 149 MiB/s（相对顺序解析 +47.7%）；
+长读解析占比小，并行解析收益落在噪声内。WSL2 状态波动极大（同代码同配置两次跑吞吐可差
+20-85%），数字仅供粗略参考。并行化沿瓶颈逐步推进：阶段 D 并行了 encoder，阶段 F 把 zstd
+下沉到 encoder worker（writer 退化为纯 I/O），阶段 H 对未压缩普通文件做数据并行解析。
+gzip/stdin/双端仍走单 reader。任何进一步并行都以阶段 E 的分段计时为据；在尚未证实某段
+成为瓶颈的前提下引入 TBB DAG 或线程池，只会把 v2 已经干掉的重复状态、输出排序和在途
+内存风险重新请回来。真实语料数字见 `docs/real-corpus.md`。
 
 帧边界天然独立，是多帧并行编码的切分点。编解码器状态保持帧内局部或 worker 内局部。在途帧
 上界 = 两条队列深度（各 4）+ N 个 encoder（默认 4）= 12 帧，每帧由编码前内存预检约束，整体

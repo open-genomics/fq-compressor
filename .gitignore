@@ -89,6 +89,9 @@ benchmark-*.csv
 # 本地性能基线（开发参考，不入库）
 perf-baselines/
 
+# 真实语料切片（见 docs/real-corpus.md / scripts/fetch_real_corpus.sh）
+corpus/
+
 # 覆盖率与分析数据
 *.profraw
 *.profdata

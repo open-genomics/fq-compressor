@@ -164,6 +164,8 @@ FQC 的目标函数是 **吞吐 × 内存有界 × 可校验 × 可回退 × 练
 
 **门槛判定：无任何档位通过。** 拟真数据上 L7/L9 的 −3.3%/−4.0% 体积要以 −43%/−53% 吞吐为代价（回退远超 10% 上限）；随机数据上 L3–L9 连体积都变差（zstd 高档位在近随机流上的匹配/块开销反噬）。**默认保持 level 1**，`--quality-level` 仅作 CLI 实验入口。
 
+公开真实切片复测（2026-08，见 `docs/real-corpus.md`）结论不变：Illumina WXS 前 200k 条 L7 体积只少 1.19%、吞吐回退 68%；人类 MinION 前 4k 条 L7 归档反而略大。默认仍不提档。
+
 对本报告的两个修正性注记：
 1. §6.2②"level 1→3 仅补 2–5%"在实测中偏乐观——L3 在两类数据上均未改善（甚至变差）；zstd 档位旋钮对本项目质量流基本无油水，佐证"压缩比差距②熵编码档位"确为小头。
 2. 差距①（质量值上下文建模）的地位再次确认：能让质量流明显瘦身的只有建模派（fqzcomp/MFCompress），而那正是 v1 已删除的路线——在练手定位下，质量流的压缩比天花板就停在 zstd level 1。
@@ -203,4 +205,5 @@ FQC 的目标函数是 **吞吐 × 内存有界 × 可校验 × 可回退 × 练
 - `ARCHITECTURE.md`（帧布局、内存模型、执行架构）
 - `docs/postmortems/2026-07-13-legacy-architecture-debt.md`（v1 ABC/SCM/ReorderMap 删除复盘）
 - `docs/postmortems/2026-07-26-stage-d-parallel-encode-no-speedup.md`（阶段 D 瓶颈与 WSL2 波动）
-- `docs/roadmap.md`（阶段 E–I 开发路线）
+- `docs/roadmap.md`（阶段 E–H 开发路线，课程已收束）
+- `docs/real-corpus.md`（公开真实 FASTQ 切片上的 round-trip 与质量流门槛复测）

@@ -61,14 +61,14 @@ $fqc compress -i R1.fastq.gz -2 R2.fastq.gz -o paired.fqc
 
 ## 性能
 
-环境：AMD Ryzen 7 5800H（WSL2，8C/16T），Clang 21 Release，**64 MiB 内存预算**，随机合成数据，3 次中位数。
+合成数据（阶段 H A/B 同窗口，64 MiB 内存预算，随机 FASTQ ×5 次中位数）：
 
-| 数据 | 输入 | 压缩 | 解压 | 压缩峰值 | 解压峰值 | 压缩比 |
-|---|---:|---:|---:|---:|---:|---:|
-| Illumina-like 150 bp | 65.49 MiB | 53.15 MiB/s | 182.40 MiB/s | 31.4 MiB | 12.1 MiB | 2.95× |
-| ONT-like 20 kbp | 63.97 MiB | 55.66 MiB/s | 215.22 MiB/s | 25.5 MiB | 12.9 MiB | 2.84× |
+| 数据 | 压缩（并行解析） | 相对顺序解析 | 压缩比 |
+|---|---:|---:|---:|
+| Illumina-like 150 bp | 148.84 MiB/s | +47.7% | 2.96× |
+| ONT-like 20 kbp | 与顺序路径持平（−1.3%，噪声内） | — | 2.84× |
 
-WSL2 下 wall-clock 波动较大，同机重跑结果可能低于上表，仅供参考。真实生物语料的压缩比尚未测量。
+WSL2 下 wall-clock 波动较大，同机重跑结果可能低于上表，仅供参考。真实生物语料的 round-trip、压缩比与质量流门槛复测见 [docs/real-corpus.md](docs/real-corpus.md)。
 
 ## 设计
 
@@ -90,7 +90,7 @@ C++23（GCC 14+ / Clang 18+）· CMake 3.28+ + Ninja · Conan 2.x · Zstd · xxH
 * 不支持随机访问、按区间提取 reads。
 * 不支持有损压缩、原始顺序重排。
 * 仅支持 FASTQ 格式。
-* 真实生物语料的压缩比尚未测量，当前数字基于随机合成数据。
+* 合成数据不能代表真实压缩比：短读质量集中时更高，长读质量近满字母表时可以更低。公开切片实测见 [docs/real-corpus.md](docs/real-corpus.md)。
 
 ## 构建
 
@@ -114,6 +114,8 @@ CI（`.github/workflows/ci.yml`，ubuntu-24.04 + clang-18）覆盖：clang-debug
 | 压缩算法与原理 | [ALGORITHM.md](ALGORITHM.md) |
 | 架构与字节布局 | [ARCHITECTURE.md](ARCHITECTURE.md) |
 | 变更记录 | [CHANGELOG.md](CHANGELOG.md) |
+| 并发路线图（A–H 已收束） | [docs/roadmap.md](docs/roadmap.md) |
+| 真实语料验收 | [docs/real-corpus.md](docs/real-corpus.md) |
 
 ## 许可证
 

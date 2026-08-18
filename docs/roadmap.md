@@ -11,15 +11,18 @@ fq-compressor 并发流水线练手路线。定位：业余练手 C++ 并发流�
 
 ## 当前基线
 
-阶段 F 后（commit 3629f6d）：
+阶段 H 后（commit a50c0ce）。并发课程 A–H 已收束。
 
 ```text
-压缩: reader(解析+帧累积) -> [MPMC 深度4] -> encoder×4(2bit打包+measure+校验和+zstd×3)
-      -> [MPMC 深度4] -> writer(ReorderBuffer 按帧id排序 -> 帧头拼装+写盘，纯I/O)
-解压: 纯顺序(ArchiveReader::readFrame + writeFastqRecord 单线程)
+压缩（未压缩普通文件）:
+  parser×K 字节块切分 + 边界对齐 --[MPMC 深度4]-->
+  encoder×4 (2bit打包+measure+校验和+zstd×3) --[MPMC 深度4]-->
+  writer (ChunkOrderer 按 (chunk,local) 保序 -> 帧头拼装+写盘)
+压缩（gzip / stdin / 双端）: 单 reader 顺序解析，encoder/writer 同上
+解压: reader(readRawFrame) --[MPMC]--> decoder×N --[MPMC]--> writer(reorder + 滚动校验和 + RecordSink)
 ```
 
-`jthread`+`stop_token` 协作取消；MPMC 为 mutex+CV 有界环形缓冲（带 relaxed 计数器，阶段E）；在途帧上界 12。当前串行段：reader(解析，wall ~33%) 与 writer(写盘，~5%)——zstd 已于阶段 F 下沉 worker 池。WSL2 吞吐波动 ±20-85%，一切性能结论以阶段 E 的 A/B 同窗口平台为据。
+`jthread`+`stop_token` 协作取消；MPMC 为 mutex+CV 有界环形缓冲（带 relaxed 计数器，阶段 E）。未压缩路径在途帧由队列深度与 worker 数上界约束。WSL2 吞吐波动 ±20-85%，一切性能结论以阶段 E 的 A/B 同窗口平台为据。真实语料验收见 `docs/real-corpus.md`。
 
 ## 阶段
 
@@ -105,13 +108,13 @@ fq-compressor 并发流水线练手路线。定位：业余练手 C++ 并发流�
 
 ### H. 并行解析（限未压缩普通文件）★★★★
 
-- 状态：未开始
+- 状态：完成（commit a50c0ce）
 - 动机：F 之后 reader（单线程解析+帧累积）是压缩路径唯一串行瓶颈（E 数据确认）。
-- 练手点：**数据并行**（区别于 D 的任务并行）——字节块切分 + 记录边界对齐协议 + 有序重组（复用 frame id/reorder）；条件启用策略（输入类型分派）。
-- 做法：输入为未压缩普通文件时启用——fstat 得大小 → 等分 K 块 → 每 worker 从块起点扫描定位下一条完整记录（4 行结构验证：seq 长度==qual 长度、'+' 行）→ 解析累积成帧 → 帧 id 按块序分配 → reorder 保序。.gz/stdin/双端输入走现有单 reader 路径（范围裁剪：双端 R1/R2 锁步在并行下复杂度爆炸，不做）。profile 采样保持在主线程，并行解析从采样终点字节偏移接续。
-- 验证：同输入归档与单 reader 版逐字节一致（块边界对齐协议的强检验）；含 '@' 出现在质量行的对抗 fixture（构造质量行恰好以 `@` 起始的记录）；tsan；E 平台量吞吐。
-- 陷阱：①'@' 歧义——不能找行首 '@' 就当记录起点，必须 4 行结构回验，失败续扫；②采样终点偏移与块切分的衔接；③退化路径覆盖测试（gz/stdin/paired 全部走旧路径且行为不变）。
-- 范围纪律：gzip 流式输入无法随机切块（`GzipStreamBuf` 纯 inflate 流）。**inflate/parse 分离设计（gz 下 inflate 串行、parse 扇出）明确不做**——除非 E 的分段计时证明 gz 路径 parse 占比 > inflate 占比，否则属投机优化。benchmark 脚本恰生成未压缩文件，H 的收益在平台上可直接量化，不构成"只为 benchmark 优化"。
+- 练手点：**数据并行**（区别于 D 的任务并行）——字节块切分 + 记录边界对齐协议 + 有序重组（`ChunkOrderer` 是 `ReorderBuffer` 的两级推广）；条件启用策略（输入类型分派）。
+- 做法：输入为未压缩普通文件时启用——fstat 得大小 → 等分 K 块 → 每 worker 从块起点扫描定位下一条完整记录（4 行结构验证：seq 长度==qual 长度、'+' 行）→ 解析累积成帧 → 帧按 `(chunkId, localId)` 标记 → writer 端按字典序重组。.gz/stdin/双端输入走现有单 reader 路径（范围裁剪：双端 R1/R2 锁步在并行下复杂度爆炸，不做）。profile 采样保持在主线程，并行解析从采样终点字节偏移接续。分帧改为 size 口径，使 `--parse-workers 0` 与 `1` 归档逐字节一致。
+- 验证（实测）：含 '@' 出现在质量行的对抗 fixture；`--parse-workers 0` vs `1` 归档逐字节一致；退化路径（gz/stdin/paired）走顺序机；A/B 同窗口 64 MiB random ×5：illumina 压缩 **+47.7%**（100.75 → 148.84 MiB/s，spread 不重叠），ont −1.3%（长读解析占比小，噪声内）；压缩比 2.9588 → 2.9572（块尾关帧切分开销）。对齐协议曾静默丢弃非首块畸形记录，已修（见 `docs/postmortems/2026-08-04-parallel-alignment-silent-skip.md`）。
+- 陷阱：①'@' 歧义——不能找行首 '@' 就当记录起点，必须 4 行结构回验，失败续扫 ✓；②采样终点偏移与块切分的衔接 ✓；③退化路径覆盖测试（gz/stdin/paired 全部走旧路径且行为不变）✓。
+- 范围纪律：gzip 流式输入无法随机切块（`GzipStreamBuf` 纯 inflate 流）。**inflate/parse 分离设计（gz 下 inflate 串行、parse 扇出）明确不做**——除非分段计时证明 gz 路径 parse 占比 > inflate 占比，否则属投机优化。
 
 ## 贯穿：量化与可观测
 
@@ -121,7 +124,9 @@ fq-compressor 并发流水线练手路线。定位：业余练手 C++ 并发流�
 
 ## 优先级
 
-A -> B -> C -> D（已完成，同步底座与多级流水线）-> E -> F -> I -> G -> H。
+A -> B -> C -> D（已完成，同步底座与多级流水线）-> E -> F -> I -> G -> H（已完成）。
+
+课程收束后不再顺延新的流水线阶段。后续只做关账与真实语料验收，见 `docs/real-corpus.md`；新的并发课题另起一章，不伪装成阶段 J。
 
 - E 是 F/G/H/I 的验证底座（WSL2 波动下无测量即盲调），必须最先。
 - F 验证成本最低（归档逐字节一致门禁）、直击已确认瓶颈；I 依赖 F 落定后的 zstd 调用点。
@@ -152,4 +157,4 @@ A -> B -> C -> D（已完成，同步底座与多级流水线）-> E -> F -> I -
 | F | 完成 | 3629f6d |
 | I（番外） | 完成 | 87562df |
 | G | 完成 | 6fae4a5 |
-| H | 未开始 | — |
+| H | 完成 | a50c0ce |

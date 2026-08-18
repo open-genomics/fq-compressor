@@ -2,7 +2,7 @@
 
 ## Metadata
 
-- Status: `Applying`
+- Status: `Completed`
 - Repository: `open-genomics/fq-compressor`
 - Audit base: `1361d4e8628a210d8fbfd415a761e67a625fd6be`
 - Capability: `archive-format`

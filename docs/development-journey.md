@@ -1,8 +1,8 @@
 # fq-compressor 并发流水线开发历程
 
 业余练手项目，目标：练手 C++ 并发流水线编程，追求轻灵巧、易维护，不引重框架。
-本文串起从架构修复到阶段 D 的开发脉络，详细阶段计划见 `docs/roadmap.md`，问题复盘见
-`docs/postmortems/`。
+本文串起从架构修复到阶段 H 收束的开发脉络，详细阶段计划见 `docs/roadmap.md`，问题复盘见
+`docs/postmortems/`，真实语料验收见 `docs/real-corpus.md`。
 
 ## 定位与约束
 
@@ -19,7 +19,7 @@ compressed_stream 多格式过度承诺、并发同步缺注释、采样/读取�
 修复后确立基线：`reader`(解析+帧累积) -> SPSC(深度4) -> `writer`(编码+zstd+xxh64+写盘)，
 `yield` 轮询 + 裸 `std::thread` + `close`/`abort` 双 bool shutdown。SPSC 已修过丢尾帧竞态。
 
-## 路线图 A -> B -> C -> D
+## 路线图 A -> H
 
 | 阶段 | 知识点 | commit |
 |---|---|---|
@@ -27,6 +27,11 @@ compressed_stream 多格式过度承诺、并发同步缺注释、采样/读取�
 | B | jthread + stop_token 协作式取消 | bafcd79 |
 | C | 3-stage 流水线，encode 与 zstd/IO 分离 | 965c084 |
 | D | 多帧并行编码 + reorder buffer | abca33e |
+| E | relaxed 计数器 + 分段计时 + A/B benchmark | 8af51ed |
+| F | zstd 下沉到 encoder worker | 3629f6d |
+| I | 质量流 per-stream zstd level（未过门槛） | 87562df |
+| G | 解压流水线 + RecordSink | 6fae4a5 |
+| H | 未压缩文件并行解析 + ChunkOrderer | a50c0ce |
 
 ### A：阻塞同步（CV + mutex）
 
@@ -58,15 +63,24 @@ reorder 恢复顺序，保证 archive 的单调帧 ID 契约（磁盘帧 ID = wr
 解码侧校验递增）。`encoderError` 用 mutex 保护（N encoder 竞争）；join 顺序
 `reader -> encoders -> close queue2 -> compressor`。
 
+### E–H：测量、下沉、镜像、数据并行
+
+D 之后按测量推进，不再猜瓶颈：
+
+- **E** 补上 relaxed 队列计数器、分段计时和 A/B 同窗口脚本，把 WSL2 噪声量化成约 ±5% 的可分辨阈值。
+- **F** 把 zstd 从 writer 迁入 encoder worker，writer 退化为纯 I/O；归档与下沉前逐字节一致。
+- **I** 质量流单独提档，拟真与随机质量上都未过「体积 ≥3% 且吞吐回退 ≤10%」门槛，默认保持 level 1。
+- **G** 解压做成压缩的镜像三段流水线；`verify` 换空 `RecordSink` 复用同一条路径。
+- **H** 对未压缩普通文件做字节块并行解析。短读压缩 +47.7%；长读解析占比小，收益落在噪声内。对齐协议曾静默丢弃非首块畸形记录，已按 critical 复盘修好。
+
 ## 性能结论
 
 N=4 并行编码**未带来近线性提升**。诊断（详见 `docs/postmortems/2026-07-26-stage-d-parallel-encode-no-speedup.md`）：
 
 - 表层：WSL2 吞吐波动 20-85%（同代码同配置两次跑差一倍），单次数字不可信。
-- 深层：Amdahl--encoder 非当前瓶颈。reader（单线程解析）与 compressor（单线程 zstd+IO）才是，
-  encoder 占比小，N 路并行收益有限。D 揭示新瓶颈在单线程两端。
+- 深层：Amdahl——当时 encoder 非瓶颈。reader（单线程解析）与 compressor（单线程 zstd+IO）才是。
 
-压缩比与 C 完全一致（illumina 2.9588 / ont 2.8403），正确性无损。
+后续阶段按这个诊断收口：F 拿掉 writer 侧 zstd，H 并行化未压缩解析。短读路径的收益能从 A/B 同窗口里分开；长读和 gzip 不在 H 的范围内。合成数据压缩比在 H 后仍约 2.96× / 2.84×（illumina / ont）；真实语料见 `docs/real-corpus.md`。
 
 ## 验证方法
 
@@ -84,3 +98,4 @@ N=4 并行编码**未带来近线性提升**。诊断（详见 `docs/postmortems
 3. WSL2 不适合精细性能归因，吞吐波动淹没代码差异。
 4. 抽象克制：有第三个重复模式再抽泛型，别预先造框架。
 5. 不稳定环境靠多证据交叉判无回归，不靠单次性能数字。
+6. 课程有终点：A–H 收束后不再为了练而叠阶段；下一步是真实语料验收，而不是阶段 J。
