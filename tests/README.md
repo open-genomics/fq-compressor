@@ -12,7 +12,7 @@ This directory contains focused unit and end-to-end tests for FQC v2.
 
 ## Directory structure
 
-- `commands/` — Bounded v2 engine tests
+- `commands/` — Archive engine and profile-detection tests
 - `common/` — Structured error tests
 - `e2e/` — End-to-end CLI tests (shell scripts)
 - `format/` — FQC v2 wire-format, integrity, and memory-bound tests

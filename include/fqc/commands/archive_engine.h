@@ -1,18 +1,16 @@
 // =============================================================================
-// fq-compressor - V2 Sequential Archive Engine
+// fq-compressor - Archive Engine
 // =============================================================================
 
 #pragma once
 
 #include "fqc/common/error.h"
-#include "fqc/common/types.h"
 #include "fqc/format/archive.h"
 
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <optional>
-#include <span>
 
 namespace fqc::commands {
 
@@ -28,8 +26,8 @@ struct CompressionRequest {
     std::size_t memoryLimitBytes = kDefaultMemoryLimitBytes;
     std::size_t targetFrameBytes = format::kDefaultTargetFrameBytes;
     int qualityZstdLevel = 1;
-    /// Parser workers for stage-H parallel parsing; 0 forces the sequential
-    /// reader. Parallel parsing only engages on uncompressed regular files
+    /// Parser workers for parallel parsing; 0 forces the sequential reader.
+    /// Parallel parsing only engages on uncompressed regular files
     /// (gzip/stdin/paired always use the sequential path regardless).
     std::size_t parseWorkers = 4;
     bool forceOverwrite = false;
@@ -55,12 +53,6 @@ struct OperationStats {
     std::uint64_t inputBytes = 0;
     std::uint64_t outputBytes = 0;
 };
-
-/// Infer a dataset profile from sampled records. Explicit header markers win;
-/// otherwise short reads are Illumina and ENA/SRA/DDBJ run accessions on long
-/// reads are ONT. Unmarked long reads fail closed.
-[[nodiscard]] auto detectProfile(std::span<const ReadRecord> records)
-    -> Result<format::DatasetProfile>;
 
 class ArchiveEngine {
 public:

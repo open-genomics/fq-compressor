@@ -1,5 +1,5 @@
 // =============================================================================
-// fq-compressor - Parallel-Parse Compression Pipeline (Stage H)
+// fq-compressor - Parallel-Parse Compression Pipeline
 // =============================================================================
 
 #include "fqc/pipeline/parallel_parse_pipeline.h"
@@ -10,9 +10,9 @@
 #include "fqc/pipeline/chunk_orderer.h"
 #include "fqc/pipeline/frame_accumulator.h"
 #include "fqc/pipeline/mpmc_queue.h"
+#include "fqc/pipeline/timing.h"
 
 #include <atomic>
-#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <fstream>
@@ -31,13 +31,6 @@ namespace fqc::pipeline {
 
 namespace {
 
-using Clock = std::chrono::steady_clock;
-
-[[nodiscard]] auto nanosSince(Clock::time_point start) -> std::uint64_t {
-    return static_cast<std::uint64_t>(
-        std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - start).count());
-}
-
 /// One queue1 item: either a parsed frame or a chunk-completion marker
 /// (`chunkEnd`, with `local` = the chunk's total frame count). The writer's
 /// ChunkOrderer needs a marker from EVERY chunk, including zero-frame ones.
@@ -55,29 +48,22 @@ struct OrderedItem {
     std::unique_ptr<format::CompressedFrame> frame;
 };
 
-void trimRight(std::string& str) {
-    while (!str.empty() && str.back() == '\r') {
-        str.pop_back();
-    }
-}
-
 /// Reads one raw line, advancing the absolute `offset` past the delimiter.
 /// Trims '\r' like the parser does. Returns false at EOF.
-[[nodiscard]] auto readRawLine(std::istream& input,
-                               std::string& line,
-                               std::uint64_t& offset) -> bool {
+[[nodiscard]] auto readRawLine(std::istream& input, std::string& line, std::uint64_t& offset)
+    -> bool {
     if (!std::getline(input, line)) {
         return false;
     }
     offset += line.size() + (input.eof() ? 0 : 1);
-    trimRight(line);
+    io::trimTrailingCr(line);
     return true;
 }
 
 }  // namespace
 
-auto findFirstRecordStart(std::istream& input,
-                          std::uint64_t baseOffset) -> std::optional<std::uint64_t> {
+auto findFirstRecordStart(std::istream& input, std::uint64_t baseOffset)
+    -> std::optional<std::uint64_t> {
     std::string l0;
     std::string l1;
     std::string l2;
@@ -96,7 +82,7 @@ auto findFirstRecordStart(std::istream& input,
         // encodeFrame's content validation: rejecting a candidate on content
         // here would silently skip a record that the sequential path parses
         // and then rejects loudly. A '@' quality line still fails because a
-        // well-formed sequence line never starts with '+' (stage H trap 1).
+        // well-formed sequence line never starts with '+'.
         const std::uint64_t afterL0 = offset;
         const bool haveL1 = readRawLine(input, l1, offset);
         const bool have4 =
@@ -170,7 +156,7 @@ auto ParallelParsePipeline::run(std::span<const ReadRecord> initialRecords,
         }
     };
 
-    // Stage 1: K parser workers, one per byte chunk of [sampleEnd, fileSize).
+    // K parser workers, one per byte chunk of [sampleEnd, fileSize).
     // Worker 0 additionally seeds its accumulator with the profile sample, so
     // framing is continuous across the sample boundary (and identical to the
     // sequential pipeline when K == 1). Every worker always emits exactly one
@@ -302,8 +288,7 @@ auto ParallelParsePipeline::run(std::span<const ReadRecord> initialRecords,
         parsers.emplace_back(parseWorker, i);
     }
 
-    // Stage 2: N encoder workers (identical to CompressPipeline, plus marker
-    // pass-through). Frames: encode + compress. Markers: forward untouched.
+    // N encoder workers (same as CompressPipeline, plus marker pass-through).
     auto encoderLoop = [&] {
         std::uint64_t popNs = 0;
         std::uint64_t encodeNs = 0;
@@ -373,10 +358,7 @@ auto ParallelParsePipeline::run(std::span<const ReadRecord> initialRecords,
         encoders.emplace_back(encoderLoop);
     }
 
-    // Stage 3: pop ordered items, drain in (chunk, local) lexicographic order
-    // via ChunkOrderer, write frames. On-disk frame id comes from the
-    // writer's own counter, so lexicographic submission preserves the
-    // archive's monotonic-frame-id invariant.
+    // Writer: drain in (chunk, local) lexicographic order via ChunkOrderer.
     std::jthread writerThread([&] {
         std::uint64_t popNs = 0;
         std::uint64_t writeNs = 0;

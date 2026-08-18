@@ -23,11 +23,16 @@
 ## 架构
 
 ```
-FASTQ 输入 → FastqParser → [SPSC 队列] → ArchiveWriter（编码 + zstd + xxh64）→ 输出
+压缩（未压缩普通文件）：
+  parser×K 字节块切分 + 边界对齐 --[MPMC]--> encoder×N (2-bit + zstd×3) --[MPMC]-->
+  writer (ChunkOrderer 保序 → 帧头 + 写盘)
+
+压缩（gzip / stdin / 双端）：单 reader 顺序解析，encoder/writer 同上
+解压：reader(readRawFrame) --[MPMC]--> decoder×N --[MPMC]--> writer(reorder + 滚动校验和)
 ```
 
 核心模块：
-- `include/fqc/pipeline/` — SPSC 队列 + 流水线编排（核心学习点）
+- `include/fqc/pipeline/` — MPMC 队列、reorder、压缩/解压/并行解析流水线（核心学习点）
 - `src/format/archive.cpp` — 二进制格式：varint、2-bit DNA 打包、zstd 帧、XXH64
 - `src/io/` — FASTQ 解析、gzip 透明输入
 - `src/commands/` — CLI 编排（compress/decompress/verify）

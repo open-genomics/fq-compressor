@@ -9,15 +9,10 @@
 #include <sstream>
 #include <stdexcept>
 #include <streambuf>
-#include <type_traits>
 
 #include <gtest/gtest.h>
 
 namespace fqc::io::test {
-
-TEST(FastqParserTest, FastqRecordUsesSharedReadRecordType) {
-    EXPECT_TRUE((std::is_same_v<FastqRecord, ReadRecord>));
-}
 
 TEST(FastqParserTest, ParsesValidRecord) {
     std::istringstream input("@read1 comment\nACGT\n+\nIIII\n");

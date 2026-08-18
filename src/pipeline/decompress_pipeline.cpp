@@ -34,7 +34,7 @@ struct InputFrame {
 
 /// A decoded frame queued from a decoder worker to the writer. unique_ptr so
 /// the queue moves only the pointer -- the records vector of a large frame is
-/// the single biggest allocation in the pipeline (stage G trap list).
+/// the single biggest allocation in the pipeline.
 struct OrderedFrame {
     std::uint64_t frameId;
     std::unique_ptr<format::DecodedFrame> frame;
@@ -50,10 +50,7 @@ DecompressPipeline::DecompressPipeline(std::size_t maxFrameBytes,
       parallelism_(parallelism == 0 ? 1 : parallelism) {}
 
 auto DecompressPipeline::run(std::istream& input, RecordSink sink) -> Result<DecompressStats> {
-    // Stage 1 -> 2: raw frames read off the stream (I/O + prechecks), each
-    // tagged with its on-disk order for the reorder buffer.
     MpmcQueue<InputFrame, kDefaultQueueDepth> queue1;
-    // Stage 2 -> 3: decoded frames, submitted to the writer out of order.
     MpmcQueue<OrderedFrame, kDefaultQueueDepth> queue2;
     std::optional<Error> readerError;
     std::optional<Error> decoderError;
@@ -75,10 +72,9 @@ auto DecompressPipeline::run(std::istream& input, RecordSink sink) -> Result<Dec
     std::stop_source stopSource;
     std::stop_token stopToken = stopSource.get_token();
 
-    // Stage 1: open + readRawFrame loop. No CPU-heavy work here: zstd,
-    // checksum and record decoding all live in the decoder workers. The
-    // reader's own stats track frames-read/encodedBytes; records/bases and
-    // the rolling checksum accumulate on the writer side instead.
+    // Reader: open + readRawFrame. zstd, checksum, and record decode run on
+    // decoder workers. records/bases and the rolling checksum accumulate on
+    // the writer side.
     std::jthread reader([&] {
         format::ArchiveReader archiveReader(input, maxFrameBytes_, memoryLimitBytes_);
         auto opened = archiveReader.open();
@@ -118,9 +114,8 @@ auto DecompressPipeline::run(std::istream& input, RecordSink sink) -> Result<Dec
         queue1.close();
     });
 
-    // Stage 2: N decoder workers compete for raw frames off queue1 and decode
-    // them (zstd + logical checksum + record decode -- pure computation).
-    // Workers do not close queue2; the main thread closes it after join.
+    // N decoder workers: decodeRawFrame is pure computation. Workers do not
+    // close queue2; the main thread closes it after join.
     auto decoderLoop = [&] {
         while (!stopToken.stop_requested()) {
             auto in = queue1.pop(stopToken);
@@ -152,10 +147,9 @@ auto DecompressPipeline::run(std::istream& input, RecordSink sink) -> Result<Dec
         decoders.emplace_back(decoderLoop);
     }
 
-    // Stage 3: pop decoded frames, reorder by frameId, then per ordered
-    // frame: accumulate stats + rolling global checksum (order-dependent --
-    // MUST stay on this single ordered thread, stage G trap 1), then invoke
-    // the sink. A sink failure cancels the whole pipeline.
+    // Writer: reorder by frameId, then accumulate stats + rolling global
+    // checksum (order-dependent -- must stay on this thread) and invoke the
+    // sink. A sink failure cancels the pipeline.
     std::jthread writer([&] {
         ReorderBuffer<std::unique_ptr<format::DecodedFrame>> reorder;
         while (!stopToken.stop_requested()) {

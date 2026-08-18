@@ -1,5 +1,5 @@
 // =============================================================================
-// fq-compressor - Parallel-Parse Compression Pipeline (Stage H)
+// fq-compressor - Parallel-Parse Compression Pipeline
 // =============================================================================
 
 #pragma once
@@ -28,15 +28,15 @@ namespace fqc::pipeline {
 /// sequential path parses and rejects loudly. A line starting with '@' is
 /// NOT sufficient on its own -- quality lines may legitimately start with
 /// '@' (Phred+33, Q31), so failed candidates rewind one line and scanning
-/// continues (stage H trap 1). A candidate truncated by EOF mid-body is
+/// continues. A candidate truncated by EOF mid-body is
 /// still returned, so the owning worker's parser raises the same error the
 /// sequential path would. Returns `std::nullopt` if no record starts before
 /// EOF.
-[[nodiscard]] auto findFirstRecordStart(std::istream& input,
-                                        std::uint64_t baseOffset) -> std::optional<std::uint64_t>;
+[[nodiscard]] auto findFirstRecordStart(std::istream& input, std::uint64_t baseOffset)
+    -> std::optional<std::uint64_t>;
 
-/// Compression pipeline whose *frame production* is data-parallel (stage H),
-/// in contrast to CompressPipeline's task-parallel reader:
+/// Compression pipeline whose frame production is data-parallel, in contrast
+/// to CompressPipeline's task-parallel reader:
 ///
 /// ```text
 /// parser x K  K workers, one per byte chunk of [sampleEnd, fileSize). Each

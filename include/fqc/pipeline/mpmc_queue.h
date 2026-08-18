@@ -28,8 +28,7 @@ struct QueueStats {
 /// Multi-producer multi-consumer bounded ring buffer.
 ///
 /// A mutex plus two `condition_variable_any` serializes all producers and
-/// consumers, so the queue is safe for concurrent fan-in and fan-out (stage D
-/// fans N encoders onto one queue and merges them onto another).
+/// consumers, so the queue is safe for concurrent fan-in and fan-out.
 ///
 /// `close()` is normal end-of-production: every blocked consumer wakes
 /// (`notify_all`, since there may be several), drains the remaining items,
@@ -120,7 +119,7 @@ public:
     /// individually atomic) approximation. Updates are `memory_order_relaxed`:
     /// every bump is performed by the lock holder, and the stats are never
     /// used for synchronization -- the one legitimate relaxed-atomics use
-    /// case, statistics that must not fence the hot path (see roadmap stage E).
+    /// case, statistics that must not fence the hot path.
     [[nodiscard]] auto stats() const -> QueueStats {
         return {
             .pushes = counters_.pushes.load(std::memory_order_relaxed),

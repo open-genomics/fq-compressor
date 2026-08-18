@@ -131,15 +131,12 @@ private:
 /// @brief Input stream with transparent decompression.
 class CompressedInputStream : public std::istream {
 public:
-    /// @brief Construct from a file path.
-    /// @param path File path.
-    /// @throws IOError if file cannot be opened.
+    /// Construct from a file path. Throws `std::runtime_error` if the file
+    /// cannot be opened; prefer `openInputFile` for Result-based errors.
     explicit CompressedInputStream(const std::filesystem::path& path);
 
-    /// @brief Construct from an existing stream.
-    /// @param source Source stream.
-    /// @param format Compression format (must be known; detect beforehand via
-    ///                detectCompressionFormat()).
+    /// Construct from an existing stream. `format` must be known; detect
+    /// beforehand via `detectCompressionFormat()`.
     explicit CompressedInputStream(std::unique_ptr<std::istream> source, CompressionFormat format);
 
     /// @brief Destructor.

@@ -52,9 +52,9 @@ struct ArchiveOptions {
     std::size_t maxFrameBytes = kDefaultMaxFrameBytes;
     std::size_t memoryLimitBytes = kDefaultMemoryLimitBytes;
     /// zstd level for the quality stream only; ID/sequence streams stay at
-    /// level 1 (stage I: quality is the ratio bottleneck, the other streams
-    /// gain little from higher levels). zstd frames are self-describing, so
-    /// the decoder needs no change and the on-disk codec IDs are untouched.
+    /// level 1 (quality is the ratio bottleneck; the other streams gain
+    /// little from higher levels). zstd frames are self-describing, so the
+    /// decoder needs no change and the on-disk codec IDs are untouched.
     int qualityZstdLevel = 1;
 };
 
@@ -117,7 +117,7 @@ struct CompressedFrame {
 ///
 /// The output is deterministic for a fixed zstd build, level and input: same
 /// bytes in, same bytes out. The pipeline relies on this for its
-/// byte-identical archive gate (see roadmap stage F).
+/// byte-identical archive gate.
 [[nodiscard]] auto compressFrame(std::unique_ptr<EncodedFrame> frame,
                                  int qualityZstdLevel) -> Result<std::unique_ptr<CompressedFrame>>;
 
@@ -140,7 +140,7 @@ struct RawFrame {
 /// A fully decoded and verified frame. `checksum` is the per-frame logical
 /// checksum (verified against the header during decoding); the *rolling*
 /// global checksum is order-dependent and must be accumulated by the caller
-/// in frame order (see roadmap stage G).
+/// in frame order.
 struct DecodedFrame {
     std::vector<ReadRecord> records;
     std::uint32_t recordCount = 0;
@@ -169,8 +169,8 @@ struct ArchiveFooter {
 /// One step of the archive's rolling global checksum. Order-dependent: apply
 /// strictly in ascending frame-id order (the sequential reader does this
 /// internally; a pipeline must do it on its ordered end).
-[[nodiscard]] auto advanceGlobalChecksum(std::uint64_t current,
-                                         std::uint64_t frameChecksum) -> std::uint64_t;
+[[nodiscard]] auto advanceGlobalChecksum(std::uint64_t current, std::uint64_t frameChecksum)
+    -> std::uint64_t;
 
 class ArchiveWriter {
 public:

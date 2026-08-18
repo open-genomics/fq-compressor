@@ -37,7 +37,7 @@ constexpr std::uint8_t kQualityCodecZstd = 1;
 constexpr std::size_t kCodecMemoryReserve = std::size_t{16} * 1024 * 1024;
 // ID/sequence streams always compress at this level (throughput-oriented; the
 // ratio/level curve flattens early on these streams). Only the quality stream
-// gets a configurable level (ArchiveOptions::qualityZstdLevel, stage I).
+// gets a configurable level (ArchiveOptions::qualityZstdLevel).
 constexpr int kStreamZstdLevel = 1;
 // Accepted range for the configurable quality level (matches the CLI check).
 constexpr int kMinZstdLevel = 1;
@@ -101,8 +101,8 @@ void appendString(Bytes& output, std::string_view value) {
     return static_cast<std::uint32_t>(value);
 }
 
-[[nodiscard]] auto writeBytes(std::ostream& output,
-                              std::span<const std::uint8_t> bytes) -> VoidResult {
+[[nodiscard]] auto writeBytes(std::ostream& output, std::span<const std::uint8_t> bytes)
+    -> VoidResult {
     output.write(reinterpret_cast<const char*>(bytes.data()),
                  static_cast<std::streamsize>(bytes.size()));
     if (!output) {
@@ -357,8 +357,8 @@ void appendPackedSequence(Bytes& output, std::string_view sequence) {
     return output;
 }
 
-[[nodiscard]] auto decompress(std::span<const std::uint8_t> input,
-                              std::size_t outputSize) -> Result<Bytes> {
+[[nodiscard]] auto decompress(std::span<const std::uint8_t> input, std::size_t outputSize)
+    -> Result<Bytes> {
     Bytes output(outputSize);
     const auto result = ZSTD_decompress(output.data(), output.size(), input.data(), input.size());
     if (ZSTD_isError(result) != 0U || result != outputSize) {
@@ -375,8 +375,8 @@ void appendPackedSequence(Bytes& output, std::string_view sequence) {
     return XXH64(qualities.data(), qualities.size(), checksum);
 }
 
-[[nodiscard]] auto advanceGlobalChecksumImpl(std::uint64_t current,
-                                             std::uint64_t frameChecksum) -> std::uint64_t {
+[[nodiscard]] auto advanceGlobalChecksumImpl(std::uint64_t current, std::uint64_t frameChecksum)
+    -> std::uint64_t {
     Bytes encoded;
     encoded.reserve(8);
     appendU64(encoded, frameChecksum);
@@ -601,8 +601,8 @@ auto parseProfile(std::string_view value) -> Result<DatasetProfile> {
                                      "unknown dataset profile: " + std::string(value));
 }
 
-auto encodeFrame(std::span<const ReadRecord> records,
-                 const ArchiveOptions& options) -> Result<std::unique_ptr<EncodedFrame>> {
+auto encodeFrame(std::span<const ReadRecord> records, const ArchiveOptions& options)
+    -> Result<std::unique_ptr<EncodedFrame>> {
     if (records.empty()) {
         return makeError<std::unique_ptr<EncodedFrame>>(ErrorCode::kUsageError,
                                                         "FQC v2 frame cannot be empty");
@@ -646,8 +646,8 @@ auto encodeFrame(std::span<const ReadRecord> records,
     return frame;
 }
 
-auto compressFrame(std::unique_ptr<EncodedFrame> frame,
-                   int qualityZstdLevel) -> Result<std::unique_ptr<CompressedFrame>> {
+auto compressFrame(std::unique_ptr<EncodedFrame> frame, int qualityZstdLevel)
+    -> Result<std::unique_ptr<CompressedFrame>> {
     if (frame == nullptr) {
         return makeError<std::unique_ptr<CompressedFrame>>(ErrorCode::kUsageError,
                                                            "FQC v2 encoded frame is null");
@@ -664,7 +664,7 @@ auto compressFrame(std::unique_ptr<EncodedFrame> frame,
     // the resident peak stays at raw x3 + one ZSTD_compressBound scratch
     // (already covered per-frame by estimateCompressionPeak) instead of
     // raw x3 + bound x3. ID/sequence stay at kStreamZstdLevel; only quality
-    // uses the caller-configured level (stage I).
+    // uses the caller-configured level.
     auto ids = compress(frame->rawIds, kStreamZstdLevel);
     if (!ids) {
         return makeError<std::unique_ptr<CompressedFrame>>(ids.error().code, ids.error().message);

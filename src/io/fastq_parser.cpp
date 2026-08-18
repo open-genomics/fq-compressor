@@ -11,35 +11,33 @@ namespace fqc::io {
 
 FastqParser::FastqParser(std::istream& stream) : stream_(stream) {}
 
-auto FastqParser::readRecord() -> Result<std::optional<FastqRecord>> {
+auto FastqParser::readRecord() -> Result<std::optional<ReadRecord>> {
     if (eof_) {
-        return std::optional<FastqRecord>{};
+        return std::optional<ReadRecord>{};
     }
 
     std::string idLine;
     if (!readLine(idLine)) {
         if (streamError_) {
-            return makeError<std::optional<FastqRecord>>(streamReadError());
+            return std::unexpected(streamReadError());
         }
-        return std::optional<FastqRecord>{};
+        return std::optional<ReadRecord>{};
     }
 
     while (idLine.empty()) {
         if (!readLine(idLine)) {
             if (streamError_) {
-                return makeError<std::optional<FastqRecord>>(streamReadError());
+                return std::unexpected(streamReadError());
             }
-            return std::optional<FastqRecord>{};
+            return std::optional<ReadRecord>{};
         }
     }
 
     if (idLine[0] != '@') {
-        return makeError<std::optional<FastqRecord>>(
-            ErrorCode::kFormatError,
-            "invalid FASTQ at line " + std::to_string(lineNumber_) + ": expected '@'");
+        return std::unexpected(formatError("expected '@'"));
     }
 
-    FastqRecord record;
+    ReadRecord record;
     std::string_view idView(idLine);
     idView.remove_prefix(1);
 
@@ -52,60 +50,27 @@ auto FastqParser::readRecord() -> Result<std::optional<FastqRecord>> {
     }
 
     if (record.id.empty()) {
-        return makeError<std::optional<FastqRecord>>(
-            ErrorCode::kFormatError,
-            "invalid FASTQ at line " + std::to_string(lineNumber_) + ": empty read ID");
+        return std::unexpected(formatError("empty read ID"));
     }
 
-    if (!readLine(record.sequence)) {
-        if (streamError_) {
-            return makeError<std::optional<FastqRecord>>(streamReadError());
-        }
-        return makeError<std::optional<FastqRecord>>(ErrorCode::kFormatError,
-                                                     "invalid FASTQ: unexpected EOF at line " +
-                                                         std::to_string(lineNumber_));
-    }
-
+    FQC_TRY(readRequiredLine(record.sequence));
     if (record.sequence.empty()) {
-        return makeError<std::optional<FastqRecord>>(
-            ErrorCode::kFormatError,
-            "invalid FASTQ at line " + std::to_string(lineNumber_) + ": empty sequence");
+        return std::unexpected(formatError("empty sequence"));
     }
 
     std::string plusLine;
-    if (!readLine(plusLine)) {
-        if (streamError_) {
-            return makeError<std::optional<FastqRecord>>(streamReadError());
-        }
-        return makeError<std::optional<FastqRecord>>(ErrorCode::kFormatError,
-                                                     "invalid FASTQ: unexpected EOF at line " +
-                                                         std::to_string(lineNumber_));
-    }
-
+    FQC_TRY(readRequiredLine(plusLine));
     if (plusLine.empty() || plusLine[0] != '+') {
-        return makeError<std::optional<FastqRecord>>(
-            ErrorCode::kFormatError,
-            "invalid FASTQ at line " + std::to_string(lineNumber_) + ": expected '+'");
+        return std::unexpected(formatError("expected '+'"));
     }
 
-    if (!readLine(record.quality)) {
-        if (streamError_) {
-            return makeError<std::optional<FastqRecord>>(streamReadError());
-        }
-        return makeError<std::optional<FastqRecord>>(ErrorCode::kFormatError,
-                                                     "invalid FASTQ: unexpected EOF at line " +
-                                                         std::to_string(lineNumber_));
-    }
-
+    FQC_TRY(readRequiredLine(record.quality));
     if (record.quality.size() != record.sequence.size()) {
-        return makeError<std::optional<FastqRecord>>(
-            ErrorCode::kFormatError,
-            "invalid FASTQ at line " + std::to_string(lineNumber_) +
-                ": quality length does not match sequence length");
+        return std::unexpected(formatError("quality length does not match sequence length"));
     }
 
     ++recordNumber_;
-    return std::optional<FastqRecord>(std::move(record));
+    return std::optional<ReadRecord>(std::move(record));
 }
 
 auto FastqParser::readLine(std::string& line) -> bool {
@@ -124,35 +89,41 @@ auto FastqParser::readLine(std::string& line) -> bool {
         return false;
     }
     ++lineNumber_;
-    // Count raw bytes before trimRight strips '\r'. getline consumes the '\n'
+    // Count raw bytes before trimTrailingCr strips '\r'. getline consumes the '\n'
     // delimiter unless it stopped at EOF (eofbit set after extracting content).
     bytesConsumed_ += line.size() + (stream_.eof() ? 0 : 1);
-    trimRight(line);
+    trimTrailingCr(line);
     return true;
+}
+
+auto FastqParser::readRequiredLine(std::string& line) -> VoidResult {
+    if (!readLine(line)) {
+        if (streamError_) {
+            return std::unexpected(streamReadError());
+        }
+        return makeVoidError(ErrorCode::kFormatError,
+                             "invalid FASTQ: unexpected EOF at line " +
+                                 std::to_string(lineNumber_));
+    }
+    return {};
+}
+
+auto FastqParser::formatError(std::string_view detail) const -> Error {
+    return Error{ErrorCode::kFormatError,
+                 "invalid FASTQ at line " + std::to_string(lineNumber_) + ": " +
+                     std::string(detail)};
 }
 
 auto FastqParser::streamReadError() -> Error {
     return Error{ErrorCode::kIOError, "input stream read error while parsing FASTQ"};
 }
 
-void FastqParser::trimRight(std::string& str) {
-    while (!str.empty() && str.back() == '\r') {
-        str.pop_back();
-    }
-}
-
 auto readRecordPair(FastqParser& primary, FastqParser* mate) -> Result<std::optional<ReadPair>> {
-    auto first = primary.readRecord();
-    if (!first) {
-        return makeError<std::optional<ReadPair>>(first.error());
-    }
-    if (!first->has_value()) {
+    FQC_TRY_ASSIGN(first, primary.readRecord());
+    if (!first.has_value()) {
         if (mate != nullptr) {
-            auto second = mate->readRecord();
-            if (!second) {
-                return makeError<std::optional<ReadPair>>(second.error());
-            }
-            if (second->has_value()) {
+            FQC_TRY_ASSIGN(second, mate->readRecord());
+            if (second.has_value()) {
                 return makeError<std::optional<ReadPair>>(
                     ErrorCode::kFormatError, "paired inputs have different record counts");
             }
@@ -160,17 +131,14 @@ auto readRecordPair(FastqParser& primary, FastqParser* mate) -> Result<std::opti
         return std::optional<ReadPair>{};
     }
     ReadPair pair;
-    pair.first = std::move(**first);
+    pair.first = std::move(*first);
     if (mate != nullptr) {
-        auto second = mate->readRecord();
-        if (!second) {
-            return makeError<std::optional<ReadPair>>(second.error());
-        }
-        if (!second->has_value()) {
+        FQC_TRY_ASSIGN(second, mate->readRecord());
+        if (!second.has_value()) {
             return makeError<std::optional<ReadPair>>(ErrorCode::kFormatError,
                                                       "paired inputs have different record counts");
         }
-        pair.second = std::move(**second);
+        pair.second = std::move(*second);
     }
     return std::optional<ReadPair>{std::move(pair)};
 }

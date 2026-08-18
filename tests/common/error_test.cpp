@@ -99,5 +99,52 @@ TEST(VoidResultTest, ResultPattern) {
     EXPECT_EQ(result2.error().code, ErrorCode::kIOError);
 }
 
+[[nodiscard]] auto tryVoid(bool ok) -> VoidResult {
+    FQC_TRY(ok ? VoidResult{} : makeVoidError(ErrorCode::kIOError, "nope"));
+    return {};
+}
+
+[[nodiscard]] auto tryAddOne(Result<int> input) -> Result<int> {
+    FQC_TRY_ASSIGN(value, input);
+    return value + 1;
+}
+
+[[nodiscard]] auto tryPromote(VoidResult inner) -> Result<std::string> {
+    FQC_TRY(inner);
+    return std::string{"ok"};
+}
+
+TEST(FqcTryTest, VoidSuccessContinues) {
+    auto result = tryVoid(true);
+    EXPECT_TRUE(result.has_value());
+}
+
+TEST(FqcTryTest, VoidErrorReturnsUnexpected) {
+    auto result = tryVoid(false);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, ErrorCode::kIOError);
+    EXPECT_EQ(result.error().message, "nope");
+}
+
+TEST(FqcTryTest, AssignUnwrapsValue) {
+    auto result = tryAddOne(Result<int>{41});
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(*result, 42);
+}
+
+TEST(FqcTryTest, AssignPropagatesError) {
+    auto result = tryAddOne(makeError<int>(ErrorCode::kFormatError, "bad"));
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, ErrorCode::kFormatError);
+    EXPECT_EQ(result.error().message, "bad");
+}
+
+TEST(FqcTryTest, PromotesVoidErrorToTypedResult) {
+    auto result = tryPromote(makeVoidError(ErrorCode::kFormatError, "truncated"));
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, ErrorCode::kFormatError);
+    EXPECT_EQ(result.error().message, "truncated");
+}
+
 }  // namespace
 }  // namespace fqc

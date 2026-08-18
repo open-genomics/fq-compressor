@@ -51,8 +51,8 @@ struct VerifyOptions {
     std::string input;
 };
 
-[[nodiscard]] auto checkedMiB(std::uint64_t value,
-                              std::string_view option) -> fqc::Result<std::size_t> {
+[[nodiscard]] auto checkedMiB(std::uint64_t value, std::string_view option)
+    -> fqc::Result<std::size_t> {
     if (value == 0 || value > std::numeric_limits<std::size_t>::max() / kBytesPerMiB) {
         return fqc::makeError<std::size_t>(fqc::ErrorCode::kUsageError,
                                            std::string(option) + " is out of range");
@@ -103,7 +103,7 @@ int main(int argc, char* argv[]) {
     DecompressOptions decompress;
     VerifyOptions verify;
 
-    CLI::App app{"fq-compressor v2: bounded-memory, lossless sequential FASTQ compression"};
+    CLI::App app{"fq-compressor v2: bounded-memory, lossless FASTQ compression"};
     app.set_version_flag("-V,--version", FQC_VERSION);
     app.require_subcommand(1);
     app.fallthrough();
@@ -114,7 +114,7 @@ int main(int argc, char* argv[]) {
     app.add_flag("-q,--quiet", global.quiet, "Suppress non-error status messages");
 
     auto* compressCommand =
-        app.add_subcommand("compress", "Compress FASTQ into the sequential FQC v2 format");
+        app.add_subcommand("compress", "Compress FASTQ into an FQC v2 sequential-frame archive");
     compressCommand->alias("c");
     compressCommand
         ->add_option("-i,--input,-1", compress.input, "Primary FASTQ input, or '-' for stdin")

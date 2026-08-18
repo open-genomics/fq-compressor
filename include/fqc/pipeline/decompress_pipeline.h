@@ -24,8 +24,7 @@ struct DecompressStats {
     std::uint64_t encodedBytes = 0;
 };
 
-/// Concurrent decompression pipeline (roadmap stage G), the mirror image of
-/// `CompressPipeline`:
+/// Concurrent decompression pipeline, the mirror image of `CompressPipeline`:
 ///
 /// ```text
 /// reader   ArchiveReader::open + readRawFrame loop (I/O + prechecks, each
@@ -36,9 +35,9 @@ struct DecompressStats {
 ///          checksum accumulation -> per-frame RecordSink invocation
 /// ```
 ///
-/// Correctness invariants (stage G trap list):
+/// Invariants:
 /// - The per-frame logical checksum is order-independent and is verified on
-///   the decoder workers; the *rolling* global checksum is a chained,
+///   the decoder workers; the rolling global checksum is a chained,
 ///   order-dependent accumulation and is computed ONLY on the ordered writer
 ///   thread. Footer totals/global-checksum validation happens after the join,
 ///   against the writer's accumulated values.
@@ -46,9 +45,8 @@ struct DecompressStats {
 ///   frame ever enters the queue, so the in-flight envelope matches the
 ///   compression pipeline (2 x queue depth + N workers).
 ///
-/// The `RecordSink` is the pluggable "generic stage" surface: `decompress`
-/// sinks records to a FASTQ writer, `verify` sinks them to a byte counter --
-/// same pipeline, first reuse. Invoked once per frame, strictly in frame-id
+/// `RecordSink` is the pluggable output: `decompress` writes FASTQ, `verify`
+/// only counts -- same pipeline. Invoked once per frame, strictly in frame-id
 /// order, on the writer thread. It returns a `VoidResult` so an output
 /// failure (e.g. disk full) cancels the pipeline through the stop_source.
 class DecompressPipeline {

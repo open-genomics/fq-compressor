@@ -15,13 +15,18 @@
 
 namespace fqc::io {
 
-using FastqRecord = ReadRecord;
+/// Strip trailing `\r` left by CRLF inputs after `std::getline` consumes `\n`.
+inline void trimTrailingCr(std::string& str) {
+    while (!str.empty() && str.back() == '\r') {
+        str.pop_back();
+    }
+}
 
 class FastqParser {
 public:
     explicit FastqParser(std::istream& stream);
 
-    [[nodiscard]] auto readRecord() -> Result<std::optional<FastqRecord>>;
+    [[nodiscard]] auto readRecord() -> Result<std::optional<ReadRecord>>;
 
     [[nodiscard]] auto lineNumber() const noexcept -> std::uint64_t {
         return lineNumber_;
@@ -33,18 +38,19 @@ public:
 
     /// Raw bytes consumed so far, including line delimiters (and any `\r`
     /// later trimmed). Exact for plain uncompressed streams -- use it to
-    /// resume parsing from the same byte offset (stage H parallel parsing).
-    /// For gzip streams it counts *decompressed* bytes, which do not map to
-    /// file offsets.
+    /// resume parsing from the same byte offset. For gzip streams it counts
+    /// *decompressed* bytes, which do not map to file offsets.
     [[nodiscard]] auto bytesConsumed() const noexcept -> std::uint64_t {
         return bytesConsumed_;
     }
 
 private:
     [[nodiscard]] auto readLine(std::string& line) -> bool;
-    static void trimRight(std::string& str);
-    /// @brief Error returned when the underlying stream fails (e.g. corrupt gzip input),
-    /// as opposed to a clean end-of-file. The streambuf signals this via @c badbit.
+    /// Fail with `kIOError` on stream failure, `kFormatError` on unexpected EOF.
+    [[nodiscard]] auto readRequiredLine(std::string& line) -> VoidResult;
+    [[nodiscard]] auto formatError(std::string_view detail) const -> Error;
+    /// Error when the underlying stream fails (e.g. corrupt gzip), as opposed
+    /// to a clean EOF. The streambuf signals this via badbit.
     [[nodiscard]] static auto streamReadError() -> Error;
 
     std::istream& stream_;
@@ -55,17 +61,17 @@ private:
     bool streamError_ = false;
 };
 
-/// 一对配对 reads；非配对模式下 `second` 为空。
+/// One pair of reads; `second` is empty in single-end mode.
 struct ReadPair {
-    FastqRecord first;
-    std::optional<FastqRecord> second;
+    ReadRecord first;
+    std::optional<ReadRecord> second;
 };
 
-/// 读取下一条记录（配对模式下读一对）。
-/// - 成功且非空：读到记录，`first` 必有，配对时 `second` 也有
-/// - 成功且空：正常 EOF；配对模式下两端同时 EOF
-/// - 失败：解析错误，或配对两端记录数不一致（kFormatError）
-[[nodiscard]] auto readRecordPair(FastqParser& primary,
-                                  FastqParser* mate) -> Result<std::optional<ReadPair>>;
+/// Read the next record (or pair, when `mate` is non-null).
+/// - success + value: a record; `second` is set in paired mode
+/// - success + empty: clean EOF; both ends EOF in paired mode
+/// - error: parse failure, or paired record counts disagree (`kFormatError`)
+[[nodiscard]] auto readRecordPair(FastqParser& primary, FastqParser* mate)
+    -> Result<std::optional<ReadPair>>;
 
 }  // namespace fqc::io

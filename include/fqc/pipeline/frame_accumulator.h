@@ -14,10 +14,9 @@
 namespace fqc::pipeline {
 
 /// Accumulates parsed records into frames by retained-byte budget. Single
-/// source of the framing rules for BOTH the sequential (CompressPipeline)
-/// and parallel (ParallelParsePipeline) frame producers -- the byte-identical
-/// archive gate depends on both paths framing the record stream identically
-/// (stage H).
+/// source of framing rules for both CompressPipeline and ParallelParsePipeline
+/// -- the byte-identical archive gate depends on both paths framing the record
+/// stream identically.
 ///
 /// Framing rules (unchanged from the original inline reader logic):
 /// - a frame closes once its retained bytes reach the target budget;

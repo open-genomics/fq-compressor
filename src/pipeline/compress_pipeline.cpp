@@ -9,9 +9,9 @@
 #include "fqc/pipeline/frame_accumulator.h"
 #include "fqc/pipeline/mpmc_queue.h"
 #include "fqc/pipeline/reorder_buffer.h"
+#include "fqc/pipeline/timing.h"
 
 #include <atomic>
-#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <istream>
@@ -46,13 +46,6 @@ struct OrderedFrame {
     std::unique_ptr<format::CompressedFrame> frame;
 };
 
-using Clock = std::chrono::steady_clock;
-
-[[nodiscard]] auto nanosSince(Clock::time_point start) -> std::uint64_t {
-    return static_cast<std::uint64_t>(
-        std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - start).count());
-}
-
 }  // namespace
 
 CompressPipeline::CompressPipeline(std::size_t targetFrameBytes,
@@ -66,13 +59,7 @@ auto CompressPipeline::run(std::istream& primary,
                            std::istream* mate,
                            std::span<const ReadRecord> initialRecords,
                            format::ArchiveWriter& writer) -> Result<PipelineStats> {
-    // Stage 1 -> 2: parsed FASTQ records accumulated into bounded frames,
-    // each tagged with a monotonic frame id for the reorder buffer.
     MpmcQueue<InputFrame, kDefaultQueueDepth> queue1;
-    // Stage 2 -> 3: compressed frames. unique_ptr so the queue moves only the
-    // frame pointer; OrderedFrame carries the id for reorder. The queue2
-    // payload shrank from raw streams (stage D) to compressed streams (stage
-    // F), so its in-flight footprint only got smaller.
     MpmcQueue<OrderedFrame, kDefaultQueueDepth> queue2;
     std::optional<Error> readerError;
     std::optional<Error> encoderError;
@@ -81,11 +68,9 @@ auto CompressPipeline::run(std::istream& primary,
     PipelineStats stats;
     std::uint64_t logicalBytes = 0;
 
-    // Stage-E observability: per-stage wall-clock accumulators. Each thread
-    // collects `steady_clock` samples in locals and merges once at exit with a
-    // relaxed fetch_add (N encoders => N merges total), keeping clock reads
-    // out of the synchronization hot path. Relaxed is sufficient: the values
-    // are advisory stats, never used for synchronization.
+    // Per-stage wall-clock: locals merge once at exit with relaxed fetch_add
+    // so clock reads stay off the synchronization hot path. Values are
+    // advisory and never used for synchronization.
     const auto wallStart = Clock::now();
     std::atomic<std::uint64_t> readerParseNs{0};
     std::atomic<std::uint64_t> readerPushNs{0};
@@ -122,8 +107,6 @@ auto CompressPipeline::run(std::istream& primary,
         }
 
         std::uint64_t frameId = 0;
-        // Shared framing rules (stage H): identical to the parallel path's
-        // accumulator, which is what makes byte-identical framing comparable.
         FrameAccumulator accumulator(targetFrameBytes_, paired_);
 
         auto pushFrame = [&](std::vector<ReadRecord> closed) -> bool {
@@ -183,13 +166,8 @@ auto CompressPipeline::run(std::istream& primary,
         readerPushNs.store(pushNs, std::memory_order_relaxed);
     });
 
-    // Stage 2: N encoder workers compete for frames off queue1, encode AND
-    // zstd-compress each (CPU-only, parallel), and push the result to queue2.
-    // `encodeFrame`/`compressFrame` are free functions touching no writer
-    // state, so N workers are safe (stage F: compression moved here from the
-    // writer, where it serialized on a single thread). Workers do not close
-    // queue2 -- multiple producers mean the main thread closes it once every
-    // encoder has joined.
+    // N encoder workers: encodeFrame + compressFrame (no writer state).
+    // Workers do not close queue2; the main thread closes it after join.
     auto encoderLoop = [&] {
         std::uint64_t popNs = 0;
         std::uint64_t encodeNs = 0;
@@ -249,11 +227,8 @@ auto CompressPipeline::run(std::istream& primary,
         encoders.emplace_back(encoderLoop);
     }
 
-    // Stage 3: pop compressed frames, reorder by frameId, assemble the frame
-    // header + write to disk + update stats/checksum. All CPU-heavy work
-    // (encode + zstd) happens upstream in the worker pool, so this thread is
-    // I/O-bound by design. ArchiveWriter and the reorder buffer are owned by
-    // this single thread -- no race on output_/stats_/checksum.
+    // Writer: reorder by frameId, then assemble the frame header and write.
+    // ArchiveWriter and the reorder buffer stay on this thread.
     std::jthread writerThread([&] {
         std::uint64_t popNs = 0;
         std::uint64_t writeNs = 0;

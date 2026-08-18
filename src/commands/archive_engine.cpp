@@ -1,9 +1,10 @@
 // =============================================================================
-// fq-compressor - V2 Sequential Archive Engine
+// fq-compressor - Archive Engine
 // =============================================================================
 
 #include "fqc/commands/archive_engine.h"
 
+#include "fqc/commands/profile.h"
 #include "fqc/common/error.h"
 #include "fqc/common/types.h"
 #include "fqc/io/compressed_stream.h"
@@ -16,15 +17,14 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
-#include <cctype>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
-#include <initializer_list>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <ostream>
 #include <span>
 #include <string>
@@ -39,12 +39,6 @@ namespace {
 
 constexpr std::size_t kEngineMemoryReserveBytes = std::size_t{16} * 1024 * 1024;
 constexpr std::size_t kMinimumMemoryLimitBytes = std::size_t{64} * 1024 * 1024;
-constexpr std::size_t kIlluminaMaxReadLength = 1'000;
-constexpr std::size_t kIlluminaMaxAverageLength = 500;
-constexpr std::initializer_list<std::string_view> kOntHeaderNeedles = {
-    "runid=", " ch=", "channel="};
-constexpr std::initializer_list<std::string_view> kHifiHeaderNeedles = {"/ccs", "hifi"};
-constexpr std::initializer_list<std::string_view> kClrHeaderNeedles = {"pacbio", "subread"};
 
 class OutputTransaction {
 public:
@@ -114,44 +108,6 @@ private:
     bool committed_ = false;
 };
 
-[[nodiscard]] auto asciiLower(char character) -> char {
-    return static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
-}
-
-[[nodiscard]] auto lowerCopy(std::string_view value) -> std::string {
-    std::string result(value);
-    std::ranges::transform(result, result.begin(), asciiLower);
-    return result;
-}
-
-[[nodiscard]] auto containsAny(std::string_view value,
-                               std::initializer_list<std::string_view> needles) -> bool {
-    return std::ranges::any_of(needles,
-                               [value](std::string_view needle) { return value.contains(needle); });
-}
-
-/// Archive-generated FASTQ IDs look like `DRR171398.1` / `ERR123.1` / `SRR…`.
-[[nodiscard]] auto looksLikeInsdcRunId(std::string_view id) -> bool {
-    if (id.size() < 4 || !std::isdigit(static_cast<unsigned char>(id[3]))) {
-        return false;
-    }
-    const char first = asciiLower(id[0]);
-    const char second = asciiLower(id[1]);
-    const char third = asciiLower(id[2]);
-    return (first == 's' || first == 'e' || first == 'd') && second == 'r' && third == 'r';
-}
-
-[[nodiscard]] auto looksLikeClrHeader(std::string_view id, std::string_view header) -> bool {
-    if (containsAny(header, kClrHeaderNeedles)) {
-        return true;
-    }
-    if (id.empty() || id.front() != 'm') {
-        return false;
-    }
-    const auto slashes = static_cast<std::size_t>(std::ranges::count(id, '/'));
-    return slashes >= 2 && !containsAny(header, kHifiHeaderNeedles);
-}
-
 [[nodiscard]] auto validateMemoryLimit(std::size_t memoryLimitBytes) -> VoidResult {
     if (memoryLimitBytes < kMinimumMemoryLimitBytes) {
         return makeVoidError(ErrorCode::kUsageError, "memory limit must be at least 64 MiB");
@@ -168,11 +124,7 @@ private:
     return static_cast<double>(ns) / 1e6;
 }
 
-/// Stage-E observability report: per-stage wall-clock breakdown (Amdahl
-/// evidence) plus queue counter snapshots. Emitted at info level, so `-q`
-/// suppresses it (benchmarks) and an interactive run prints it. Since stage F
-/// the encoder section carries the zstd work (`zstd=`) and the writer section
-/// is pure frame assembly + I/O (`write=`).
+/// Per-stage wall-clock plus queue snapshots. Info level, so `-q` suppresses it.
 void logPipelineObservability(const pipeline::PipelineStats& stats) {
     const auto& t = stats.timings;
     FQC_LOG_INFO(
@@ -209,10 +161,9 @@ void logPipelineObservability(const pipeline::PipelineStats& stats) {
                     (request.memoryLimitBytes - kEngineMemoryReserveBytes) / 8);
 }
 
-/// Stage-H dispatch probe: returns the file size only when `path` is a
-/// regular, uncompressed file (parallel parsing needs random access to
-/// *uncompressed* bytes). Gzip/bzip2/xz/zstd input and anything that fails to
-/// stat/probe yields 0, which routes to the sequential reader.
+/// File size when `path` is a regular uncompressed file (parallel parsing needs
+/// random access to uncompressed bytes). Compressed input or a failed stat/probe
+/// yields 0, which routes to the sequential reader.
 [[nodiscard]] auto uncompressedRegularFileSize(const std::filesystem::path& path) -> std::uint64_t {
     std::error_code error;
     if (!std::filesystem::is_regular_file(path, error) || error) {
@@ -297,89 +248,34 @@ void logPipelineObservability(const pipeline::PipelineStats& stats) {
 
 }  // namespace
 
-auto detectProfile(std::span<const ReadRecord> records) -> Result<format::DatasetProfile> {
-    if (records.empty()) {
-        return format::DatasetProfile::kIllumina;
-    }
-
-    std::size_t ontHeaders = 0;
-    std::size_t hifiHeaders = 0;
-    std::size_t clrHeaders = 0;
-    std::size_t insdcRunIds = 0;
-    std::uint64_t totalBases = 0;
-    std::size_t maxLength = 0;
-    for (const auto& record : records) {
-        const auto header = lowerCopy(record.id + " " + record.comment);
-        if (containsAny(header, kOntHeaderNeedles)) {
-            ++ontHeaders;
-        }
-        if (looksLikeInsdcRunId(record.id)) {
-            ++insdcRunIds;
-        }
-        if (containsAny(header, kHifiHeaderNeedles)) {
-            ++hifiHeaders;
-        }
-        if (looksLikeClrHeader(record.id, header)) {
-            ++clrHeaders;
-        }
-        totalBases += record.sequence.size();
-        maxLength = std::max(maxLength, record.sequence.size());
-    }
-
-    const auto majority = (records.size() + 1) / 2;
-    // Markers first so `/ccs` beats an SRR accession. Length before INSDC so
-    // short ENA Illumina stays Illumina. Unmarked long reads fail closed.
-    if (hifiHeaders >= majority) {
-        return format::DatasetProfile::kPacBioHiFi;
-    }
-    if (ontHeaders >= majority) {
-        return format::DatasetProfile::kOnt;
-    }
-    if (clrHeaders >= majority) {
-        return format::DatasetProfile::kPacBioClr;
-    }
-    const auto averageLength = totalBases / records.size();
-    if (maxLength <= kIlluminaMaxReadLength && averageLength <= kIlluminaMaxAverageLength) {
-        return format::DatasetProfile::kIllumina;
-    }
-    if (insdcRunIds >= majority) {
-        return format::DatasetProfile::kOnt;
-    }
-    return makeError<format::DatasetProfile>(
-        ErrorCode::kUsageError,
-        "dataset profile is ambiguous; specify illumina, ont, pacbio-hifi, or pacbio-clr");
+[[nodiscard]] auto toArchiveStats(const pipeline::DecompressStats& stats) -> format::ArchiveStats {
+    return {
+        .frameCount = stats.frameCount,
+        .recordCount = stats.recordCount,
+        .totalBases = stats.totalBases,
+        .encodedBytes = stats.encodedBytes,
+    };
 }
 
 auto ArchiveEngine::compress(const CompressionRequest& request) const -> Result<OperationStats> {
-    if (auto result = validateMemoryLimit(request.memoryLimitBytes); !result) {
-        return makeError<OperationStats>(result.error());
-    }
+    FQC_TRY(validateMemoryLimit(request.memoryLimitBytes));
     if (request.targetFrameBytes == 0) {
         return makeError<OperationStats>(ErrorCode::kUsageError,
                                          "target frame size must be positive");
     }
-    if (auto result = validateOutput(request.inputPath, request.outputPath, request.forceOverwrite);
-        !result) {
-        return makeError<OperationStats>(result.error());
-    }
+    FQC_TRY(validateOutput(request.inputPath, request.outputPath, request.forceOverwrite));
     if (request.paired() && request.inputPath == "-" && request.matePath == "-") {
         return makeError<OperationStats>(ErrorCode::kUsageError,
                                          "paired inputs cannot both use stdin");
     }
 
-    auto primaryStream = io::openInputFile(request.inputPath);
-    if (!primaryStream) {
-        return makeError<OperationStats>(primaryStream.error());
-    }
-    io::FastqParser primary(**primaryStream);
+    FQC_TRY_ASSIGN(primaryStream, io::openInputFile(request.inputPath));
+    io::FastqParser primary(*primaryStream);
     std::unique_ptr<std::istream> mateStreamPtr;
     std::optional<io::FastqParser> mate;
     if (request.paired()) {
-        auto mateStream = io::openInputFile(request.matePath);
-        if (!mateStream) {
-            return makeError<OperationStats>(mateStream.error());
-        }
-        mateStreamPtr = std::move(*mateStream);
+        FQC_TRY_ASSIGN(mateStream, io::openInputFile(request.matePath));
+        mateStreamPtr = std::move(mateStream);
         mate.emplace(*mateStreamPtr);
     }
 
@@ -387,45 +283,34 @@ auto ArchiveEngine::compress(const CompressionRequest& request) const -> Result<
     const auto maxSampleBytes = sampleLimitBytes(request.memoryLimitBytes);
     std::size_t sampledBases = 0;
     while (sample.size() < kProfileSampleMaxRecords && sampledBases < maxSampleBytes) {
-        auto pair = io::readRecordPair(primary, mate ? &*mate : nullptr);
-        if (!pair) {
-            return makeError<OperationStats>(pair.error());
-        }
-        if (!pair->has_value()) {
+        FQC_TRY_ASSIGN(pair, io::readRecordPair(primary, mate ? &*mate : nullptr));
+        if (!pair.has_value()) {
             break;
         }
-        sampledBases += (*pair)->first.sequence.size();
-        sample.push_back(std::move((*pair)->first));
-        if ((*pair)->second) {
-            sampledBases += (*pair)->second->sequence.size();
-            sample.push_back(std::move(*(*pair)->second));
+        sampledBases += pair->first.sequence.size();
+        sample.push_back(std::move(pair->first));
+        if (pair->second) {
+            sampledBases += pair->second->sequence.size();
+            sample.push_back(std::move(*pair->second));
         }
     }
 
-    auto resolvedProfile = request.profile.has_value()
-        ? Result<format::DatasetProfile>(*request.profile)
-        : detectProfile(sample);
-    if (!resolvedProfile) {
-        return makeError<OperationStats>(resolvedProfile.error());
-    }
+    FQC_TRY_ASSIGN(resolvedProfile,
+                   request.profile.has_value() ? Result<format::DatasetProfile>(*request.profile)
+                                               : detectProfile(sample));
 
     OutputTransaction outputTransaction(request.outputPath, request.outputPath != "-");
-    auto output = openOutput(outputTransaction.path());
-    if (!output) {
-        return makeError<OperationStats>(output.error());
-    }
-    format::ArchiveWriter writer(**output,
-                                 {.profile = *resolvedProfile,
+    FQC_TRY_ASSIGN(output, openOutput(outputTransaction.path()));
+    format::ArchiveWriter writer(*output,
+                                 {.profile = resolvedProfile,
                                   .paired = request.paired(),
                                   .maxFrameBytes = maxFrameBytesFor(request.memoryLimitBytes),
                                   .memoryLimitBytes = request.memoryLimitBytes,
                                   .qualityZstdLevel = request.qualityZstdLevel});
 
-    // Stage-H dispatch: parallel parsing engages only for an uncompressed
-    // regular file with workers > 0 (gzip is a pure inflate stream, stdin is
-    // not seekable, paired lock-step doesn't parallelize -- roadmap scope
-    // discipline). Parallel parsing resumes at the sample's exact byte
-    // offset, so sampling stays on the main thread for both paths.
+    // Parallel parsing: uncompressed regular file, workers > 0. gzip is a pure
+    // inflate stream, stdin is not seekable, paired lock-step does not
+    // parallelize. Parsing resumes at the sample's exact byte offset.
     std::uint64_t inputFileSize = 0;
     if (request.parseWorkers > 0 && !request.paired() && request.inputPath != "-") {
         inputFileSize = uncompressedRegularFileSize(request.inputPath);
@@ -442,99 +327,60 @@ auto ArchiveEngine::compress(const CompressionRequest& request) const -> Result<
         pipeline::CompressPipeline pipelineEngine(targetFrameBytesFor(request), request.paired());
         std::istream* mateStream = mateStreamPtr ? mateStreamPtr.get() : nullptr;
         pipelineResult = pipelineEngine.run(
-            **primaryStream, mateStream, std::span<const ReadRecord>{sample}, writer);
+            *primaryStream, mateStream, std::span<const ReadRecord>{sample}, writer);
     }
-    if (!pipelineResult) {
-        return makeError<OperationStats>(pipelineResult.error());
-    }
-    logPipelineObservability(*pipelineResult);
-    if (auto result = writer.finish(); !result) {
-        return makeError<OperationStats>(result.error());
-    }
-    output->reset();
-    if (auto result = outputTransaction.commit(request.forceOverwrite); !result) {
-        return makeError<OperationStats>(result.error());
-    }
-    return toOperationStats(writer.metadata(), writer.stats(), true, pipelineResult->logicalBytes);
-}
-
-[[nodiscard]] auto toArchiveStats(const pipeline::DecompressStats& stats) -> format::ArchiveStats {
-    return {
-        .frameCount = stats.frameCount,
-        .recordCount = stats.recordCount,
-        .totalBases = stats.totalBases,
-        .encodedBytes = stats.encodedBytes,
-    };
+    FQC_TRY_ASSIGN(pipelineStats, std::move(pipelineResult));
+    logPipelineObservability(pipelineStats);
+    FQC_TRY(writer.finish());
+    output.reset();
+    FQC_TRY(outputTransaction.commit(request.forceOverwrite));
+    return toOperationStats(writer.metadata(), writer.stats(), true, pipelineStats.logicalBytes);
 }
 
 auto ArchiveEngine::decompress(const DecompressionRequest& request) const
     -> Result<OperationStats> {
-    if (auto result = validateMemoryLimit(request.memoryLimitBytes); !result) {
-        return makeError<OperationStats>(result.error());
-    }
-    if (auto result = validateOutput(request.inputPath, request.outputPath, request.forceOverwrite);
-        !result) {
-        return makeError<OperationStats>(result.error());
-    }
-    auto input = io::openInputFile(request.inputPath);
-    if (!input) {
-        return makeError<OperationStats>(input.error());
-    }
+    FQC_TRY(validateMemoryLimit(request.memoryLimitBytes));
+    FQC_TRY(validateOutput(request.inputPath, request.outputPath, request.forceOverwrite));
+    FQC_TRY_ASSIGN(input, io::openInputFile(request.inputPath));
     OutputTransaction outputTransaction(request.outputPath, request.outputPath != "-");
-    auto output = openOutput(outputTransaction.path());
-    if (!output) {
-        return makeError<OperationStats>(output.error());
-    }
+    FQC_TRY_ASSIGN(output, openOutput(outputTransaction.path()));
     std::uint64_t logicalBytes = 0;
     pipeline::DecompressPipeline pipelineEngine(maxFrameBytesFor(request.memoryLimitBytes),
                                                 request.memoryLimitBytes);
-    auto stats = pipelineEngine.run(**input, [&](std::vector<ReadRecord> records) -> VoidResult {
-        for (const auto& record : records) {
-            logicalBytes += canonicalFastqBytes(record);
-            if (auto result = writeFastqRecord(**output, record); !result) {
-                return result;
-            }
-        }
-        return {};
-    });
-    if (!stats) {
-        return makeError<OperationStats>(stats.error());
-    }
-    (*output)->flush();
-    if (!**output) {
+    FQC_TRY_ASSIGN(stats,
+                   pipelineEngine.run(*input, [&](std::vector<ReadRecord> records) -> VoidResult {
+                       for (const auto& record : records) {
+                           logicalBytes += canonicalFastqBytes(record);
+                           FQC_TRY(writeFastqRecord(*output, record));
+                       }
+                       return {};
+                   }));
+    output->flush();
+    if (!*output) {
         return makeError<OperationStats>(ErrorCode::kIOError, "failed to flush decompressed FASTQ");
     }
-    output->reset();
-    if (auto result = outputTransaction.commit(request.forceOverwrite); !result) {
-        return makeError<OperationStats>(result.error());
-    }
-    return toOperationStats(stats->metadata, toArchiveStats(*stats), false, logicalBytes);
+    output.reset();
+    FQC_TRY(outputTransaction.commit(request.forceOverwrite));
+    return toOperationStats(stats.metadata, toArchiveStats(stats), false, logicalBytes);
 }
 
 auto ArchiveEngine::verify(const std::filesystem::path& inputPath,
                            std::size_t memoryLimitBytes) const -> Result<OperationStats> {
-    if (auto result = validateMemoryLimit(memoryLimitBytes); !result) {
-        return makeError<OperationStats>(result.error());
-    }
-    auto input = io::openInputFile(inputPath);
-    if (!input) {
-        return makeError<OperationStats>(input.error());
-    }
-    // Same pipeline as decompress with a counting-only sink: the full decode
-    // and validation path runs, nothing is written (generic-stage reuse).
+    FQC_TRY(validateMemoryLimit(memoryLimitBytes));
+    FQC_TRY_ASSIGN(input, io::openInputFile(inputPath));
+    // Same pipeline as decompress with a counting-only sink: full decode and
+    // validation, nothing written.
     std::uint64_t logicalBytes = 0;
     pipeline::DecompressPipeline pipelineEngine(maxFrameBytesFor(memoryLimitBytes),
                                                 memoryLimitBytes);
-    auto stats = pipelineEngine.run(**input, [&](std::vector<ReadRecord> records) -> VoidResult {
-        for (const auto& record : records) {
-            logicalBytes += canonicalFastqBytes(record);
-        }
-        return {};
-    });
-    if (!stats) {
-        return makeError<OperationStats>(stats.error());
-    }
-    return toOperationStats(stats->metadata, toArchiveStats(*stats), false, logicalBytes);
+    FQC_TRY_ASSIGN(stats,
+                   pipelineEngine.run(*input, [&](std::vector<ReadRecord> records) -> VoidResult {
+                       for (const auto& record : records) {
+                           logicalBytes += canonicalFastqBytes(record);
+                       }
+                       return {};
+                   }));
+    return toOperationStats(stats.metadata, toArchiveStats(stats), false, logicalBytes);
 }
 
 }  // namespace fqc::commands

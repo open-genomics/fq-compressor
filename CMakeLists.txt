@@ -21,7 +21,7 @@ set(FQC_VERSION_CORE "${CMAKE_MATCH_1}")
 project(FQCompressor
     LANGUAGES CXX
     VERSION ${FQC_VERSION_CORE}
-    DESCRIPTION "High-performance sequential FASTQ compressor"
+    DESCRIPTION "High-performance FASTQ compressor"
     HOMEPAGE_URL "https://github.com/open-genomics/fq-compressor"
 )
 

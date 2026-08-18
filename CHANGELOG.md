@@ -9,6 +9,7 @@
 
 ### 变更
 
+- **clean code 收口**：`AGENTS.md` / CLI 描述与当前 MPMC 流水线对齐；`FQC_TRY` 降低 `Result` 传播样板；profile 检测独立为 `profile.cpp`；去掉无语义的 `FastqRecord` 别名；生产注释去掉课程阶段叙事，只留不变量。
 - **ENA 转写长读可 auto 识别为 ONT**：`detectProfile` 在 Illumina 长度规则之后，把多数 ID 为 `SRR`/`ERR`/`DRR` + 数字的长读判为 `ont`（档案生成 FASTQ 会丢掉 `runid=`）。短读 ENA 头仍按长度走 Illumina；无 accession 的模糊长读继续拒绝。单测覆盖 `ERR` 前缀，以及 `/ccs` 优先于 `SRR` accession。
 
 ### 新增

@@ -21,6 +21,8 @@
 #include <utility>
 #include <vector>
 
+#include "support.h"
+
 #include <gtest/gtest.h>
 
 using fqc::ErrorCode;
@@ -33,9 +35,8 @@ using fqc::pipeline::ParallelParsePipeline;
 
 namespace {
 
-[[nodiscard]] auto makeFastq(int count,
-                             int sequenceLength = 150,
-                             bool atQuality = false) -> std::string {
+[[nodiscard]] auto makeFastq(int count, int sequenceLength = 150, bool atQuality = false)
+    -> std::string {
     std::string fastq;
     for (int i = 0; i < count; ++i) {
         fastq += "@read_" + std::to_string(i) + " comment\n";
@@ -126,21 +127,6 @@ private:
     return records;
 }
 
-[[nodiscard]] auto parseFastqRecords(const std::string& fastq) -> std::vector<ReadRecord> {
-    std::istringstream input(fastq);
-    fqc::io::FastqParser parser(input);
-    std::vector<ReadRecord> records;
-    while (true) {
-        auto record = parser.readRecord();
-        EXPECT_TRUE(record.has_value());
-        if (!record->has_value()) {
-            break;
-        }
-        records.push_back(std::move(**record));
-    }
-    return records;
-}
-
 }  // namespace
 
 // The stage-H gem: with a single chunk worker the parallel pipeline's framing
@@ -179,7 +165,7 @@ TEST(ParallelParsePipelineTest, SampledSingleWorkerIsByteIdenticalToSequential) 
     const auto parallel = runParallel(file, sample, sampleEnd, 1, 128);
 
     EXPECT_EQ(parallel, sequential);
-    EXPECT_EQ(readAllRecords(parallel), parseFastqRecords(fastq));
+    EXPECT_EQ(readAllRecords(parallel), fqc::test::parseAllFastq(fastq));
 }
 
 TEST(ParallelParsePipelineTest, MultiWorkerPreservesRecordOrderAndContent) {
@@ -187,7 +173,7 @@ TEST(ParallelParsePipelineTest, MultiWorkerPreservesRecordOrderAndContent) {
     TempFastqFile file(fastq);
 
     const auto archive = runParallel(file, {}, 0, 4, 512);
-    EXPECT_EQ(readAllRecords(archive), parseFastqRecords(fastq));
+    EXPECT_EQ(readAllRecords(archive), fqc::test::parseAllFastq(fastq));
 }
 
 TEST(ParallelParsePipelineTest, AdversarialAtQualityLinesRoundTrip) {
@@ -197,14 +183,14 @@ TEST(ParallelParsePipelineTest, AdversarialAtQualityLinesRoundTrip) {
     TempFastqFile file(fastq);
 
     const auto archive = runParallel(file, {}, 0, 4, 256);
-    EXPECT_EQ(readAllRecords(archive), parseFastqRecords(fastq));
+    EXPECT_EQ(readAllRecords(archive), fqc::test::parseAllFastq(fastq));
 }
 
 TEST(ParallelParsePipelineTest, SampleCoveringWholeFileYieldsSampleOnlyArchive) {
     const std::string fastq = makeFastq(40);
     TempFastqFile file(fastq);
 
-    const auto sample = parseFastqRecords(fastq);
+    const auto sample = fqc::test::parseAllFastq(fastq);
     const auto archive = runParallel(file, sample, file.size(), 4, 128);
     EXPECT_EQ(readAllRecords(archive), sample);
 }
@@ -222,7 +208,7 @@ TEST(ParallelParsePipelineTest, WorkerBeyondFileSizeEmitsOnlyMarker) {
     TempFastqFile file(fastq);
 
     const auto archive = runParallel(file, {}, 0, 8, 1 << 20);
-    EXPECT_EQ(readAllRecords(archive), parseFastqRecords(fastq));
+    EXPECT_EQ(readAllRecords(archive), fqc::test::parseAllFastq(fastq));
 }
 
 TEST(ParallelParsePipelineTest, MalformedRecordInAlignmentZoneFailsLoudly) {

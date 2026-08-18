@@ -25,6 +25,7 @@ set(FQC_CORE_SOURCES
 # Command sources
 set(FQC_COMMAND_SOURCES
     commands/archive_engine.cpp
+    commands/profile.cpp
 )
 
 # Create the core library

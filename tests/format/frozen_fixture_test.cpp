@@ -10,7 +10,6 @@
 // =============================================================================
 
 #include "fqc/format/archive.h"
-#include "fqc/io/fastq_parser.h"
 
 #include <cstddef>
 #include <fstream>
@@ -20,6 +19,8 @@
 #include <utility>
 #include <vector>
 
+#include "support.h"
+
 #include <gtest/gtest.h>
 
 namespace fqc::format::test {
@@ -27,22 +28,6 @@ namespace {
 
 [[nodiscard]] auto fixturePath(std::string_view name) -> std::string {
     return std::string(FQC_FIXTURE_DIR) + "/" + std::string(name);
-}
-
-[[nodiscard]] auto parseFastq(const std::string& path) -> std::vector<ReadRecord> {
-    std::ifstream stream(path);
-    EXPECT_TRUE(stream) << "cannot open " << path;
-    io::FastqParser parser(stream);
-    std::vector<ReadRecord> records;
-    for (;;) {
-        auto record = parser.readRecord();
-        EXPECT_TRUE(record) << "parse error in " << path;
-        if (!record || !record->has_value()) {
-            break;
-        }
-        records.push_back(std::move(**record));
-    }
-    return records;
 }
 
 struct DecodedArchive {
@@ -84,7 +69,7 @@ TEST(FrozenFixture, SingleEndArchiveDecodesToCommittedFastq) {
     EXPECT_EQ(decoded.stats.frameCount, 1U);
     EXPECT_EQ(decoded.stats.recordCount, 3U);
     EXPECT_EQ(decoded.stats.totalBases, 150U);
-    EXPECT_EQ(decoded.records, parseFastq(fixturePath("input_se.fastq")));
+    EXPECT_EQ(decoded.records, fqc::test::parseAllFastqFile(fixturePath("input_se.fastq")));
 }
 
 TEST(FrozenFixture, PairedEndArchiveDecodesToInterleavedFastq) {
@@ -96,8 +81,8 @@ TEST(FrozenFixture, PairedEndArchiveDecodesToInterleavedFastq) {
     EXPECT_EQ(decoded.stats.recordCount, 6U);
     EXPECT_EQ(decoded.stats.totalBases, 300U);
 
-    const auto r1 = parseFastq(fixturePath("input_r1.fastq"));
-    const auto r2 = parseFastq(fixturePath("input_r2.fastq"));
+    const auto r1 = fqc::test::parseAllFastqFile(fixturePath("input_r1.fastq"));
+    const auto r2 = fqc::test::parseAllFastqFile(fixturePath("input_r2.fastq"));
     ASSERT_EQ(r1.size(), r2.size());
     std::vector<ReadRecord> interleaved;
     interleaved.reserve(r1.size() + r2.size());

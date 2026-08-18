@@ -13,7 +13,7 @@
 namespace fqc::pipeline {
 
 /// Reorders out-of-order completions into (chunkId, localId) lexicographic
-/// order -- the ordered-submission core of stage H parallel parsing.
+/// order -- the ordered-submission core of parallel parsing.
 ///
 /// Producers are K chunk workers, each tagging its frames with a chunk-local
 /// monotonic id; items from different chunks interleave arbitrarily. A chunk
@@ -31,17 +31,16 @@ class ChunkOrderer {
 public:
     /// Submit one frame. Returns the longest ready sequence in (chunk, local)
     /// order (possibly empty).
-    [[nodiscard]] auto submitFrame(std::uint64_t chunk,
-                                   std::uint64_t local,
-                                   T value) -> std::vector<T> {
+    [[nodiscard]] auto submitFrame(std::uint64_t chunk, std::uint64_t local, T value)
+        -> std::vector<T> {
         pending_.emplace(std::make_pair(chunk, local), std::move(value));
         return drain();
     }
 
     /// Submit a chunk-completion marker: `totalFrames` is how many frames the
     /// chunk produced (0 allowed). Returns any items unblocked by it.
-    [[nodiscard]] auto submitChunkEnd(std::uint64_t chunk,
-                                      std::uint64_t totalFrames) -> std::vector<T> {
+    [[nodiscard]] auto submitChunkEnd(std::uint64_t chunk, std::uint64_t totalFrames)
+        -> std::vector<T> {
         chunkTotals_.emplace(chunk, totalFrames);
         return drain();
     }
