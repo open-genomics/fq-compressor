@@ -30,7 +30,7 @@ fetch_head \
     "$OUT/SRR2962693_1.head200k.fastq" \
     800000
 
-# 人类 MinION，前 4k 条（16k 行）。约 125 MiB。头行无 runid=，压缩时需 --profile ont。
+# 人类 MinION，前 4k 条（16k 行）。约 125 MiB。ENA 头无 runid=，靠长读 + DRR accession 识别。
 fetch_head \
     "https://ftp.sra.ebi.ac.uk/vol1/fastq/DRR171/DRR171398/DRR171398_1.fastq.gz" \
     "$OUT/DRR171398_1.head4k.fastq" \

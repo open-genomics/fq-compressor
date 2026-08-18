@@ -27,7 +27,7 @@
 | 切片 | auto profile | 命令 | verify | decompress `cmp` |
 |---|---|---|---|---|
 | Illumina | `illumina` | 默认并行解析 | 通过 | 与输入逐字节一致 |
-| ONT | **拒绝**（头行无 `runid=` / channel，见下） | `--profile ont` | 通过 | 与输入逐字节一致 |
+| ONT | `ont`（ENA run accession + 长读） | 默认并行解析 | 通过 | 与输入逐字节一致 |
 
 `--quality-level 7` 的归档同样 `verify` 通过。并行与顺序路径的归档不必逐字节相同（K>1 时块尾关帧）；记录顺序与内容必须相同，本轮 `cmp` 已确认。
 
@@ -59,9 +59,9 @@
 
 ## 发现：ENA 风格 ONT 头行
 
-DRR171398 经 ENA 转写后的头行是 `@DRR171398.1 1/1`，没有 `runid=` 或 channel 标签。读长远超 Illumina 阈值，auto profile 按设计拒绝猜测，要求 `--profile ont`。
+DRR171398 经 ENA 转写后的头行是 `@DRR171398.1 1/1`，没有 `runid=` 或 channel 标签。关账时 auto profile 会拒绝；随后已把「长读 + INSDC run accession」收进 `detectProfile`，本切片现可 auto 判为 `ont`。短读 ENA 头（如 `@SRR2962693.1`）仍走长度规则，判为 Illumina。
 
-这不是缺陷，但公开 MinION 数据里常见。要用 auto 识别这类头，得另开一章改启发式，不在本次关账范围。
+ENA 转写也会抹掉 PacBio 的 `/ccs` 等标记。这类长读现在会标成 `ont`。当前所有 profile 共用回退编码，标签不影响压缩；若要归档元数据准确，PacBio 的 ENA FASTQ 仍应传 `--profile`。无 accession、无平台标记的长读继续拒绝猜测。
 
 ## 结论
 

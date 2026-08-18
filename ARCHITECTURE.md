@@ -57,7 +57,8 @@ v2 的准入预检在测量流的同时顺便校验完整的大小写 IUPAC 字�
 `auto` 模式最多采样 50,000 条记录或 512 MiB 碱基，且不超过可用操作预算的八分之一。
 
 - Illumina：短读长（最长不超过 1,000 bp，平均不超过 500 bp）。
-- ONT：多数 read 头部含 `runid=` 或 channel 标签等特征。
+- ONT：多数 read 头部含 `runid=` 或 channel 标签；或长读且 ID 为 ENA/SRA/DDBJ
+  转写后的 run accession（`SRR`/`ERR`/`DRR` + 数字，如 `@DRR171398.1`）。
 - PacBio HiFi：多数头部含 `/ccs` 或 `hifi` 标记。
 - PacBio CLR：多数头部含 PacBio/subread 或 movie/ZMW/subread 风格标记。
 

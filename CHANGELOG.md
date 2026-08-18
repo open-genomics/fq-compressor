@@ -5,7 +5,11 @@
 ### 文档
 
 - **路线图关账**：阶段 H 标为完成；README / ARCHITECTURE / 开发历程同步并行解析后的数据流与合成性能。
-- **真实语料验收**：新增 `docs/real-corpus.md` 与 `scripts/fetch_real_corpus.sh`。公开切片上 Illumina WXS 压缩比 4.15×（优于合成 2.96×），人类 MinION 1.96×（劣于合成，质量流近满字母表）；`--quality-level 7` 仍未过门槛；ENA 转写的 ONT 头行无 `runid=`，auto profile 需 `--profile ont`。
+- **真实语料验收**：新增 `docs/real-corpus.md` 与 `scripts/fetch_real_corpus.sh`。公开切片上 Illumina WXS 压缩比 4.15×（优于合成 2.96×），人类 MinION 1.96×（劣于合成，质量流近满字母表）；`--quality-level 7` 仍未过门槛。
+
+### 变更
+
+- **ENA 转写长读可 auto 识别为 ONT**：`detectProfile` 在 Illumina 长度规则之后，把多数 ID 为 `SRR`/`ERR`/`DRR` + 数字的长读判为 `ont`（档案生成 FASTQ 会丢掉 `runid=`）。短读 ENA 头仍按长度走 Illumina；无 accession 的模糊长读继续拒绝。
 
 ### 新增
 

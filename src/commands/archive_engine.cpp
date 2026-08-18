@@ -122,6 +122,20 @@ private:
                                [value](std::string_view needle) { return value.contains(needle); });
 }
 
+/// ENA/SRA/DDBJ archive-generated FASTQ rewrites headers to `@<run>.<spot>`.
+/// Native ONT `runid=` / channel tags are gone; short Illumina runs still hit
+/// the length rule first, so this only fires for long reads.
+[[nodiscard]] auto looksLikeInsdcRunId(std::string_view id) -> bool {
+    if (id.size() < 4) {
+        return false;
+    }
+    const auto prefix = lowerCopy(id.substr(0, 3));
+    if (prefix != "srr" && prefix != "err" && prefix != "drr") {
+        return false;
+    }
+    return std::isdigit(static_cast<unsigned char>(id[3])) != 0;
+}
+
 [[nodiscard]] auto validateMemoryLimit(std::size_t memoryLimitBytes) -> VoidResult {
     if (memoryLimitBytes < kMinimumMemoryLimitBytes) {
         return makeVoidError(ErrorCode::kUsageError, "memory limit must be at least 64 MiB");
@@ -275,11 +289,13 @@ auto detectProfile(std::span<const ReadRecord> records) -> Result<format::Datase
     std::size_t ontHeaders = 0;
     std::size_t hifiHeaders = 0;
     std::size_t clrHeaders = 0;
+    std::size_t insdcRunIds = 0;
     std::uint64_t totalBases = 0;
     std::size_t maxLength = 0;
     for (const auto& record : records) {
         const auto header = lowerCopy(record.id + " " + record.comment);
         ontHeaders += containsAny(header, {"runid=", " ch=", "channel="}) ? 1U : 0U;
+        insdcRunIds += looksLikeInsdcRunId(record.id) ? 1U : 0U;
         hifiHeaders += containsAny(header, {"/ccs", "hifi"}) ? 1U : 0U;
         const auto slashCount = static_cast<std::size_t>(std::ranges::count(record.id, '/'));
         clrHeaders += (containsAny(header, {"pacbio", "subread"}) ||
@@ -304,6 +320,9 @@ auto detectProfile(std::span<const ReadRecord> records) -> Result<format::Datase
     const auto averageLength = totalBases / records.size();
     if (maxLength <= 1'000 && averageLength <= 500) {
         return format::DatasetProfile::kIllumina;
+    }
+    if (insdcRunIds >= majority) {
+        return format::DatasetProfile::kOnt;
     }
     return makeError<format::DatasetProfile>(
         ErrorCode::kUsageError,

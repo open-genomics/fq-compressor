@@ -129,6 +129,20 @@ TEST_F(ArchiveEngineTest, DetectsAllProfilesAndRejectsAmbiguousLongReads) {
     EXPECT_EQ(ambiguousProfile.error().code, ErrorCode::kUsageError);
 }
 
+TEST_F(ArchiveEngineTest, DetectsEnaRewrittenLongReadsAsOnt) {
+    std::vector<ReadRecord> enaOnt = {
+        {"DRR171398.1", "1/1", std::string(16'340, 'A'), std::string(16'340, 'I')},
+    };
+    auto ont = detectProfile(enaOnt);
+    ASSERT_TRUE(ont) << ont.error().message;
+    EXPECT_EQ(*ont, format::DatasetProfile::kOnt);
+
+    std::vector<ReadRecord> enaShort = {
+        {"SRR2962693.1", "1/1", std::string(126, 'A'), std::string(126, 'I')},
+    };
+    ASSERT_EQ(detectProfile(enaShort).value(), format::DatasetProfile::kIllumina);
+}
+
 TEST_F(ArchiveEngineTest, RejectsPairedCountMismatchAndTinyMemoryLimit) {
     writeFile(tempDir_ / "r1.fastq", "@a/1\nACGT\n+\nIIII\n@b/1\nACGT\n+\nIIII\n");
     writeFile(tempDir_ / "r2.fastq", "@a/2\nTGCA\n+\nJJJJ\n");
