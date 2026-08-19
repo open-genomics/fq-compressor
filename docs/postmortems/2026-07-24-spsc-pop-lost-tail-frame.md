@@ -44,7 +44,7 @@ writer: pop() → ... → pop() → nullopt
 
 ## 调查
 
-1. **先怀疑 flaky 环境/资源问题。** 但失败模式是"数据少了一帧"而非超时/崩溃，且每次都是 `recordCount=0`（全丢），不像资源问题。决定深挖。
+1. **先怀疑环境抖动（flaky）/资源问题。** 但失败模式是"数据少了一帧"而非超时/崩溃，且每次都是 `recordCount=0`（全丢），不像资源问题。决定深挖。
 2. **本地复现尝试。** `clang-debug` 跑 200 次、`clang-tsan` 跑 50 次 PairedRun，全过。x86 TSO 内存模型下难复现弱序问题，符合"CI 偶发、本地不复现"的竞态特征。
 3. **读 `SpscQueue` 实现。** 注意到 `head_`、`closed_`、`aborted_` 是三个**独立 atomic**，无共同同步点。`pop()` 先 acquire 读 `head_`（判空），再 acquire 读 `closed_`（判关）。两个 load 之间无 ordering 保证。
 4. **构造竞态场景。** 生产者 `push`（`head_.store(release)`）紧接 `close`（`closed_.store(release)`）。消费者同一轮迭代：先读 `head_` 可能得 stale 值（=tail，判空），再读 `closed_` 得 true。`closed_` 的 acquire 只与 `closed_.store(release)` 建 happens-before，**不保证**之前的 `head_` load 能看到 `push` 的 store。弱内存模型下"新 closed + 旧 head"的撕裂快照合法。
@@ -84,7 +84,7 @@ if (aborted_.load(acquire) || closed_.load(acquire)) {
 
 1. **多 atomic 状态机需显式同步点。** 各自 acquire/release 只保证单变量可见性，不保证跨变量的 load 顺序。若消费者逻辑依赖"先读 A 再读 B"的隐含顺序，必须有一处同时建立两者的 happens-before，否则弱内存模型下会观察到"新 B + 旧 A"的撕裂快照。
 2. **`close` 不是 flush。** `close()` 只声明"不再有新 push"，不等价于"之前的 push 都已可见"。后者需要 `close` 与 `push` 之间有明确的 release-acquire 链。本例中链是存在的（同线程 program order + release store），但消费者必须在**读到 close 之后**重读 head 才能搭上这条链。
-3. **CI flaky ≠ 环境噪声。** 本地不复现、CI 偶发的测试失败，尤其是"数据少了一个/多了"而非"崩溃/超时"，往往指向真实的内存序或并发缺陷。不要用 `--retry` 掩盖。
+3. **CI 偶发失败 ≠ 环境噪声。** 本地不复现、CI 偶发的测试失败，尤其是"数据少了一个/多了"而非"崩溃/超时"，往往指向真实的内存序或并发缺陷。不要用 `--retry` 掩盖。
 4. **小输入是竞态的放大器。** `PairedRun` 用 10 条小记录恰好使整批落入一帧，把竞态窗口压缩到 `pushFrame→close` 这一对操作上，反而比大输入更易命中。压力测试用大输入测吞吐，用**最小输入**测竞态边界。
 5. **TSan 不万能。** TSan 检测数据竞争，但本 bug 是合法 acquire/release 下的"可见性顺序"问题，无 race（每次 load/store 都正确配对），TSan 不报。最终靠根因推理 + 修复后回归确认。
 6. **未加专项回归测试。** 该竞态依赖弱内存模型时序，x86 上无法稳定复现，故未写会 flaky 的专项测试。防护依赖：code review 时审查 SPSC 多 atomic 的 load 顺序，以及任何对 `pop()`/`push()` 的改动须过 tsan 全套。

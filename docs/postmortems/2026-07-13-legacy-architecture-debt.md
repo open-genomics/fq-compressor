@@ -43,8 +43,8 @@ commit `75b7400` 以有界 FQC v2 替换遗留压缩器：
 
 - 8/8 个 CTest 目标在 clang-debug、clang-release、clang-asan（ASan+UBSan）、clang-tsan 下全部通过。
 - `./scripts/lint.sh format-check` 通过。
-- 随机化 64 MiB 全路径运行跨越 x86_64 50/100 下限（见 `performance/baselines/2026-07-13-v0.2.0.md`）。
+- 随机化 64 MiB 全路径运行跨越 x86_64 50/100 下限（基线文件原载于 `performance/baselines/2026-07-13-v0.2.0.md`，已随项目瘦身删除）。
 
 ## 后续与教训
 
-ARM64 与代表性生物学语料仍为发布环境门禁；见 `benchmark_v2/CODEC_GATES.md` 中的编码器准入台账，该台账阻止未经度量的编码器发布。
+ARM64 与代表性生物学语料仍为发布环境门禁；编码器准入台账原载于 `benchmark_v2/CODEC_GATES.md`（已随项目瘦身删除），其理念——任何编码器改动须过体积与吞吐双门槛——留存于 `ARCHITECTURE.md`。

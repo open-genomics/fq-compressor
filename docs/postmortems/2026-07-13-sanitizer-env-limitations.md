@@ -35,4 +35,4 @@
 
 ## 后续与教训
 
-泄漏检测与 vptr 检查仍作为发布环境验证项：在打 release tag 之前，必须在不受限的机器上运行。已记录于 `README.md` 与 `performance/baselines/2026-07-13-v0.2.0.md`。
+泄漏检测与 vptr 检查仍作为发布环境验证项：在打 release tag 之前，必须在不受限的机器上运行。已记录于 `README.md`（基线文件原载于 `performance/baselines/2026-07-13-v0.2.0.md`，已随项目瘦身删除）。

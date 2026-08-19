@@ -4,6 +4,8 @@
 
 ### 文档
 
+- **README 首屏格式族对照**：重写为两实现对照表（仓库、实现语言、格式族 ID、完整 magic、访问模型、对方链接），新增同名二进制 `fqc` 的 `PATH` 覆盖风险提醒。对应 openspec 变更 `document-fqc-format-family`（verification 标注 ready-to-archive=no，待独立审查后再归档）。
+- **postmortem 文档整理**：7 篇复盘文档统一中英混排表述、标点（`--` → `——`）、补充已随项目瘦身删除的基线/台账文件说明，无技术内容变更。
 - **路线图关账**：阶段 H 标为完成；README / ARCHITECTURE / 开发历程同步并行解析后的数据流与合成性能。
 - **真实语料验收**：新增 `docs/real-corpus.md` 与 `scripts/fetch_real_corpus.sh`。公开切片上 Illumina WXS 压缩比 4.15×（优于合成 2.96×），人类 MinION 1.96×（劣于合成，质量流近满字母表）；`--quality-level 7` 仍未过门槛。
 

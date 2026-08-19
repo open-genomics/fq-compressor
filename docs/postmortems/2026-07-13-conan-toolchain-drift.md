@@ -45,4 +45,4 @@
 
 ## 后续与教训
 
-`install_deps.sh` 流程现在每个 preset 产出单一工具链；外部消费方检查已纳入 `README.md` 的 release checklist。
+`install_deps.sh` 流程现在每个 preset 产出单一工具链；外部消费方检查已纳入 `README.md` 的发布清单（release checklist）。

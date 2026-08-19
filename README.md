@@ -1,11 +1,17 @@
 # fq-compressor
 
 
-> **Format family**: `fqc-sequential/v2` — command `fqc`, extension `.fqc`,
-> magic `46 51 43 56 32 0D 0A 1A`. This is distinct from the Rust implementation's
-> `fqc-indexed/v2` (magic `89 46 51 43 0D 0A 1A 0A`). Readers reject the other
-> family's magic with an explicit unsupported-format-family error; extension
-> alone cannot select a decoder.
+> **格式族：`fqc-sequential/v2`**。`fqc` 与 `.fqc` 是两个**同名、不同格式族**的产品：
+> 本仓库（C++）与 [`fq-compressor-rust`](https://github.com/open-genomics/fq-compressor-rust)（Rust）
+> 各自实现自己的 `fqc` 二进制与 `.fqc` 归档，magic 不同、互不兼容、不能互相解码。
+
+| 仓库 | 实现语言 | 格式族 ID | 完整 magic | 访问模型 |
+|---|---|---|---|---|
+| [open-genomics/fq-compressor](https://github.com/open-genomics/fq-compressor)（本仓库） | C++23 | `fqc-sequential/v2` | `46 51 43 56 32 0D 0A 1A`（`FQCV2\r\n\x1A`） | 顺序流式归档；不支持随机访问/按区间提取 |
+| [open-genomics/fq-compressor-rust](https://github.com/open-genomics/fq-compressor-rust) | Rust | `fqc-indexed/v2` | `89 46 51 43 0D 0A 1A 0A` | 块索引归档；支持检视/校验/部分流式 |
+
+扩展名 `.fqc` 不能判定格式：reader 必须检查 archive magic，两个实现以显式的
+unsupported-format-family 错误拒绝对方的 magic，不能互相解码。
 
 **把 FASTQ 压成小而可校验的归档，内存可控，管道友好。**
 
@@ -36,6 +42,10 @@ git clone https://github.com/open-genomics/fq-compressor.git
 cd fq-compressor
 ./scripts/build.sh clang-release
 ```
+
+> **同名二进制 `PATH` 覆盖风险**：两个实现都安装名为 `fqc` 的二进制。若两者同时
+> 进入 `PATH`，后安装者（或 `PATH` 中更靠前的目录）会覆盖另一个，请用 `which fqc`
+> 确认实际调用的实现。
 
 下文示例用 `$fqc` 代指可执行文件路径：
 

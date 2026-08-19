@@ -17,7 +17,7 @@
 ## 调查
 
 - 首先添加了拼接 gzip 支持，随后在多 member 输入上观察到间歇性的短读（short read）。
-- 将输入截断为两个小 member，确认第二个 member 的第一个 chunk 恰好在发生过 move 时缺失。
+- 将输入截断为两个小 member，确认第二个 member 的第一个数据块（chunk）恰好在发生过 move 时缺失。
 - 检查 move 赋值运算符：它转移了 zlib 状态，但没有转移已经解码进 streambuf 取区（get area）且尚未被消费的字节。
 
 ## 根因
@@ -34,4 +34,4 @@ move 赋值运算符在销毁源的 put/get 缓冲时，既没有 flush 也没�
 
 ## 后续与教训
 
-compressed-stream 测试现已包含拼接 gzip 加 move 的用例；bugprone clang-tidy 检查在 `./scripts/lint.sh lint` 中运行。
+压缩流（compressed-stream）测试现已包含拼接 gzip 加 move 的用例；bugprone clang-tidy 检查在 `./scripts/lint.sh lint` 中运行。

@@ -52,7 +52,7 @@ D 只动了压缩路径（reader/encoder/compressor）。解压走 `ArchiveReade
 
 ### 波动量化
 
-同代码同配置两次跑（D 首次 vs D-NOW）：illumina 压缩 55.85 -> 67.11（+20%），解压 59.05 -> 109.43（**+85%**）。WSL2 吞吐波动可达 20-85%，单次性能数字不可信。
+同代码同配置两次跑（D 首次 vs D-NOW）：illumina 压缩 55.85 → 67.11（+20%），解压 59.05 → 109.43（**+85%**）。WSL2 吞吐波动可达 20-85%，单次性能数字不可信。
 
 ## 根因（两层）
 
@@ -82,9 +82,9 @@ D 的真正价值是**揭示新瓶颈在单线程的 reader 与 compressor 两�
 
 无法靠单次性能数字判定，改用三条独立证据交叉：
 
-1. **正确性**：压缩比 4 次跑完全一致（illumina 2.9588 / ont 2.8403）--reorder 只改提交顺序不改帧内容，逻辑正确。
-2. **并发正确性**：clang-tsan 10/10 无竞争--MpmcQueue 多生产多消、N encoder 并行、encoderError mutex、reorder、shutdown 链式全部干净。
-3. **性能同态对比**：D-NOW vs C-NOW（同机器状态），而非 D vs C 原值（跨时）--排除机器漂移。
+1. **正确性**：压缩比 4 次跑完全一致（illumina 2.9588 / ont 2.8403）——reorder 只改提交顺序不改帧内容，逻辑正确。
+2. **并发正确性**：clang-tsan 10/10 无竞争——MpmcQueue 多生产多消、N encoder 并行、encoderError mutex、reorder、shutdown 链式全部干净。
+3. **性能同态对比**：D-NOW vs C-NOW（同机器状态），而非 D vs C 原值（跨时）——排除机器漂移。
 
 三者一致指向：D 架构正确、无回归，性能未提升是瓶颈在别处。
 
@@ -94,4 +94,4 @@ D 的真正价值是**揭示新瓶颈在单线程的 reader 与 compressor 两�
 - **教训一**：WSL2 不适合精细性能归因，吞吐波动 20-85%，单次数字不可信，必须同状态切代码对比。
 - **教训二**：并发优化前先 profiling，盲目并行非瓶颈 stage 会落空（Amdahl）。应先测各 stage 占比，再决定并行谁。
 - **教训三**："无回归"判定要排除机器漂移，跨时比基线会被环境变化伪装成回归或提升；切代码同状态重跑是唯一可靠对比。
-- **教训四**：练手项目价值在原语落地。D 练了 MPMC + reorder + work distribution，已全部落地且 tsan 干净；性能提升是 bonus，未提升不否定 D 的练手价值。
+- **教训四**：练手项目价值在原语落地。D 练了 MPMC + reorder + work distribution，已全部落地且 tsan 干净；性能提升是额外收获，未提升不否定 D 的练手价值。
