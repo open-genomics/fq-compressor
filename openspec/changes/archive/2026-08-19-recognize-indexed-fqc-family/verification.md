@@ -1,6 +1,8 @@
 # Verification: recognize-indexed-fqc-family
 
 - Status: `Completed`
+- Ready to archive: `yes`
+- Verifier: `implementing agent (self-verified)`
 - Date: 2026-08-13
 
 | Case | Evidence | Result |

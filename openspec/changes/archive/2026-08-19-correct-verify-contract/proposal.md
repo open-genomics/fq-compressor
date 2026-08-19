@@ -2,7 +2,7 @@
 
 ## Metadata
 
-- Status: `Completed`
+- Status: `Archived`
 - Task IDs: `FQC-CPP-DOC-001`
 - Prerequisites: none (docs only)
 

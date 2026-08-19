@@ -2,7 +2,7 @@
 
 ## Metadata
 
-- Status: `Completed`
+- Status: `Archived`
 - Task IDs: `FQC-FAMILY-001` (C++)
 - Prerequisites: `FQC-DOC-001` / sequential freeze
 

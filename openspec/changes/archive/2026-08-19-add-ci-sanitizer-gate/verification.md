@@ -1,6 +1,8 @@
 # Verification: add-ci-sanitizer-gate
 
 - Status: `Completed`
+- Ready to archive: `yes`
+- Verifier: `implementing agent (self-verified)`
 - Date: 2026-08-14
 
 | Case | Evidence | Result |

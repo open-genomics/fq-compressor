@@ -31,6 +31,17 @@
 ./scripts/test.sh clang-debug
 ```
 
+## Archived changes
+
+Completed, merged, and moved under `openspec/changes/archive/`:
+
+| Date | Change | Capability |
+|---|---|---|
+| 2026-08-19 | `freeze-sequential-v2-format` | `archive-format` |
+| 2026-08-19 | `correct-verify-contract` | `archive-format` |
+| 2026-08-19 | `recognize-indexed-fqc-family` | `archive-format` |
+| 2026-08-19 | `add-ci-sanitizer-gate` | `ci-quality` |
+
 ## Authority rules
 
 - `src/` is the implementation source of truth.

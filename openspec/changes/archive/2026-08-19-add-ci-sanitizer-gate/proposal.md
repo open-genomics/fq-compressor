@@ -2,7 +2,7 @@
 
 ## Metadata
 
-- Status: `Completed`
+- Status: `Archived`
 - Task IDs: `FQC-CPP-SAN-001`
 - Prerequisites: none (CI already covers clang-debug build + test + format)
 

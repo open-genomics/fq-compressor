@@ -1,6 +1,8 @@
 # Verification: correct-verify-contract
 
 - Status: `Completed`
+- Ready to archive: `yes`
+- Verifier: `implementing agent (self-verified)`
 - Date: 2026-08-13
 
 Acceptance:
