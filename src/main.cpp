@@ -51,8 +51,8 @@ struct VerifyOptions {
     std::string input;
 };
 
-[[nodiscard]] auto checkedMiB(std::uint64_t value, std::string_view option)
-    -> fqc::Result<std::size_t> {
+[[nodiscard]] auto checkedMiB(std::uint64_t value,
+                              std::string_view option) -> fqc::Result<std::size_t> {
     if (value == 0 || value > std::numeric_limits<std::size_t>::max() / kBytesPerMiB) {
         return fqc::makeError<std::size_t>(fqc::ErrorCode::kUsageError,
                                            std::string(option) + " is out of range");
@@ -97,7 +97,11 @@ template <typename T>
 
 }  // namespace
 
-int main(int argc, char* argv[]) {
+/// 全部 CLI 逻辑。与 main 分离，使入口处的 catch-all 能兜住 CLI 构建等
+/// 可能抛出的异常（bugprone-exception-escape）。
+// argv 是标准入口参数签名，不能替换为 std::array。
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays, modernize-avoid-c-arrays)
+auto run(int argc, char* argv[]) -> int {
     GlobalOptions global;
     CompressOptions compress;
     DecompressOptions decompress;
@@ -137,7 +141,7 @@ int main(int argc, char* argv[]) {
                      compress.qualityLevel,
                      "zstd level for the quality stream (ID/sequence stay at 1)")
         ->default_val(1)
-        ->check(CLI::Range(1, 19));
+        ->check(CLI::Range(fqc::format::kMinZstdLevel, fqc::format::kMaxZstdLevel));
     compressCommand
         ->add_option("--parse-workers",
                      compress.parseWorkers,
@@ -175,7 +179,6 @@ int main(int argc, char* argv[]) {
             return reportError(memoryLimit);
         }
 
-        const fqc::commands::ArchiveEngine engine;
         if (*compressCommand) {
             auto targetFrameBytes = checkedMiB(compress.frameMiB, "--frame-mib");
             if (!targetFrameBytes) {
@@ -185,36 +188,47 @@ int main(int argc, char* argv[]) {
             if (!profile) {
                 return reportError(profile);
             }
-            auto result = engine.compress({.inputPath = compress.input,
-                                           .matePath = compress.mate,
-                                           .outputPath = compress.output,
-                                           .profile = *profile,
-                                           .memoryLimitBytes = *memoryLimit,
-                                           .targetFrameBytes = *targetFrameBytes,
-                                           .qualityZstdLevel = compress.qualityLevel,
-                                           .parseWorkers = compress.parseWorkers,
-                                           .forceOverwrite = compress.force});
+            auto result =
+                fqc::commands::ArchiveEngine::compress({.inputPath = compress.input,
+                                                        .matePath = compress.mate,
+                                                        .outputPath = compress.output,
+                                                        .profile = *profile,
+                                                        .memoryLimitBytes = *memoryLimit,
+                                                        .targetFrameBytes = *targetFrameBytes,
+                                                        .qualityZstdLevel = compress.qualityLevel,
+                                                        .parseWorkers = compress.parseWorkers,
+                                                        .forceOverwrite = compress.force});
             if (!result) {
                 return reportError(result);
             }
             logStats("compression", *result, global.quiet);
         } else if (*decompressCommand) {
-            auto result = engine.decompress({.inputPath = decompress.input,
-                                             .outputPath = decompress.output,
-                                             .memoryLimitBytes = *memoryLimit,
-                                             .forceOverwrite = decompress.force});
+            auto result =
+                fqc::commands::ArchiveEngine::decompress({.inputPath = decompress.input,
+                                                          .outputPath = decompress.output,
+                                                          .memoryLimitBytes = *memoryLimit,
+                                                          .forceOverwrite = decompress.force});
             if (!result) {
                 return reportError(result);
             }
             logStats("decompression", *result, global.quiet);
         } else if (*verifyCommand) {
-            auto result = engine.verify(verify.input, *memoryLimit);
+            auto result = fqc::commands::ArchiveEngine::verify(verify.input, *memoryLimit);
             if (!result) {
                 return reportError(result);
             }
             logStats("verification", *result, global.quiet);
         }
         return 0;
+    } catch (const std::exception& error) {
+        FQC_LOG_ERROR("unexpected error: {}", error.what());
+        return 3;
+    }
+}  // run()
+
+auto main(int argc, char* argv[]) -> int {
+    try {
+        return run(argc, argv);
     } catch (const std::exception& error) {
         FQC_LOG_ERROR("unexpected error: {}", error.what());
         return 3;

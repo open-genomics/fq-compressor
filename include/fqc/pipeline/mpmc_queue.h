@@ -50,6 +50,8 @@ public:
 
     MpmcQueue(const MpmcQueue&) = delete;
     MpmcQueue& operator=(const MpmcQueue&) = delete;
+    MpmcQueue(MpmcQueue&&) = delete;
+    MpmcQueue& operator=(MpmcQueue&&) = delete;
 
     /// Enqueue an item. Returns false if `st` was stop-requested; otherwise
     /// blocks until space is available and returns true. Safe for concurrent
@@ -108,7 +110,7 @@ public:
     /// blocked consumers wake, drain the remaining items, then see `nullopt`.
     void close() {
         {
-            std::lock_guard lock(m_);
+            const std::lock_guard lock(m_);
             closed_ = true;
         }
         cvNotEmpty_.notify_all();

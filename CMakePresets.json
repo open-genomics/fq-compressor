@@ -69,13 +69,26 @@
                 "CMAKE_EXE_LINKER_FLAGS_DEBUG": "-stdlib=libc++ -lc++abi -fsanitize=thread",
                 "CMAKE_SHARED_LINKER_FLAGS_DEBUG": "-stdlib=libc++ -lc++abi -fsanitize=thread"
             }
+        },
+        {
+            "name": "clang-coverage",
+            "displayName": "Clang Coverage (llvm-cov)",
+            "inherits": "clang-base",
+            "toolchainFile": "${sourceDir}/build/${presetName}/build/Debug/generators/conan_toolchain.cmake",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CMAKE_CXX_FLAGS_DEBUG": "-g -O1 -DDEBUG -fprofile-instr-generate -fcoverage-mapping",
+                "CMAKE_EXE_LINKER_FLAGS_DEBUG": "-stdlib=libc++ -lc++abi -fprofile-instr-generate -fcoverage-mapping",
+                "CMAKE_SHARED_LINKER_FLAGS_DEBUG": "-stdlib=libc++ -lc++abi -fprofile-instr-generate -fcoverage-mapping"
+            }
         }
     ],
     "buildPresets": [
         { "name": "clang-debug", "configurePreset": "clang-debug" },
         { "name": "clang-release", "configurePreset": "clang-release" },
         { "name": "clang-asan", "configurePreset": "clang-asan" },
-        { "name": "clang-tsan", "configurePreset": "clang-tsan" }
+        { "name": "clang-tsan", "configurePreset": "clang-tsan" },
+        { "name": "clang-coverage", "configurePreset": "clang-coverage" }
     ],
     "testPresets": [
         {
@@ -101,6 +114,12 @@
             "configurePreset": "clang-tsan",
             "output": { "outputOnFailure": true, "verbosity": "verbose" },
             "execution": { "noTestsAction": "error", "stopOnFailure": true }
+        },
+        {
+            "name": "clang-coverage",
+            "configurePreset": "clang-coverage",
+            "output": { "outputOnFailure": true },
+            "execution": { "noTestsAction": "error" }
         }
     ]
 }

@@ -71,7 +71,7 @@ struct ReadPair {
 /// - success + value: a record; `second` is set in paired mode
 /// - success + empty: clean EOF; both ends EOF in paired mode
 /// - error: parse failure, or paired record counts disagree (`kFormatError`)
-[[nodiscard]] auto readRecordPair(FastqParser& primary, FastqParser* mate)
-    -> Result<std::optional<ReadPair>>;
+[[nodiscard]] auto readRecordPair(FastqParser& primary,
+                                  FastqParser* mate) -> Result<std::optional<ReadPair>>;
 
 }  // namespace fqc::io

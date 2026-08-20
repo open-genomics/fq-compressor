@@ -37,11 +37,9 @@ constexpr std::uint8_t kQualityCodecZstd = 1;
 constexpr std::size_t kCodecMemoryReserve = std::size_t{16} * 1024 * 1024;
 // ID/sequence streams always compress at this level (throughput-oriented; the
 // ratio/level curve flattens early on these streams). Only the quality stream
-// gets a configurable level (ArchiveOptions::qualityZstdLevel).
+// gets a configurable level (ArchiveOptions::qualityZstdLevel), bounded by the
+// public kMinZstdLevel/kMaxZstdLevel (single source of truth, shared with CLI).
 constexpr int kStreamZstdLevel = 1;
-// Accepted range for the configurable quality level (matches the CLI check).
-constexpr int kMinZstdLevel = 1;
-constexpr int kMaxZstdLevel = 19;
 
 using Bytes = std::vector<std::uint8_t>;
 
@@ -101,8 +99,8 @@ void appendString(Bytes& output, std::string_view value) {
     return static_cast<std::uint32_t>(value);
 }
 
-[[nodiscard]] auto writeBytes(std::ostream& output, std::span<const std::uint8_t> bytes)
-    -> VoidResult {
+[[nodiscard]] auto writeBytes(std::ostream& output,
+                              std::span<const std::uint8_t> bytes) -> VoidResult {
     output.write(reinterpret_cast<const char*>(bytes.data()),
                  static_cast<std::streamsize>(bytes.size()));
     if (!output) {
@@ -357,8 +355,8 @@ void appendPackedSequence(Bytes& output, std::string_view sequence) {
     return output;
 }
 
-[[nodiscard]] auto decompress(std::span<const std::uint8_t> input, std::size_t outputSize)
-    -> Result<Bytes> {
+[[nodiscard]] auto decompress(std::span<const std::uint8_t> input,
+                              std::size_t outputSize) -> Result<Bytes> {
     Bytes output(outputSize);
     const auto result = ZSTD_decompress(output.data(), output.size(), input.data(), input.size());
     if (ZSTD_isError(result) != 0U || result != outputSize) {
@@ -375,8 +373,8 @@ void appendPackedSequence(Bytes& output, std::string_view sequence) {
     return XXH64(qualities.data(), qualities.size(), checksum);
 }
 
-[[nodiscard]] auto advanceGlobalChecksumImpl(std::uint64_t current, std::uint64_t frameChecksum)
-    -> std::uint64_t {
+[[nodiscard]] auto advanceGlobalChecksumImpl(std::uint64_t current,
+                                             std::uint64_t frameChecksum) -> std::uint64_t {
     Bytes encoded;
     encoded.reserve(8);
     appendU64(encoded, frameChecksum);
@@ -568,7 +566,9 @@ struct RawStreamSizes {
                                       "FQC v2 frame memory estimate overflow");
     }
     for (const auto rawSize : {rawIds, rawSequences, rawQualities}) {
-        if (!checkedAdd(peak, rawSize) || !checkedAdd(peak, rawSize)) {
+        // 每路原始流在估算中计入一次（原实现重复调用 checkedAdd 把 raw 计了两遍，
+        // 峰值被系统性高估；修正为单次累计，见 clang-tidy misc-redundant-expression）
+        if (!checkedAdd(peak, rawSize)) {
             return makeError<std::size_t>(ErrorCode::kFormatError,
                                           "FQC v2 frame memory estimate overflow");
         }
@@ -601,8 +601,8 @@ auto parseProfile(std::string_view value) -> Result<DatasetProfile> {
                                      "unknown dataset profile: " + std::string(value));
 }
 
-auto encodeFrame(std::span<const ReadRecord> records, const ArchiveOptions& options)
-    -> Result<std::unique_ptr<EncodedFrame>> {
+auto encodeFrame(std::span<const ReadRecord> records,
+                 const ArchiveOptions& options) -> Result<std::unique_ptr<EncodedFrame>> {
     if (records.empty()) {
         return makeError<std::unique_ptr<EncodedFrame>>(ErrorCode::kUsageError,
                                                         "FQC v2 frame cannot be empty");
@@ -646,8 +646,8 @@ auto encodeFrame(std::span<const ReadRecord> records, const ArchiveOptions& opti
     return frame;
 }
 
-auto compressFrame(std::unique_ptr<EncodedFrame> frame, int qualityZstdLevel)
-    -> Result<std::unique_ptr<CompressedFrame>> {
+auto compressFrame(std::unique_ptr<EncodedFrame> frame,
+                   int qualityZstdLevel) -> Result<std::unique_ptr<CompressedFrame>> {
     if (frame == nullptr) {
         return makeError<std::unique_ptr<CompressedFrame>>(ErrorCode::kUsageError,
                                                            "FQC v2 encoded frame is null");
@@ -941,7 +941,11 @@ auto ArchiveReader::readFrame() -> Result<std::optional<std::vector<ReadRecord>>
     if (!raw->has_value()) {
         // Footer reached: readRawFrame has structurally parsed and stashed it;
         // validation happens against this reader's accumulated state.
-        const auto& footerData = *footer_;
+        auto footerResult = footer();
+        if (!footerResult) {
+            return makeError<std::optional<std::vector<ReadRecord>>>(footerResult.error());
+        }
+        const auto& footerData = *footerResult;
         if (footerData.frameCount != stats_.frameCount ||
             footerData.recordCount != stats_.recordCount ||
             footerData.totalBases != stats_.totalBases) {
@@ -955,6 +959,8 @@ auto ArchiveReader::readFrame() -> Result<std::optional<std::vector<ReadRecord>>
         return std::optional<std::vector<ReadRecord>>{};
     }
 
+    // raw 是否 engaged 已由上方 has_value 分支保证；检查器无法跨 `**` 双解引用推导
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     auto decoded = decodeRawFrame(**raw);
     if (!decoded) {
         return makeError<std::optional<std::vector<ReadRecord>>>(decoded.error());

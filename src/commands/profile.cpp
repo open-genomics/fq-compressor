@@ -39,7 +39,7 @@ constexpr std::initializer_list<std::string_view> kClrHeaderNeedles = {"pacbio",
 
 /// Archive-generated FASTQ IDs look like `DRR171398.1` / `ERR123.1` / `SRR…`.
 [[nodiscard]] auto looksLikeInsdcRunId(std::string_view id) -> bool {
-    if (id.size() < 4 || !std::isdigit(static_cast<unsigned char>(id[3]))) {
+    if (id.size() < 4 || (std::isdigit(static_cast<unsigned char>(id[3])) == 0)) {
         return false;
     }
     const char first = asciiLower(id[0]);

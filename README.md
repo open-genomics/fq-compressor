@@ -1,6 +1,8 @@
 # fq-compressor
 
-把 FASTQ 压成**小而可校验**的归档：内存可控、管道友好、压缩比约 2.8–2.9×。
+把 FASTQ 压成**小而可校验**的归档：内存可控、管道友好。压缩比视数据而定——
+合成数据约 2.8–2.9×，真实语料 1.96–4.15×（详见 [性能](#性能) 与
+[docs/real-corpus.md](docs/real-corpus.md)）。
 
 > **格式族 `fqc-sequential/v2`**（magic `46 51 43 56 32 0D 0A 1A`，`FQCV2\r\n\x1A`）：
 > 与 [fq-compressor-rust](https://github.com/open-genomics/fq-compressor-rust)
@@ -8,12 +10,37 @@
 > magic 与字节布局不同，不能互相解码；`.fqc` 扩展名不能判定格式，reader 必须检查 archive magic。
 
 [![CI 状态](https://github.com/open-genomics/fq-compressor/actions/workflows/ci.yml/badge.svg)](https://github.com/open-genomics/fq-compressor/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/open-genomics/fq-compressor/branch/master/graph/badge.svg)](https://codecov.io/gh/open-genomics/fq-compressor)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 ![C++23](https://img.shields.io/badge/C%2B%2B-23-blue.svg)
 ![CMake 3.28+](https://img.shields.io/badge/CMake-3.28%2B-blue.svg)
 ![Conan 2.x](https://img.shields.io/badge/Conan-2.x-blue.svg)
 
-[快速开始](#快速开始) · [核心算法](#核心算法) · [高性能架构](#高性能架构) · [性能](#性能)
+[安装与获取](#安装与获取) · [快速开始](#快速开始) · [核心算法](#核心算法) · [高性能架构](#高性能架构) · [性能](#性能) · [同类工具对比](#同类工具对比)
+
+## 安装与获取
+
+**Linux x86_64**：从 [GitHub Releases](https://github.com/open-genomics/fq-compressor/releases)
+下载 `fqc` 与 `SHA256SUMS`，核对校验和后再运行：
+
+```bash
+curl -LO https://github.com/open-genomics/fq-compressor/releases/latest/download/fqc
+curl -LO https://github.com/open-genomics/fq-compressor/releases/latest/download/SHA256SUMS
+sha256sum -c --ignore-missing SHA256SUMS
+chmod +x fqc && ./fqc --version
+```
+
+> Release 在打 `v*` tag 时由 CI 自动构建并附加（见
+> [.github/workflows/release.yml](.github/workflows/release.yml)）；发布前会跑一次
+> round-trip + verify 回归 sanity。
+
+**其他平台 / 从源码构建**：需 clang-18 + libc++、CMake 3.28+、Conan 2.x、Ninja，
+工具链要求与质量门禁见 [docs/building.md](docs/building.md)：
+
+```bash
+git clone https://github.com/open-genomics/fq-compressor.git
+cd fq-compressor && ./scripts/build.sh clang-release
+```
 
 ## 快速开始
 
@@ -75,7 +102,17 @@ FASTQ 记录的信息字段——ID、序列、质量值——按**列式分离*
 | Illumina-like 150 bp | **148.84 MiB/s** | +47.7% | 2.96× |
 | ONT-like 20 kbp | 与顺序路径持平 | — | 2.84× |
 
-真实生物语料实测见 [docs/real-corpus.md](docs/real-corpus.md)。
+真实生物语料实测（Illumina WXS 4.15×、ONT 1.96× 等）见
+[docs/real-corpus.md](docs/real-corpus.md)；合成数据不代表真实压缩比——短读质量
+集中时更高，长读质量近满字母表时可以更低。
+
+## 同类工具对比
+
+相对通用 `gzip`/`zstd`（无结构感知，约 2–4× 缩小），FQC v2 吃 FASTQ 字段结构
+（2-bit 序列打包、独立质量流），压缩比更高；同为无参专用的 SPRING/fqzcomp 在压缩比
+上通常更强，但依赖全局重排或稠密上下文建模——非流式、内存随数据规模增长。本项目
+的取舍是**流式、内存有界、快速可校验**，压缩比让位于工程可用性。调研全景见
+[docs/fastq-compression-survey.md](docs/fastq-compression-survey.md)。
 
 ## 已知限制
 
@@ -92,6 +129,9 @@ FASTQ 记录的信息字段——ID、序列、质量值——按**列式分离*
 | 架构与字节布局 | [ARCHITECTURE.md](ARCHITECTURE.md) |
 | 真实语料验收 | [docs/real-corpus.md](docs/real-corpus.md) |
 | 并发路线图与开发历程 | [docs/roadmap.md](docs/roadmap.md) |
+| 决策记录（ADR） | [docs/decisions/](docs/decisions/README.md) |
+| 贡献指南 | [CONTRIBUTING.md](CONTRIBUTING.md) |
+| 安全漏洞上报 | [SECURITY.md](SECURITY.md) |
 | 变更记录 | [CHANGELOG.md](CHANGELOG.md) |
 
 ## 许可证

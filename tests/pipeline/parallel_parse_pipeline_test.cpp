@@ -35,8 +35,9 @@ using fqc::pipeline::ParallelParsePipeline;
 
 namespace {
 
-[[nodiscard]] auto makeFastq(int count, int sequenceLength = 150, bool atQuality = false)
-    -> std::string {
+[[nodiscard]] auto makeFastq(int count,
+                             int sequenceLength = 150,
+                             bool atQuality = false) -> std::string {
     std::string fastq;
     for (int i = 0; i < count; ++i) {
         fastq += "@read_" + std::to_string(i) + " comment\n";

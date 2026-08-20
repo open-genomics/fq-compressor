@@ -28,7 +28,7 @@ namespace {
 /// producer), so the writer's reorder buffer can restore submission order
 /// after out-of-order decoding.
 struct InputFrame {
-    std::uint64_t frameId;
+    std::uint64_t frameId{};
     std::unique_ptr<format::RawFrame> frame;
 };
 
@@ -36,7 +36,7 @@ struct InputFrame {
 /// the queue moves only the pointer -- the records vector of a large frame is
 /// the single biggest allocation in the pipeline.
 struct OrderedFrame {
-    std::uint64_t frameId;
+    std::uint64_t frameId{};
     std::unique_ptr<format::DecodedFrame> frame;
 };
 
@@ -49,7 +49,8 @@ DecompressPipeline::DecompressPipeline(std::size_t maxFrameBytes,
       memoryLimitBytes_(memoryLimitBytes),
       parallelism_(parallelism == 0 ? 1 : parallelism) {}
 
-auto DecompressPipeline::run(std::istream& input, RecordSink sink) -> Result<DecompressStats> {
+auto DecompressPipeline::run(std::istream& input,
+                             RecordSink sink) const -> Result<DecompressStats> {
     MpmcQueue<InputFrame, kDefaultQueueDepth> queue1;
     MpmcQueue<OrderedFrame, kDefaultQueueDepth> queue2;
     std::optional<Error> readerError;
@@ -125,7 +126,7 @@ auto DecompressPipeline::run(std::istream& input, RecordSink sink) -> Result<Dec
             auto decoded = format::decodeRawFrame(*in->frame);
             if (!decoded) {
                 {
-                    std::lock_guard lk(decoderErrorMutex);
+                    const std::lock_guard lk(decoderErrorMutex);
                     if (!decoderError) {
                         decoderError = decoded.error();
                     }

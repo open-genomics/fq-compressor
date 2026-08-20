@@ -1,0 +1,62 @@
+name: 'Conan build'
+description: |
+  Install the clang-18/libc++ toolchain, run `conan install`, then build a
+  CMake preset. Shared by ci.yml and release.yml so the toolchain/conan steps
+  have a single source of truth.
+
+  ccache is wired up when present on PATH (CI provides it via
+  ccache-action): CMAKE_<LANG>_COMPILER_LAUNCHER is exported from the
+  environment so CMake seeds the cache with it when not already set. If
+  ccache is absent the build still works, just without the accelerator.
+
+inputs:
+  preset:
+    description: 'CMake preset to build (clang-debug / clang-asan / clang-coverage / clang-release)'
+    required: true
+  conan-build-type:
+    description: "Conan `build_type` setting (Debug / Release)"
+    required: true
+    default: 'Debug'
+  extra-conan-args:
+    description: 'Extra arguments appended to `conan install` (e.g. `--build=gtest*`)'
+    required: false
+    default: ''
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Install toolchain
+      shell: bash
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install -y -qq \
+          clang-18 clang-format-18 libc++-18-dev libc++abi-18-dev ninja-build
+        sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-18 100
+        sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-18 100
+        sudo update-alternatives --install /usr/bin/clang-format clang-format /usr/bin/clang-format-18 100
+        pip install conan --quiet
+
+    - name: Conan install
+      shell: bash
+      env:
+        # 让 Conan 在 --build=missing 从源码构建依赖时，CMake 选用 clang 而非
+        # 系统默认的 gcc；否则 libc++ 工具链会把 -stdlib=libc++ 传给 gcc 而报错
+        CC: clang
+        CXX: clang++
+      run: |
+        conan profile detect --force
+        conan install . --output-folder=build/${{ inputs.preset }} --build=missing \
+          ${{ inputs.extra-conan-args }} \
+          -s build_type=${{ inputs.conan-build-type }} \
+          -s compiler=clang \
+          -s compiler.version=18 \
+          -s compiler.libcxx=libc++ \
+          -s compiler.cppstd=23
+
+    - name: Build
+      shell: bash
+      env:
+        # 若 ccache 在 PATH 中则启用；否则为无害 no-op
+        CMAKE_C_COMPILER_LAUNCHER: ccache
+        CMAKE_CXX_COMPILER_LAUNCHER: ccache
+      run: ./scripts/build.sh ${{ inputs.preset }}

@@ -1,0 +1,61 @@
+name: Release
+
+# 打 v* tag 时构建 release 二进制并附到对应 GitHub Release。
+# CHANGELOG 发布段与 tag 由发布者在 commit 时同步维护。
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup ccache
+        uses: hendrikmuhs/ccache-action@v1
+        with:
+          key: release-${{ runner.os }}
+
+      - name: Build release binary
+        uses: ./.github/actions/conan-build
+        with:
+          preset: clang-release
+          conan-build-type: Release
+
+      # 发布回归 sanity：不做性能断言（CI 吞吐波动 ±20-85%，见
+      # docs/roadmap.md 阶段 E），只验证 round-trip 与 verify 功能可用。
+      - name: Round-trip and verify sanity
+        run: |
+          set -euo pipefail
+          fqc=build/clang-release/src/fqc
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
+          "$fqc" compress -i tests/fixtures/sequential-v2/input_se.fastq -o "$tmp/se.fqc"
+          "$fqc" verify "$tmp/se.fqc"
+          "$fqc" decompress -i "$tmp/se.fqc" -o "$tmp/se.out.fastq"
+          cmp tests/fixtures/sequential-v2/input_se.fastq "$tmp/se.out.fastq"
+          "$fqc" --version
+          echo "::notice::release smoke test passed"
+
+      - name: Stage artifacts
+        run: |
+          mkdir -p dist
+          cp build/clang-release/src/fqc dist/fqc
+          ldd dist/fqc
+          sha256sum dist/fqc > dist/SHA256SUMS
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          fail_on_unmatched_files: true
+          generate_release_notes: true

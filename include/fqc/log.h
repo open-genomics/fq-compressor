@@ -1,12 +1,13 @@
 #pragma once
 
+#include <cstdint>
 #include <cstdio>
 
 #include <fmt/format.h>
 
 namespace fqc::log {
 
-enum class Level : int { kDebug = 0, kInfo, kWarning, kError };
+enum class Level : std::uint8_t { kDebug = 0, kInfo, kWarning, kError };
 
 inline Level threshold = Level::kInfo;
 
@@ -25,8 +26,9 @@ constexpr const char* tag(Level l) {
 
 template <typename... Args>
 void emit(Level lvl, fmt::format_string<Args...> f, Args&&... args) {
-    if (static_cast<int>(lvl) < static_cast<int>(threshold))
+    if (static_cast<int>(lvl) < static_cast<int>(threshold)) {
         return;
+    }
     fmt::println(stderr, "[{}] {}", tag(lvl), fmt::format(f, std::forward<Args>(args)...));
 }
 

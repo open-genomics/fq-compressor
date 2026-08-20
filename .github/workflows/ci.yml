@@ -19,38 +19,16 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Install toolchain
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq clang-18 clang-format-18 libc++-18-dev libc++abi-18-dev ninja-build
-          sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-18 100
-          sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-18 100
-          sudo update-alternatives --install /usr/bin/clang-format clang-format /usr/bin/clang-format-18 100
-          pip install conan --quiet
-
-      - name: Cache Conan
-        uses: actions/cache@v5
+      - name: Setup ccache
+        uses: hendrikmuhs/ccache-action@v1
         with:
-          path: ~/.conan2
-          key: conan-${{ hashFiles('conanfile.py') }}
+          key: debug-${{ runner.os }}
 
-      - name: Conan install
-        env:
-          # 让 Conan 在 --build=missing 从源码构建依赖时，CMake 选用 clang 而非
-          # 系统默认的 gcc；否则 libc++ 工具链会把 -stdlib=libc++ 传给 gcc 而报错
-          CC: clang
-          CXX: clang++
-        run: |
-          conan profile detect --force
-          conan install . --output-folder=build/clang-debug --build=missing \
-            -s build_type=Debug \
-            -s compiler=clang \
-            -s compiler.version=18 \
-            -s compiler.libcxx=libc++ \
-            -s compiler.cppstd=23
-
-      - name: Build (clang-debug)
-        run: ./scripts/build.sh clang-debug
+      - name: Conan install + build (clang-debug)
+        uses: ./.github/actions/conan-build
+        with:
+          preset: clang-debug
+          conan-build-type: Debug
 
       - name: Test (clang-debug)
         run: ./scripts/test.sh clang-debug
@@ -63,39 +41,20 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Install toolchain
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq clang-18 libc++-18-dev libc++abi-18-dev ninja-build
-          sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-18 100
-          sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-18 100
-          pip install conan --quiet
-
-      - name: Cache Conan
-        uses: actions/cache@v5
+      - name: Setup ccache
+        uses: hendrikmuhs/ccache-action@v1
         with:
-          path: ~/.conan2
-          key: conan-${{ hashFiles('conanfile.py') }}
+          key: asan-${{ runner.os }}
 
-      - name: Conan install (clang-asan)
-        env:
-          # 与 build-and-test 相同的 clang/libc++ 工具链。--build=gtest* 强制
-          # GTest 与项目同工具链从源码构建，避免预编译包混链在 gtest 静态注册
-          # 阶段触发 libc++ 容器注解误报（见 docs/postmortems/2026-07-13-*）
-          CC: clang
-          CXX: clang++
-        run: |
-          conan profile detect --force
-          conan install . --output-folder=build/clang-asan --build=missing \
-            --build=gtest* \
-            -s build_type=Debug \
-            -s compiler=clang \
-            -s compiler.version=18 \
-            -s compiler.libcxx=libc++ \
-            -s compiler.cppstd=23
-
-      - name: Build (clang-asan)
-        run: ./scripts/build.sh clang-asan
+      - name: Conan install + build (clang-asan)
+        uses: ./.github/actions/conan-build
+        with:
+          preset: clang-asan
+          conan-build-type: Debug
+          # --build=gtest* 强制 GTest 与项目同工具链从源码构建，避免预编译包
+          # 混链在 gtest 静态注册阶段触发 libc++ 容器注解误报
+          # （见 docs/postmortems/2026-07-13-*）
+          extra-conan-args: --build=gtest*
 
       - name: Test (clang-asan)
         env:
@@ -106,3 +65,90 @@ jobs:
           #    系统性误报（本地 libc++19 不触发）；其余 ASan/UBSan 检查保持启用。
           ASAN_OPTIONS: detect_leaks=0:alloc_dealloc_mismatch=0
         run: ./scripts/test.sh clang-asan
+
+  coverage:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup ccache
+        uses: hendrikmuhs/ccache-action@v1
+        with:
+          key: coverage-${{ runner.os }}
+
+      - name: Install llvm-cov tooling
+        run: sudo apt-get install -y -qq llvm-18
+
+      - name: Conan install + build (clang-coverage)
+        uses: ./.github/actions/conan-build
+        with:
+          preset: clang-coverage
+          conan-build-type: Debug
+
+      - name: Run tests with profile capture
+        env:
+          # 每个测试进程写独立的 .profraw（%p = pid）；ctest 子进程继承该环境变量
+          LLVM_PROFILE_FILE: /tmp/prof/%p.profraw
+        run: |
+          mkdir -p /tmp/prof
+          ./scripts/test.sh clang-coverage
+
+      - name: Generate coverage report (lcov)
+        run: |
+          set -euo pipefail
+          if ! compgen -G "/tmp/prof/*.profraw" > /dev/null; then
+            echo "no profraw produced" >&2
+            exit 1
+          fi
+          llvm-profdata-18 merge -sparse /tmp/prof/*.profraw -o coverage.profdata
+          # 只统计 src/include 下的生产代码；排除构建产物与测试自身源码
+          objects=(build/clang-coverage/src/fqc)
+          while IFS= read -r t; do objects+=("$t"); done \
+            < <(find build/clang-coverage/tests -type f -perm -u+x \
+                  -not -name '*.a' -not -name '*.o' -not -name '*.ninja' | sort)
+          llvm-cov-18 export -format=lcov -instr-profile=coverage.profdata \
+            -ignore-filename-regex='(^|[\\/])(build|\.conan2|tests)[\\/]' \
+            "${objects[@]/#/-object=}" > coverage.info
+          wc -l coverage.info
+
+      - name: Upload to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: coverage.info
+          # token 未配置时（新仓库/未授权）不阻断 CI，报告仅存 artifact
+          fail_ci_if_error: false
+
+  clang-tidy:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup ccache
+        uses: hendrikmuhs/ccache-action@v1
+        with:
+          key: tidy-${{ runner.os }}
+
+      - name: Install clang-tidy
+        run: sudo apt-get install -y -qq clang-tidy-18
+
+      # 构建 clang-debug 仅为获得 compile_commands.json（无需测试）
+      - name: Conan install + build (clang-debug)
+        uses: ./.github/actions/conan-build
+        with:
+          preset: clang-debug
+          conan-build-type: Debug
+
+      - name: Run clang-tidy on production sources
+        run: |
+          set -euo pipefail
+          # 只对 src/ 下的生产源做静态分析（tests 排除，HeaderFilterRegex
+          # 已限定 src|include）。.clang-tidy 设 WarningsAsErrors='*'，
+          # 任一告警即失败（门禁语义）。
+          failed=0
+          while IFS= read -r f; do
+            if ! clang-tidy-18 -p build/clang-debug "$f" 2>&1; then
+              failed=1
+            fi
+          done < <(find src -name '*.cpp' | sort)
+          exit $failed

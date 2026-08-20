@@ -50,8 +50,9 @@ struct OrderedItem {
 
 /// Reads one raw line, advancing the absolute `offset` past the delimiter.
 /// Trims '\r' like the parser does. Returns false at EOF.
-[[nodiscard]] auto readRawLine(std::istream& input, std::string& line, std::uint64_t& offset)
-    -> bool {
+[[nodiscard]] auto readRawLine(std::istream& input,
+                               std::string& line,
+                               std::uint64_t& offset) -> bool {
     if (!std::getline(input, line)) {
         return false;
     }
@@ -62,8 +63,8 @@ struct OrderedItem {
 
 }  // namespace
 
-auto findFirstRecordStart(std::istream& input, std::uint64_t baseOffset)
-    -> std::optional<std::uint64_t> {
+auto findFirstRecordStart(std::istream& input,
+                          std::uint64_t baseOffset) -> std::optional<std::uint64_t> {
     std::string l0;
     std::string l1;
     std::string l2;
@@ -125,6 +126,9 @@ ParallelParsePipeline::ParallelParsePipeline(std::filesystem::path inputPath,
       sampleEndOffset_(sampleEndOffset),
       parallelism_(parallelism == 0 ? 1 : parallelism) {}
 
+// 并行解析管线按帧号维护一个有序窗口（chunk 乱序产出、严格按序提交），
+// 每个阶段的状态机交错是这一不变量所必需，拆分为独立函数反而更难推理。
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 auto ParallelParsePipeline::run(std::span<const ReadRecord> initialRecords,
                                 format::ArchiveWriter& writer) -> Result<PipelineStats> {
     MpmcQueue<ParseItem, kDefaultQueueDepth> queue1;
@@ -150,7 +154,7 @@ auto ParallelParsePipeline::run(std::span<const ReadRecord> initialRecords,
     std::stop_token stopToken = stopSource.get_token();
 
     auto recordError = [&](const Error& error) {
-        std::lock_guard lk(errorMutex);
+        const std::lock_guard lk(errorMutex);
         if (!parseError) {
             parseError = error;
         }
@@ -316,7 +320,7 @@ auto ParallelParsePipeline::run(std::span<const ReadRecord> initialRecords,
             encodeNs += nanosSince(encodeStart);
             if (!encoded) {
                 {
-                    std::lock_guard lk(errorMutex);
+                    const std::lock_guard lk(errorMutex);
                     if (!encoderError) {
                         encoderError = encoded.error();
                     }
@@ -330,7 +334,7 @@ auto ParallelParsePipeline::run(std::span<const ReadRecord> initialRecords,
             compressNs += nanosSince(compressStart);
             if (!compressed) {
                 {
-                    std::lock_guard lk(errorMutex);
+                    const std::lock_guard lk(errorMutex);
                     if (!encoderError) {
                         encoderError = compressed.error();
                     }

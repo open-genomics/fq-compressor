@@ -41,6 +41,14 @@
 
 cli11、fmt、zlib-ng、zstd、xxhash、gtest（仅测试）
 
+## 注释与文档语言
+
+- **公开头文件 API 注释用英文**（`include/fqc/**` 下的 Doxygen 风格 `///` 文档），
+  保证跨语言协作者与工具链（Doxygen）可读。
+- **实现内注释用中文**（`.cpp` 内的行内/块注释），解释"为什么"与取舍，不复述代码。
+- 文档（README、docs/、CHANGELOG、openspec、tests/README）用中文。
+- 新代码遵循上述策略；不要顺手翻写既有注释（避免无价值 diff）。
+
 ## Git
 
 - 提交信息使用中文

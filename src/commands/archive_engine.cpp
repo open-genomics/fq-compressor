@@ -121,7 +121,8 @@ private:
 }
 
 [[nodiscard]] constexpr auto nsToMs(std::uint64_t ns) -> double {
-    return static_cast<double>(ns) / 1e6;
+    constexpr double kNsPerMillisecond = 1e6;
+    return static_cast<double>(ns) / kNsPerMillisecond;
 }
 
 /// Per-stage wall-clock plus queue snapshots. Info level, so `-q` suppresses it.
@@ -257,7 +258,7 @@ void logPipelineObservability(const pipeline::PipelineStats& stats) {
     };
 }
 
-auto ArchiveEngine::compress(const CompressionRequest& request) const -> Result<OperationStats> {
+auto ArchiveEngine::compress(const CompressionRequest& request) -> Result<OperationStats> {
     FQC_TRY(validateMemoryLimit(request.memoryLimitBytes));
     if (request.targetFrameBytes == 0) {
         return makeError<OperationStats>(ErrorCode::kUsageError,
@@ -324,7 +325,8 @@ auto ArchiveEngine::compress(const CompressionRequest& request) const -> Result<
                                                        request.parseWorkers);
         pipelineResult = parallelEngine.run(std::span<const ReadRecord>{sample}, writer);
     } else {
-        pipeline::CompressPipeline pipelineEngine(targetFrameBytesFor(request), request.paired());
+        const pipeline::CompressPipeline pipelineEngine(targetFrameBytesFor(request),
+                                                        request.paired());
         std::istream* mateStream = mateStreamPtr ? mateStreamPtr.get() : nullptr;
         pipelineResult = pipelineEngine.run(
             *primaryStream, mateStream, std::span<const ReadRecord>{sample}, writer);
@@ -337,24 +339,24 @@ auto ArchiveEngine::compress(const CompressionRequest& request) const -> Result<
     return toOperationStats(writer.metadata(), writer.stats(), true, pipelineStats.logicalBytes);
 }
 
-auto ArchiveEngine::decompress(const DecompressionRequest& request) const
-    -> Result<OperationStats> {
+auto ArchiveEngine::decompress(const DecompressionRequest& request) -> Result<OperationStats> {
     FQC_TRY(validateMemoryLimit(request.memoryLimitBytes));
     FQC_TRY(validateOutput(request.inputPath, request.outputPath, request.forceOverwrite));
     FQC_TRY_ASSIGN(input, io::openInputFile(request.inputPath));
     OutputTransaction outputTransaction(request.outputPath, request.outputPath != "-");
     FQC_TRY_ASSIGN(output, openOutput(outputTransaction.path()));
     std::uint64_t logicalBytes = 0;
-    pipeline::DecompressPipeline pipelineEngine(maxFrameBytesFor(request.memoryLimitBytes),
-                                                request.memoryLimitBytes);
-    FQC_TRY_ASSIGN(stats,
-                   pipelineEngine.run(*input, [&](std::vector<ReadRecord> records) -> VoidResult {
-                       for (const auto& record : records) {
-                           logicalBytes += canonicalFastqBytes(record);
-                           FQC_TRY(writeFastqRecord(*output, record));
-                       }
-                       return {};
-                   }));
+    const pipeline::DecompressPipeline pipelineEngine(maxFrameBytesFor(request.memoryLimitBytes),
+                                                      request.memoryLimitBytes);
+    FQC_TRY_ASSIGN(
+        stats,
+        pipelineEngine.run(*input, [&](const std::vector<ReadRecord>& records) -> VoidResult {
+            for (const auto& record : records) {
+                logicalBytes += canonicalFastqBytes(record);
+                FQC_TRY(writeFastqRecord(*output, record));
+            }
+            return {};
+        }));
     output->flush();
     if (!*output) {
         return makeError<OperationStats>(ErrorCode::kIOError, "failed to flush decompressed FASTQ");
@@ -365,21 +367,22 @@ auto ArchiveEngine::decompress(const DecompressionRequest& request) const
 }
 
 auto ArchiveEngine::verify(const std::filesystem::path& inputPath,
-                           std::size_t memoryLimitBytes) const -> Result<OperationStats> {
+                           std::size_t memoryLimitBytes) -> Result<OperationStats> {
     FQC_TRY(validateMemoryLimit(memoryLimitBytes));
     FQC_TRY_ASSIGN(input, io::openInputFile(inputPath));
     // Same pipeline as decompress with a counting-only sink: full decode and
     // validation, nothing written.
     std::uint64_t logicalBytes = 0;
-    pipeline::DecompressPipeline pipelineEngine(maxFrameBytesFor(memoryLimitBytes),
-                                                memoryLimitBytes);
-    FQC_TRY_ASSIGN(stats,
-                   pipelineEngine.run(*input, [&](std::vector<ReadRecord> records) -> VoidResult {
-                       for (const auto& record : records) {
-                           logicalBytes += canonicalFastqBytes(record);
-                       }
-                       return {};
-                   }));
+    const pipeline::DecompressPipeline pipelineEngine(maxFrameBytesFor(memoryLimitBytes),
+                                                      memoryLimitBytes);
+    FQC_TRY_ASSIGN(
+        stats,
+        pipelineEngine.run(*input, [&](const std::vector<ReadRecord>& records) -> VoidResult {
+            for (const auto& record : records) {
+                logicalBytes += canonicalFastqBytes(record);
+            }
+            return {};
+        }));
     return toOperationStats(stats.metadata, toArchiveStats(stats), false, logicalBytes);
 }
 

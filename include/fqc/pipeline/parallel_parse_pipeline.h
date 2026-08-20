@@ -32,8 +32,8 @@ namespace fqc::pipeline {
 /// still returned, so the owning worker's parser raises the same error the
 /// sequential path would. Returns `std::nullopt` if no record starts before
 /// EOF.
-[[nodiscard]] auto findFirstRecordStart(std::istream& input, std::uint64_t baseOffset)
-    -> std::optional<std::uint64_t>;
+[[nodiscard]] auto findFirstRecordStart(std::istream& input,
+                                        std::uint64_t baseOffset) -> std::optional<std::uint64_t>;
 
 /// Compression pipeline whose frame production is data-parallel, in contrast
 /// to CompressPipeline's task-parallel reader:

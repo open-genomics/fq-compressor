@@ -32,7 +32,7 @@ namespace {
 /// monotonic order in which the reader closed the frame; encoders complete out
 /// of order, so the id rides along to drive the reorder buffer.
 struct InputFrame {
-    std::uint64_t frameId;
+    std::uint64_t frameId{};
     std::vector<ReadRecord> records;
 };
 
@@ -42,7 +42,7 @@ struct InputFrame {
 /// derived from the writer's own frame counter, so in-order submission keeps
 /// the archive's monotonic-frame-id invariant (see ARCHITECTURE.md).
 struct OrderedFrame {
-    std::uint64_t frameId;
+    std::uint64_t frameId{};
     std::unique_ptr<format::CompressedFrame> frame;
 };
 
@@ -55,10 +55,13 @@ CompressPipeline::CompressPipeline(std::size_t targetFrameBytes,
       paired_(paired),
       parallelism_(parallelism == 0 ? 1 : parallelism) {}
 
+// 有界管线刻意顺序化各阶段的共享缓冲与停止信号，拆分会破坏其可见性；
+// 复杂度来自阶段交错本身，而非可消除的分支。
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 auto CompressPipeline::run(std::istream& primary,
                            std::istream* mate,
                            std::span<const ReadRecord> initialRecords,
-                           format::ArchiveWriter& writer) -> Result<PipelineStats> {
+                           format::ArchiveWriter& writer) const -> Result<PipelineStats> {
     MpmcQueue<InputFrame, kDefaultQueueDepth> queue1;
     MpmcQueue<OrderedFrame, kDefaultQueueDepth> queue2;
     std::optional<Error> readerError;
@@ -112,7 +115,7 @@ auto CompressPipeline::run(std::istream& primary,
         auto pushFrame = [&](std::vector<ReadRecord> closed) -> bool {
             InputFrame in{frameId++, std::move(closed)};
             const auto pushStart = Clock::now();
-            bool ok = queue1.push(std::move(in), stopToken);
+            const bool ok = queue1.push(std::move(in), stopToken);
             pushNs += nanosSince(pushStart);
             return ok;
         };
@@ -185,7 +188,7 @@ auto CompressPipeline::run(std::istream& primary,
             encodeNs += nanosSince(encodeStart);
             if (!encoded) {
                 {
-                    std::lock_guard lk(encoderErrorMutex);
+                    const std::lock_guard lk(encoderErrorMutex);
                     if (!encoderError) {
                         encoderError = encoded.error();
                     }
@@ -199,7 +202,7 @@ auto CompressPipeline::run(std::istream& primary,
             compressNs += nanosSince(compressStart);
             if (!compressed) {
                 {
-                    std::lock_guard lk(encoderErrorMutex);
+                    const std::lock_guard lk(encoderErrorMutex);
                     if (!encoderError) {
                         encoderError = compressed.error();
                     }

@@ -64,7 +64,7 @@ public:
     /// cancels the others through their stop_token (same pattern as
     /// CompressPipeline). Footer validation failures surface as errors only
     /// after all frames were decoded and emitted in order.
-    [[nodiscard]] auto run(std::istream& input, RecordSink sink) -> Result<DecompressStats>;
+    [[nodiscard]] auto run(std::istream& input, RecordSink sink) const -> Result<DecompressStats>;
 
 private:
     std::size_t maxFrameBytes_;

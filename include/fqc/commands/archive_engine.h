@@ -58,11 +58,11 @@ class ArchiveEngine {
 public:
     ArchiveEngine() = default;
 
-    [[nodiscard]] auto compress(const CompressionRequest& request) const -> Result<OperationStats>;
-    [[nodiscard]] auto decompress(const DecompressionRequest& request) const
+    [[nodiscard]] static auto compress(const CompressionRequest& request) -> Result<OperationStats>;
+    [[nodiscard]] static auto decompress(const DecompressionRequest& request)
         -> Result<OperationStats>;
-    [[nodiscard]] auto verify(const std::filesystem::path& inputPath,
-                              std::size_t memoryLimitBytes = kDefaultMemoryLimitBytes) const
+    [[nodiscard]] static auto verify(const std::filesystem::path& inputPath,
+                                     std::size_t memoryLimitBytes = kDefaultMemoryLimitBytes)
         -> Result<OperationStats>;
 };
 

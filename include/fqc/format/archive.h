@@ -22,6 +22,10 @@ inline constexpr std::uint16_t kArchiveVersion = 2;
 inline constexpr std::size_t kDefaultTargetFrameBytes = std::size_t{64} * 1024 * 1024;
 inline constexpr std::size_t kDefaultMaxFrameBytes = std::size_t{512} * 1024 * 1024;
 inline constexpr std::size_t kDefaultMemoryLimitBytes = 16ULL * 1024ULL * 1024ULL * 1024ULL;
+/// Accepted range for the configurable quality-stream zstd level. Single source
+/// of truth: the CLI validates against it and the archive encoder enforces it.
+inline constexpr int kMinZstdLevel = 1;
+inline constexpr int kMaxZstdLevel = 19;
 
 enum class DatasetProfile : std::uint8_t {
     kIllumina = 1,
@@ -169,8 +173,8 @@ struct ArchiveFooter {
 /// One step of the archive's rolling global checksum. Order-dependent: apply
 /// strictly in ascending frame-id order (the sequential reader does this
 /// internally; a pipeline must do it on its ordered end).
-[[nodiscard]] auto advanceGlobalChecksum(std::uint64_t current, std::uint64_t frameChecksum)
-    -> std::uint64_t;
+[[nodiscard]] auto advanceGlobalChecksum(std::uint64_t current,
+                                         std::uint64_t frameChecksum) -> std::uint64_t;
 
 class ArchiveWriter {
 public:
@@ -178,6 +182,8 @@ public:
 
     ArchiveWriter(const ArchiveWriter&) = delete;
     ArchiveWriter& operator=(const ArchiveWriter&) = delete;
+    ArchiveWriter(ArchiveWriter&&) = delete;
+    ArchiveWriter& operator=(ArchiveWriter&&) = delete;
 
     [[nodiscard]] auto writeFrame(std::span<const ReadRecord> records) -> VoidResult;
     /// Write a `CompressedFrame` produced by `compressFrame`: assemble the
@@ -220,6 +226,8 @@ public:
 
     ArchiveReader(const ArchiveReader&) = delete;
     ArchiveReader& operator=(const ArchiveReader&) = delete;
+    ArchiveReader(ArchiveReader&&) = delete;
+    ArchiveReader& operator=(ArchiveReader&&) = delete;
 
     [[nodiscard]] auto open() -> Result<ArchiveMetadata>;
 

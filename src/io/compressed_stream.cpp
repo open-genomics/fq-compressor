@@ -9,6 +9,7 @@
 #include "fqc/log.h"
 
 #include <algorithm>
+#include <array>
 #include <cstring>
 #include <iostream>
 #include <limits>
@@ -25,16 +26,16 @@ namespace fqc::io {
 namespace {
 
 // Gzip magic: 0x1f 0x8b
-constexpr std::uint8_t kGzipMagic[] = {0x1f, 0x8b};
+constexpr std::array<std::uint8_t, 2> kGzipMagic{0x1f, 0x8b};
 
 // Bzip2 magic: 'B' 'Z' 'h'
-constexpr std::uint8_t kBzip2Magic[] = {0x42, 0x5a, 0x68};
+constexpr std::array<std::uint8_t, 3> kBzip2Magic{0x42, 0x5a, 0x68};
 
 // XZ magic: 0xfd '7' 'z' 'X' 'Z' 0x00
-constexpr std::uint8_t kXzMagic[] = {0xfd, 0x37, 0x7a, 0x58, 0x5a, 0x00};
+constexpr std::array<std::uint8_t, 6> kXzMagic{0xfd, 0x37, 0x7a, 0x58, 0x5a, 0x00};
 
 // Zstd magic: 0x28 0xb5 0x2f 0xfd
-constexpr std::uint8_t kZstdMagic[] = {0x28, 0xb5, 0x2f, 0xfd};
+constexpr std::array<std::uint8_t, 4> kZstdMagic{0x28, 0xb5, 0x2f, 0xfd};
 
 }  // namespace
 
@@ -48,26 +49,26 @@ CompressionFormat detectCompressionFormat(std::span<const std::uint8_t> data) {
     }
 
     // Check gzip (most common for FASTQ)
-    if (data.size() >= sizeof(kGzipMagic) &&
-        std::memcmp(data.data(), kGzipMagic, sizeof(kGzipMagic)) == 0) {
+    if (data.size() >= kGzipMagic.size() &&
+        std::memcmp(data.data(), kGzipMagic.data(), kGzipMagic.size()) == 0) {
         return CompressionFormat::kGzip;
     }
 
     // Check bzip2
-    if (data.size() >= sizeof(kBzip2Magic) &&
-        std::memcmp(data.data(), kBzip2Magic, sizeof(kBzip2Magic)) == 0) {
+    if (data.size() >= kBzip2Magic.size() &&
+        std::memcmp(data.data(), kBzip2Magic.data(), kBzip2Magic.size()) == 0) {
         return CompressionFormat::kBzip2;
     }
 
     // Check xz
-    if (data.size() >= sizeof(kXzMagic) &&
-        std::memcmp(data.data(), kXzMagic, sizeof(kXzMagic)) == 0) {
+    if (data.size() >= kXzMagic.size() &&
+        std::memcmp(data.data(), kXzMagic.data(), kXzMagic.size()) == 0) {
         return CompressionFormat::kXz;
     }
 
     // Check zstd
-    if (data.size() >= sizeof(kZstdMagic) &&
-        std::memcmp(data.data(), kZstdMagic, sizeof(kZstdMagic)) == 0) {
+    if (data.size() >= kZstdMagic.size() &&
+        std::memcmp(data.data(), kZstdMagic.data(), kZstdMagic.size()) == 0) {
         return CompressionFormat::kZstd;
     }
 
@@ -183,7 +184,7 @@ void GzipStreamBuf::initZlib() {
     std::memset(stream, 0, sizeof(z_stream));
 
     // Use inflateInit2 with 16+MAX_WBITS for gzip format
-    int ret = inflateInit2(stream, 16 + MAX_WBITS);
+    const int ret = inflateInit2(stream, 16 + MAX_WBITS);
     if (ret != Z_OK) {
         delete stream;
         throw std::runtime_error(std::string("failed to initialize zlib: ") + zError(ret));
@@ -194,7 +195,7 @@ void GzipStreamBuf::initZlib() {
 }
 
 void GzipStreamBuf::cleanupZlib() {
-    if (zlibStream_) {
+    if (zlibStream_ != nullptr) {
         auto* stream = static_cast<z_stream*>(zlibStream_);
         inflateEnd(stream);
         delete stream;
@@ -212,7 +213,7 @@ GzipStreamBuf::int_type GzipStreamBuf::underflow() {
         return traits_type::eof();
     }
 
-    std::size_t decompressed = decompress();
+    const std::size_t decompressed = decompress();
     if (decompressed == 0) {
         if (streamEnd_) {
             return traits_type::eof();
@@ -229,7 +230,7 @@ GzipStreamBuf::int_type GzipStreamBuf::underflow() {
 }
 
 std::size_t GzipStreamBuf::decompress() {
-    if (!initialized_ || !source_) {
+    if (!initialized_ || (source_ == nullptr)) {
         return 0;
     }
 
@@ -313,15 +314,16 @@ CompressedInputStream::CompressedInputStream(const std::filesystem::path& path)
     }
 
     // Detect format from magic bytes
-    std::uint8_t magic[8];
-    fileStream_->read(reinterpret_cast<char*>(magic), sizeof(magic));
+    std::array<std::uint8_t, 8> magic{};
+    fileStream_->read(reinterpret_cast<char*>(magic.data()),
+                      static_cast<std::streamsize>(magic.size()));
     auto bytesRead = static_cast<std::size_t>(fileStream_->gcount());
 
     // Seek back to beginning
     fileStream_->clear();
     fileStream_->seekg(0, std::ios::beg);
 
-    format_ = detectCompressionFormat({magic, bytesRead});
+    format_ = detectCompressionFormat({magic.data(), bytesRead});
 
     // Fallback to extension-based detection
     if (format_ == CompressionFormat::kNone && bytesRead < 2) {
@@ -341,7 +343,7 @@ CompressedInputStream::~CompressedInputStream() = default;
 
 void CompressedInputStream::setup() {
     std::istream* source = fileStream_ ? fileStream_.get() : sourceStream_.get();
-    if (!source) {
+    if (source == nullptr) {
         throw std::runtime_error("no source stream available");
     }
 
@@ -399,7 +401,7 @@ protected:
         if (phase_ == Phase::kPrefix) {
             phase_ = Phase::kUnderlying;
         }
-        if (phase_ == Phase::kUnderlying && underlying_) {
+        if (phase_ == Phase::kUnderlying && (underlying_ != nullptr)) {
             return underlying_->sgetc();
         }
         return traits_type::eof();
@@ -407,14 +409,14 @@ protected:
 
     int_type uflow() override {
         if (gptr() < egptr()) {
-            char_type ch = *gptr();
+            const char_type ch = *gptr();
             gbump(1);
             return traits_type::to_int_type(ch);
         }
         if (phase_ == Phase::kPrefix) {
             phase_ = Phase::kUnderlying;
         }
-        if (phase_ == Phase::kUnderlying && underlying_) {
+        if (phase_ == Phase::kUnderlying && (underlying_ != nullptr)) {
             return underlying_->sbumpc();
         }
         return traits_type::eof();
@@ -424,8 +426,8 @@ protected:
         std::streamsize totalRead = 0;
         // Drain prefix first
         if (phase_ == Phase::kPrefix) {
-            std::streamsize avail = egptr() - gptr();
-            std::streamsize toCopy = std::min(count, avail);
+            const std::streamsize avail = egptr() - gptr();
+            const std::streamsize toCopy = std::min(count, avail);
             std::memcpy(s, gptr(), static_cast<std::size_t>(toCopy));
             gbump(static_cast<int>(toCopy));
             totalRead += toCopy;
@@ -436,7 +438,7 @@ protected:
             }
         }
         // Read from underlying
-        if (count > 0 && phase_ == Phase::kUnderlying && underlying_) {
+        if (count > 0 && phase_ == Phase::kUnderlying && (underlying_ != nullptr)) {
             totalRead += underlying_->sgetn(s, count);
         }
         return totalRead;
@@ -467,15 +469,16 @@ auto openInputFile(const std::filesystem::path& path) -> Result<std::unique_ptr<
     if (path == "-") {
         FQC_LOG_DEBUG("Opening stdin for input");
 
-        std::uint8_t magic[8];
-        std::cin.read(reinterpret_cast<char*>(magic), sizeof(magic));
+        std::array<std::uint8_t, 8> magic{};
+        std::cin.read(reinterpret_cast<char*>(magic.data()),
+                      static_cast<std::streamsize>(magic.size()));
         auto bytesRead = static_cast<std::size_t>(std::cin.gcount());
 
-        auto format = detectCompressionFormat({magic, bytesRead});
+        auto format = detectCompressionFormat({magic.data(), bytesRead});
 
         if (format == CompressionFormat::kNone) {
             return std::unique_ptr<std::istream>(
-                std::make_unique<PrependInputStream>(magic, bytesRead, std::cin.rdbuf()));
+                std::make_unique<PrependInputStream>(magic.data(), bytesRead, std::cin.rdbuf()));
         }
 
         if (!isCompressionSupported(format)) {
@@ -487,7 +490,7 @@ auto openInputFile(const std::filesystem::path& path) -> Result<std::unique_ptr<
 
         try {
             auto prefixed =
-                std::make_unique<PrependInputStream>(magic, bytesRead, std::cin.rdbuf());
+                std::make_unique<PrependInputStream>(magic.data(), bytesRead, std::cin.rdbuf());
             return std::unique_ptr<std::istream>(
                 std::make_unique<CompressedInputStream>(std::move(prefixed), format));
         } catch (const std::exception& e) {

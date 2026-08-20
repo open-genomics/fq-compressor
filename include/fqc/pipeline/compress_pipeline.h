@@ -66,7 +66,7 @@ public:
     [[nodiscard]] auto run(std::istream& primary,
                            std::istream* mate,
                            std::span<const ReadRecord> initialRecords,
-                           format::ArchiveWriter& writer) -> Result<PipelineStats>;
+                           format::ArchiveWriter& writer) const -> Result<PipelineStats>;
 
 private:
     std::size_t targetFrameBytes_;

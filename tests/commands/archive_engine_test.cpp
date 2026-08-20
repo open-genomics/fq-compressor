@@ -19,8 +19,9 @@ constexpr std::string_view kShortFastq =
     "@short_1 1:N:0:ACGT\nACGTNacgt\n+\n!#IJKLMNO\n"
     "@short_2 2:N:0:TGCA\nTGCARYSWK\n+\nJKLMNOPQR\n";
 
-[[nodiscard]] auto profileOf(std::string_view id, std::string_view comment, std::size_t bases)
-    -> Result<format::DatasetProfile> {
+[[nodiscard]] auto profileOf(std::string_view id,
+                             std::string_view comment,
+                             std::size_t bases) -> Result<format::DatasetProfile> {
     return detectProfile(std::vector{ReadRecord{
         std::string(id), std::string(comment), std::string(bases, 'A'), std::string(bases, 'I')}});
 }

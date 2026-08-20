@@ -18,6 +18,7 @@ print_usage() {
     echo "  clang-release    - Clang Release build"
     echo "  clang-asan       - Clang with AddressSanitizer"
     echo "  clang-tsan       - Clang with ThreadSanitizer"
+    echo "  clang-coverage   - Clang build with code coverage instrumentation (llvm-cov)"
     echo ""
     echo "Examples:"
     echo "  $0                    # Build with clang-debug preset"
@@ -32,7 +33,7 @@ if [[ "$PRESET" == "-h" || "$PRESET" == "--help" ]]; then
 fi
 
 # 验证 preset 是否存在
-VALID_PRESETS="clang-debug clang-release clang-asan clang-tsan"
+VALID_PRESETS="clang-debug clang-release clang-asan clang-tsan clang-coverage"
 if ! echo "$VALID_PRESETS" | grep -qw "$PRESET"; then
     echo "Error: Unknown preset '$PRESET'"
     print_usage

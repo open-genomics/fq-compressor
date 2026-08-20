@@ -2,6 +2,8 @@
 
 ## [未发布]
 
+## [0.1.0] - 2026-08-21
+
 ### 文档
 
 - **README 收口 + 格式族契约**：首屏精简为单段格式族说明并补齐契约要点——本实现为 `fqc-sequential/v2`（magic `46 51 43 56 32 0D 0A 1A`，`FQCV2\r\n\x1A`），与 [fq-compressor-rust](https://github.com/open-genomics/fq-compressor-rust)（`fqc-indexed/v2`，magic `89 46 51 43 0D 0A 1A 0A`）同名但格式不兼容、不能互相解码；`.fqc` 扩展名不能判定格式，reader 必须检查 archive magic。新增同名二进制 `fqc` 的 `PATH` 覆盖风险提醒（`which fqc` 确认实际调用实现）。
