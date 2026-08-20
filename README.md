@@ -2,9 +2,10 @@
 
 把 FASTQ 压成**小而可校验**的归档：内存可控、管道友好、压缩比约 2.8–2.9×。
 
-> **格式族 `fqc-sequential/v2`**：与 [fq-compressor-rust](https://github.com/open-genomics/fq-compressor-rust)
-> （Rust，`fqc-indexed/v2`）同名但**格式不兼容**——magic 与字节布局不同，不能互相解码；
-> `.fqc` 扩展名不能判定格式，reader 必须检查 archive magic。
+> **格式族 `fqc-sequential/v2`**（magic `46 51 43 56 32 0D 0A 1A`，`FQCV2\r\n\x1A`）：
+> 与 [fq-compressor-rust](https://github.com/open-genomics/fq-compressor-rust)
+> （Rust，`fqc-indexed/v2`，magic `89 46 51 43 0D 0A 1A 0A`）同名但**格式不兼容**——
+> magic 与字节布局不同，不能互相解码；`.fqc` 扩展名不能判定格式，reader 必须检查 archive magic。
 
 [![CI 状态](https://github.com/open-genomics/fq-compressor/actions/workflows/ci.yml/badge.svg)](https://github.com/open-genomics/fq-compressor/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
@@ -28,6 +29,9 @@ $fqc compress   -i R1.fastq.gz -2 R2.fastq.gz -o paired.fqc   # 双端
 ```
 
 完整参数 `$fqc --help`；工具链要求与质量门禁见 [docs/building.md](docs/building.md)。
+
+> 若同时安装了 [fq-compressor-rust](https://github.com/open-genomics/fq-compressor-rust) 的 `fqc`，
+> 两个同名二进制会互相覆盖，`PATH` 中靠前者生效；用 `which fqc` 确认实际调用的实现。
 
 ## 核心算法
 

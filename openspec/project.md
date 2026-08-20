@@ -15,6 +15,7 @@
 | Capability | Path | Description |
 |---|---|---|
 | `archive-format` | `openspec/specs/archive-format/` | Sequential v2 binary layout, header/frame/footer, checksums |
+| `format-governance` | `openspec/specs/format-governance/` | Same-name `.fqc` format family coexistence documentation contract |
 
 ## External boundaries
 
@@ -41,6 +42,7 @@ Completed, merged, and moved under `openspec/changes/archive/`:
 | 2026-08-19 | `correct-verify-contract` | `archive-format` |
 | 2026-08-19 | `recognize-indexed-fqc-family` | `archive-format` |
 | 2026-08-19 | `add-ci-sanitizer-gate` | `ci-quality` |
+| 2026-08-20 | `document-fqc-format-family` | `format-governance` |
 
 ## Authority rules
 
