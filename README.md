@@ -1,19 +1,10 @@
 # fq-compressor
 
+把 FASTQ 压成**小而可校验**的归档：内存可控、管道友好、压缩比约 2.8–2.9×。
 
-> **格式族：`fqc-sequential/v2`**。`fqc` 与 `.fqc` 是两个**同名、不同格式族**的产品：
-> 本仓库（C++）与 [`fq-compressor-rust`](https://github.com/open-genomics/fq-compressor-rust)（Rust）
-> 各自实现自己的 `fqc` 二进制与 `.fqc` 归档，magic 不同、互不兼容、不能互相解码。
-
-| 仓库 | 实现语言 | 格式族 ID | 完整 magic | 访问模型 |
-|---|---|---|---|---|
-| [open-genomics/fq-compressor](https://github.com/open-genomics/fq-compressor)（本仓库） | C++23 | `fqc-sequential/v2` | `46 51 43 56 32 0D 0A 1A`（`FQCV2\r\n\x1A`） | 顺序流式归档；不支持随机访问/按区间提取 |
-| [open-genomics/fq-compressor-rust](https://github.com/open-genomics/fq-compressor-rust) | Rust | `fqc-indexed/v2` | `89 46 51 43 0D 0A 1A 0A` | 块索引归档；支持检视/校验/部分流式 |
-
-扩展名 `.fqc` 不能判定格式：reader 必须检查 archive magic，两个实现以显式的
-unsupported-format-family 错误拒绝对方的 magic，不能互相解码。
-
-**把 FASTQ 压成小而可校验的归档，内存可控，管道友好。**
+> **格式族 `fqc-sequential/v2`**：与 [fq-compressor-rust](https://github.com/open-genomics/fq-compressor-rust)
+> （Rust，`fqc-indexed/v2`）同名但**格式不兼容**——magic 与字节布局不同，不能互相解码；
+> `.fqc` 扩展名不能判定格式，reader 必须检查 archive magic。
 
 [![CI 状态](https://github.com/open-genomics/fq-compressor/actions/workflows/ci.yml/badge.svg)](https://github.com/open-genomics/fq-compressor/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
@@ -21,53 +12,55 @@ unsupported-format-family 错误拒绝对方的 magic，不能互相解码。
 ![CMake 3.28+](https://img.shields.io/badge/CMake-3.28%2B-blue.svg)
 ![Conan 2.x](https://img.shields.io/badge/Conan-2.x-blue.svg)
 
-[快速开始](#快速开始) · [架构](ARCHITECTURE.md) · [算法](ALGORITHM.md)
-
-## 解决什么问题
-
-FASTQ 文件大、传输贵、存档要防静默损坏。fq-compressor 针对这三点：
-
-* **体积小** — 2-bit 打包碱基 + Zstd，随机合成数据压缩比约 2.8–2.9×。
-* **可校验** — 全局头、逻辑帧、footer 三层 XXH64。`verify` **完整解码**并验证全部结构、逻辑内容与 footer，但不写 FASTQ；CPU/内存成本与 `decompress` 同量级，不是常数时间元数据检查。XXH64 用于发现随机损坏，不提供对恶意篡改的密码学认证。
-* **内存有界** — 默认 16 GiB 预算，最低 64 MiB；逐帧保守估算峰值，不会 OOM。
-
-不支持随机访问、按区间提取、有损压缩、非 FASTQ 输入。详见 [已知限制](#已知限制)。
+[快速开始](#快速开始) · [核心算法](#核心算法) · [高性能架构](#高性能架构) · [性能](#性能)
 
 ## 快速开始
 
-### 源码构建
-
 ```bash
 git clone https://github.com/open-genomics/fq-compressor.git
-cd fq-compressor
-./scripts/build.sh clang-release
-```
-
-> **同名二进制 `PATH` 覆盖风险**：两个实现都安装名为 `fqc` 的二进制。若两者同时
-> 进入 `PATH`，后安装者（或 `PATH` 中更靠前的目录）会覆盖另一个，请用 `which fqc`
-> 确认实际调用的实现。
-
-下文示例用 `$fqc` 代指可执行文件路径：
-
-```bash
+cd fq-compressor && ./scripts/build.sh clang-release
 fqc=./build/clang-release/src/fqc
-```
 
-### 用法
-
-```bash
-$fqc compress   -i reads.fastq.gz -o reads.fqc    # 压缩
+$fqc compress   -i reads.fastq.gz -o reads.fqc     # 压缩
 $fqc decompress -i reads.fqc        -o out.fastq   # 解压
 $fqc verify     reads.fqc                          # 完整解码校验，不写 FASTQ
+$fqc compress   -i R1.fastq.gz -2 R2.fastq.gz -o paired.fqc   # 双端
 ```
 
-双端测序：
+完整参数 `$fqc --help`；工具链要求与质量门禁见 [docs/building.md](docs/building.md)。
 
-```bash
-$fqc compress -i R1.fastq.gz -2 R2.fastq.gz -o paired.fqc
+## 核心算法
+
+FASTQ 记录的信息字段——ID、序列、质量值——按**列式分离**编码为三条独立字节流，
+各自 Zstd level 1 压缩后写入**顺序自校验帧**。
+
+* **2-bit 打包** — 大写 A/C/G/T 各占 2 bit，序列部分直接 4:1 压缩（压缩比最大单一贡献者）；
+  其余 IUPAC 符号与小写碱基按原始字节 + 增量位置记录，大小写精确保留。
+* **质量值直通** — 原始 Phred+33 ASCII 直接交给 Zstd（无损是硬约束，不做有损变换）。
+* **三层 XXH64** — 全局头、帧逻辑（**未压缩流**链式哈希，能发现 Zstd 静默错误）、
+  footer 滚动累积（发现丢帧/重排/篡改）。完整性检测，非密码学认证。
+* **varint 编码** — 所有长度、计数、位置增量用 LEB128。
+
+每步在压什么、端到端压缩比拆解、设计取舍：见 [ALGORITHM.md](ALGORITHM.md)。
+
+## 高性能架构
+
+压缩（未压缩普通文件）是**多帧并行编码流水线**，解压是其镜像；三条命令共用同一引擎。
+
+```text
+压缩: parser×K 字节块切分+边界对齐 →[有界 MPMC]→ encoder×N (2-bit+校验和+zstd×3, 乱序) →[MPMC]→ ChunkOrderer 保序 → 写盘
+解压: reader 读帧+内存预检 →[MPMC]→ decoder×N (zstd+校验和+解码, 乱序) →[MPMC]→ reorder 保序 → 滚动校验和 → 写出
 ```
 
-完整参数：`$fqc --help`。字节布局：[ARCHITECTURE.md](ARCHITECTURE.md)。
+* **内存有界** — 默认 16 GiB 预算、最低 64 MiB。压缩三道防线（采样上限、帧累积目标、
+  编码前保守峰值预检）；解压侧同样聚合校验，不会 OOM。
+* **故障边界清晰** — 截断、未知格式/版本、校验和不匹配、内存超限一律 fail closed；
+  覆盖已有输出需 `--force`。
+* **管道友好** — 支持 stdin/stdout；普通文件先写临时文件，成功后原子替换。
+* **单引擎复用** — `verify` 走与 `decompress` 完全相同的解码校验路径，只换空 sink
+  （因此是完整解码，不是常数时间元数据检查）。
+
+模块划分、内存模型、归档字节布局、并行化收束过程：见 [ARCHITECTURE.md](ARCHITECTURE.md)。
 
 ## 性能
 
@@ -75,57 +68,27 @@ $fqc compress -i R1.fastq.gz -2 R2.fastq.gz -o paired.fqc
 
 | 数据 | 压缩（并行解析） | 相对顺序解析 | 压缩比 |
 |---|---:|---:|---:|
-| Illumina-like 150 bp | 148.84 MiB/s | +47.7% | 2.96× |
-| ONT-like 20 kbp | 与顺序路径持平（−1.3%，噪声内） | — | 2.84× |
+| Illumina-like 150 bp | **148.84 MiB/s** | +47.7% | 2.96× |
+| ONT-like 20 kbp | 与顺序路径持平 | — | 2.84× |
 
-WSL2 下 wall-clock 波动较大，同机重跑结果可能低于上表，仅供参考。真实生物语料的 round-trip、压缩比与质量流门槛复测见 [docs/real-corpus.md](docs/real-corpus.md)。
-
-## 设计
-
-* **顺序帧** — 独立自校验帧，压缩/解压/校验共用一个引擎。
-* **紧凑编码** — 大写 A/C/G/T 打包为 2 bit；其余 IUPAC 字符和小写碱基按原始位置精确保留。
-* **内存有界** — 逐帧保守峰值估算后再分配。
-* **管道友好** — 支持 stdin/stdout；普通文件先写临时文件，成功后原子替换。
-* **双端相邻** — R1/R2 成对存储，帧边界不拆开配对。
-* **多层校验** — XXH64 覆盖全局头、每个逻辑帧、结尾 footer（完整性检测，非密码学认证）。
-
-机制细节见 [ARCHITECTURE.md](ARCHITECTURE.md)。
-
-## 技术栈
-
-C++23（GCC 14+ / Clang 18+）· CMake 3.28+ + Ninja · Conan 2.x · Zstd · xxHash · GoogleTest
+真实生物语料实测见 [docs/real-corpus.md](docs/real-corpus.md)。
 
 ## 已知限制
 
-* 不支持随机访问、按区间提取 reads。
-* 不支持有损压缩、原始顺序重排。
-* 仅支持 FASTQ 格式。
-* 合成数据不能代表真实压缩比：短读质量集中时更高，长读质量近满字母表时可以更低。公开切片实测见 [docs/real-corpus.md](docs/real-corpus.md)。
-
-## 构建
-
-* C++23 编译器：**GCC 14+** 或 **Clang 18+**
-* **CMake 3.28+**
-* **Conan 2.x**
-* Linux / macOS；Windows 用 WSL 或 Docker
-
-## 质量
-
-CI（`.github/workflows/ci.yml`，ubuntu-24.04 + clang-18）覆盖：clang-debug 构建、全部测试（单元 + 集成 + 端到端）、clang-format 检查，以及 `clang-asan`（ASan+UBSan）构建与测试门禁。校验失败即报错，exit code 约定见 [AGENTS.md](AGENTS.md)。
-
-本地另有 `clang-release` / `clang-asan` / `clang-tsan` preset。注意环境限制：LeakSanitizer 在部分受限环境不可用，CI 与本地均以 `ASAN_OPTIONS=detect_leaks=0` 运行（泄漏检测保留为发布机检查项）；ASan 下系统 libc++18 未插桩，异常对象释放会触发 alloc-dealloc-mismatch 误报，CI 以 `alloc_dealloc_mismatch=0` 关闭该子检查（其余 ASan/UBSan 检查保持）；ASan preset 的 GTest 需与项目同工具链从源码构建（CI 用 `--build=gtest*`），避免预编译包混链在 gtest 静态注册阶段触发 libc++ 容器注解误报（heap-buffer-overflow）。详见 `docs/postmortems/2026-07-13-sanitizer-env-limitations.md`。
+* 不支持随机访问、按区间提取、有损压缩、原始顺序重排；仅支持 FASTQ。
+* 合成数据不能代表真实压缩比：短读质量集中时更高，长读质量近满字母表时可以更低
+  （实测见 [docs/real-corpus.md](docs/real-corpus.md)）。
 
 ## 文档
 
 | 目的 | 位置 |
 |---|---|
-| 构建与首次运行 | 本文件 |
-| 命令参数 | `$fqc --help` |
+| 构建、工具链、质量与 CI | [docs/building.md](docs/building.md) |
 | 压缩算法与原理 | [ALGORITHM.md](ALGORITHM.md) |
 | 架构与字节布局 | [ARCHITECTURE.md](ARCHITECTURE.md) |
-| 变更记录 | [CHANGELOG.md](CHANGELOG.md) |
-| 并发路线图（A–H 已收束） | [docs/roadmap.md](docs/roadmap.md) |
 | 真实语料验收 | [docs/real-corpus.md](docs/real-corpus.md) |
+| 并发路线图与开发历程 | [docs/roadmap.md](docs/roadmap.md) |
+| 变更记录 | [CHANGELOG.md](CHANGELOG.md) |
 
 ## 许可证
 
