@@ -1,0 +1,87 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1180 340" font-family="ui-monospace, 'SF Mono', 'Cascadia Code', Consolas, monospace">
+  <!-- 压缩路径：多帧并行编码流水线（阶段 H，未压缩普通文件） -->
+  <defs>
+    <marker id="arrc" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L6,3 L0,6 Z" fill="#8fa0c0"/>
+    </marker>
+  </defs>
+
+  <!-- A 输入 -->
+  <rect x="16" y="116" width="104" height="92" rx="8" fill="#0e1728" stroke="#34d399" stroke-width="1.6"/>
+  <text x="68" y="146" text-anchor="middle" fill="#6ee7b7" font-size="12.5" font-weight="700">FASTQ</text>
+  <text x="68" y="166" text-anchor="middle" fill="#8fa0c0" font-size="11">未压缩</text>
+  <text x="68" y="184" text-anchor="middle" fill="#8fa0c0" font-size="11">普通文件</text>
+  <text x="68" y="200" text-anchor="middle" fill="#5f7194" font-size="10">stdin / gzip / 双端走顺序路径</text>
+
+  <line x1="124" y1="162" x2="148" y2="162" stroke="#8fa0c0" stroke-width="1.6" marker-end="url(#arrc)"/>
+
+  <!-- B parser×K -->
+  <rect x="152" y="86" width="216" height="176" rx="10" fill="none" stroke="#38bdf8" stroke-width="1.2" stroke-dasharray="5,4"/>
+  <text x="260" y="104" text-anchor="middle" fill="#7dd3fc" font-size="12.5" font-weight="700">parser × K</text>
+  <rect x="164" y="116" width="192" height="34" rx="5" fill="rgba(56,189,248,0.10)" stroke="rgba(56,189,248,0.45)"/>
+  <text x="260" y="137" text-anchor="middle" fill="#bfe3ff" font-size="11">字节块切分</text>
+  <rect x="164" y="156" width="192" height="34" rx="5" fill="rgba(56,189,248,0.10)" stroke="rgba(56,189,248,0.45)"/>
+  <text x="260" y="177" text-anchor="middle" fill="#bfe3ff" font-size="11">记录边界对齐</text>
+  <rect x="164" y="196" width="192" height="34" rx="5" fill="rgba(56,189,248,0.10)" stroke="rgba(56,189,248,0.45)"/>
+  <text x="260" y="217" text-anchor="middle" fill="#bfe3ff" font-size="11">标记 (chunkId, localId)</text>
+  <text x="260" y="248" text-anchor="middle" fill="#5f7194" font-size="10.5">各自打开独立 ifstream</text>
+
+  <line x1="372" y1="162" x2="400" y2="162" stroke="#8fa0c0" stroke-width="1.6" marker-end="url(#arrc)"/>
+
+  <!-- C MPMC -->
+  <rect x="404" y="116" width="74" height="92" rx="8" fill="#0e1728" stroke="#fbbf24" stroke-width="1.6"/>
+  <text x="441" y="144" text-anchor="middle" fill="#fcd34d" font-size="11.5" font-weight="700">MPMC</text>
+  <text x="441" y="162" text-anchor="middle" fill="#8fa0c0" font-size="10.5">有界队列</text>
+  <text x="441" y="178" text-anchor="middle" fill="#8fa0c0" font-size="10.5">深度 4</text>
+  <text x="441" y="196" text-anchor="middle" fill="#5f7194" font-size="10">解耦三段</text>
+
+  <line x1="482" y1="162" x2="510" y2="162" stroke="#8fa0c0" stroke-width="1.6" marker-end="url(#arrc)"/>
+
+  <!-- D encoder×N -->
+  <rect x="514" y="86" width="216" height="176" rx="10" fill="none" stroke="#34d399" stroke-width="1.2" stroke-dasharray="5,4"/>
+  <text x="622" y="104" text-anchor="middle" fill="#6ee7b7" font-size="12.5" font-weight="700">encoder × N（默认 4）</text>
+  <rect x="526" y="114" width="192" height="30" rx="5" fill="rgba(52,211,153,0.10)" stroke="rgba(52,211,153,0.45)"/>
+  <text x="622" y="133" text-anchor="middle" fill="#a7f3d0" font-size="11">2-bit 打包 + measure</text>
+  <rect x="526" y="148" width="192" height="30" rx="5" fill="rgba(52,211,153,0.10)" stroke="rgba(52,211,153,0.45)"/>
+  <text x="622" y="167" text-anchor="middle" fill="#a7f3d0" font-size="11">逻辑校验和 + zstd × 3</text>
+  <rect x="526" y="182" width="192" height="30" rx="5" fill="rgba(52,211,153,0.10)" stroke="rgba(52,211,153,0.45)"/>
+  <text x="622" y="201" text-anchor="middle" fill="#a7f3d0" font-size="11">CPU 密集</text>
+  <rect x="526" y="216" width="192" height="30" rx="5" fill="rgba(52,211,153,0.10)" stroke="rgba(52,211,153,0.45)"/>
+  <text x="622" y="235" text-anchor="middle" fill="#a7f3d0" font-size="11">乱序完成</text>
+  <text x="622" y="252" text-anchor="middle" fill="#5f7194" font-size="10.5">状态帧内局部，无需共享</text>
+
+  <line x1="734" y1="162" x2="762" y2="162" stroke="#8fa0c0" stroke-width="1.6" marker-end="url(#arrc)"/>
+
+  <!-- E MPMC -->
+  <rect x="766" y="116" width="74" height="92" rx="8" fill="#0e1728" stroke="#fbbf24" stroke-width="1.6"/>
+  <text x="803" y="144" text-anchor="middle" fill="#fcd34d" font-size="11.5" font-weight="700">MPMC</text>
+  <text x="803" y="162" text-anchor="middle" fill="#8fa0c0" font-size="10.5">有界队列</text>
+  <text x="803" y="178" text-anchor="middle" fill="#8fa0c0" font-size="10.5">深度 4</text>
+
+  <line x1="844" y1="162" x2="872" y2="162" stroke="#8fa0c0" stroke-width="1.6" marker-end="url(#arrc)"/>
+
+  <!-- F writer / ChunkOrderer -->
+  <rect x="876" y="86" width="200" height="176" rx="10" fill="none" stroke="#f472b6" stroke-width="1.2" stroke-dasharray="5,4"/>
+  <text x="976" y="104" text-anchor="middle" fill="#f9a8d4" font-size="12.5" font-weight="700">writer / ChunkOrderer</text>
+  <rect x="888" y="116" width="176" height="46" rx="5" fill="rgba(244,114,182,0.10)" stroke="rgba(244,114,182,0.45)"/>
+  <text x="976" y="138" text-anchor="middle" fill="#fbcfe8" font-size="11">按 (chunk, local)</text>
+  <text x="976" y="154" text-anchor="middle" fill="#fbcfe8" font-size="11">字典序保序提交</text>
+  <rect x="888" y="170" width="176" height="46" rx="5" fill="rgba(244,114,182,0.10)" stroke="rgba(244,114,182,0.45)"/>
+  <text x="976" y="192" text-anchor="middle" fill="#fbcfe8" font-size="11">帧头拼装</text>
+  <text x="976" y="208" text-anchor="middle" fill="#fbcfe8" font-size="11">写盘（纯 I/O）</text>
+  <text x="976" y="248" text-anchor="middle" fill="#5f7194" font-size="10.5">先写临时文件，成功原子替换</text>
+
+  <line x1="1080" y1="162" x2="1104" y2="162" stroke="#8fa0c0" stroke-width="1.6" marker-end="url(#arrc)"/>
+
+  <!-- G 输出 -->
+  <rect x="1108" y="116" width="56" height="92" rx="8" fill="#0e1728" stroke="#fbbf24" stroke-width="1.6"/>
+  <text x="1136" y="146" text-anchor="middle" fill="#fcd34d" font-size="11.5" font-weight="700">.fqc</text>
+  <text x="1136" y="164" text-anchor="middle" fill="#8fa0c0" font-size="10.5">归档</text>
+  <text x="1136" y="196" text-anchor="middle" fill="#5f7194" font-size="10">输出</text>
+
+  <!-- 底部注释 -->
+  <text x="260" y="296" text-anchor="middle" fill="#8fa0c0" font-size="11.5">① 数据并行解析（阶段 H）</text>
+  <text x="622" y="296" text-anchor="middle" fill="#8fa0c0" font-size="11.5">② 编解码 CPU 密集、乱序完成</text>
+  <text x="976" y="296" text-anchor="middle" fill="#8fa0c0" font-size="11.5">③ 唯一有序端：保序提交 + 写盘</text>
+  <text x="1136" y="316" text-anchor="middle" fill="#5f7194" font-size="10.5">在途帧上界 = 队列 4 + 4 + encoder 4 ≈ 12 帧</text>
+</svg>

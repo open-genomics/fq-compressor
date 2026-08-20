@@ -1,0 +1,108 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1180 500" font-family="ui-monospace, 'SF Mono', 'Cascadia Code', Consolas, monospace">
+  <!-- fqc-sequential/v2 归档字节布局 -->
+  <defs>
+    <marker id="arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L6,3 L0,6 Z" fill="#8fa0c0"/>
+    </marker>
+  </defs>
+
+  <!-- ============ 第 1 行：归档整体 ============ -->
+  <text x="20" y="30" fill="#5f7194" font-size="13" font-weight="700" letter-spacing="1">归档整体</text>
+
+  <!-- 全局头 -->
+  <rect x="20" y="46" width="170" height="78" rx="8" fill="#0e1728" stroke="#38bdf8" stroke-width="1.6"/>
+  <rect x="20" y="46" width="170" height="20" rx="8" fill="rgba(56,189,248,0.15)"/>
+  <text x="105" y="60" text-anchor="middle" fill="#7dd3fc" font-size="11">全局头</text>
+  <text x="105" y="88" text-anchor="middle" fill="#dbe6f7" font-size="12.5">magic · 版本 · 标志</text>
+  <text x="105" y="105" text-anchor="middle" fill="#8fa0c0" font-size="11">profile · 编解码器 ID</text>
+  <text x="105" y="118" text-anchor="middle" fill="#5f7194" font-size="10">32 B</text>
+
+  <!-- 帧 1 -->
+  <rect x="230" y="46" width="150" height="78" rx="8" fill="#0e1728" stroke="#34d399" stroke-width="1.6"/>
+  <rect x="230" y="46" width="150" height="20" rx="8" fill="rgba(52,211,153,0.15)"/>
+  <text x="305" y="60" text-anchor="middle" fill="#6ee7b7" font-size="11">帧 1</text>
+  <text x="305" y="88" text-anchor="middle" fill="#dbe6f7" font-size="12.5">帧头 72 B</text>
+  <text x="305" y="105" text-anchor="middle" fill="#8fa0c0" font-size="11">+ 三路压缩载荷</text>
+  <text x="305" y="118" text-anchor="middle" fill="#5f7194" font-size="10">帧 ID 单调递增</text>
+
+  <!-- 帧 2 -->
+  <rect x="420" y="46" width="150" height="78" rx="8" fill="#0e1728" stroke="#34d399" stroke-width="1.6"/>
+  <rect x="420" y="46" width="150" height="20" rx="8" fill="rgba(52,211,153,0.15)"/>
+  <text x="495" y="60" text-anchor="middle" fill="#6ee7b7" font-size="11">帧 2</text>
+  <text x="495" y="88" text-anchor="middle" fill="#dbe6f7" font-size="12.5">帧头 72 B</text>
+  <text x="495" y="105" text-anchor="middle" fill="#8fa0c0" font-size="11">+ 三路压缩载荷</text>
+  <text x="495" y="118" text-anchor="middle" fill="#5f7194" font-size="10">…</text>
+
+  <!-- 省略 -->
+  <text x="608" y="92" text-anchor="middle" fill="#5f7194" font-size="20">· · ·</text>
+  <text x="608" y="112" text-anchor="middle" fill="#5f7194" font-size="11">N 帧</text>
+
+  <!-- footer -->
+  <rect x="660" y="46" width="170" height="78" rx="8" fill="#0e1728" stroke="#fbbf24" stroke-width="1.6"/>
+  <rect x="660" y="46" width="170" height="20" rx="8" fill="rgba(251,191,36,0.15)"/>
+  <text x="745" y="60" text-anchor="middle" fill="#fcd34d" font-size="11">Footer</text>
+  <text x="745" y="88" text-anchor="middle" fill="#dbe6f7" font-size="12.5">帧 / read / 碱基总计</text>
+  <text x="745" y="105" text-anchor="middle" fill="#8fa0c0" font-size="11">+ 滚动全局校验和</text>
+  <text x="745" y="118" text-anchor="middle" fill="#5f7194" font-size="10">40 B</text>
+
+  <!-- 数据流方向箭头 -->
+  <line x1="196" y1="85" x2="224" y2="85" stroke="#8fa0c0" stroke-width="1.6" marker-end="url(#arr)"/>
+  <line x1="386" y1="85" x2="414" y2="85" stroke="#8fa0c0" stroke-width="1.6" marker-end="url(#arr)"/>
+  <line x1="576" y1="85" x2="604" y2="85" stroke="#8fa0c0" stroke-width="1.6" marker-end="url(#arr)"/>
+
+  <!-- ============ 第 2 行：单帧展开 ============ -->
+  <text x="20" y="210" fill="#5f7194" font-size="13" font-weight="700" letter-spacing="1">单个帧展开</text>
+
+  <!-- 帧头 -->
+  <rect x="20" y="228" width="180" height="120" rx="8" fill="#0e1728" stroke="#f472b6" stroke-width="1.6"/>
+  <rect x="20" y="228" width="180" height="22" rx="8" fill="rgba(244,114,182,0.15)"/>
+  <text x="110" y="243" text-anchor="middle" fill="#f9a8d4" font-size="11">帧头 72 B</text>
+  <text x="110" y="272" text-anchor="middle" fill="#8fa0c0" font-size="11">帧 ID</text>
+  <text x="110" y="290" text-anchor="middle" fill="#8fa0c0" font-size="11">记录数</text>
+  <text x="110" y="308" text-anchor="middle" fill="#8fa0c0" font-size="11">原始 / 编码流大小</text>
+  <text x="110" y="330" text-anchor="middle" fill="#5f7194" font-size="10">逐字段内存预检</text>
+
+  <!-- ID 载荷 -->
+  <rect x="240" y="228" width="210" height="120" rx="8" fill="#0e1728" stroke="#38bdf8" stroke-width="1.6"/>
+  <rect x="240" y="228" width="210" height="22" rx="8" fill="rgba(56,189,248,0.15)"/>
+  <text x="345" y="243" text-anchor="middle" fill="#7dd3fc" font-size="11">ID 载荷</text>
+  <text x="345" y="272" text-anchor="middle" fill="#8fa0c0" font-size="11">varint(记录数)</text>
+  <text x="345" y="290" text-anchor="middle" fill="#8fa0c0" font-size="11">[len + ID + 注释] × N</text>
+  <text x="345" y="312" text-anchor="middle" fill="#5f7194" font-size="11">→ Zstd L1</text>
+
+  <!-- 序列载荷 -->
+  <rect x="490" y="228" width="210" height="120" rx="8" fill="#0e1728" stroke="#34d399" stroke-width="1.6"/>
+  <rect x="490" y="228" width="210" height="22" rx="8" fill="rgba(52,211,153,0.15)"/>
+  <text x="595" y="243" text-anchor="middle" fill="#6ee7b7" font-size="11">序列载荷</text>
+  <text x="595" y="272" text-anchor="middle" fill="#8fa0c0" font-size="11">varint(记录数)</text>
+  <text x="595" y="290" text-anchor="middle" fill="#8fa0c0" font-size="11">[2-bit 打包 + 异常] × N</text>
+  <text x="595" y="312" text-anchor="middle" fill="#5f7194" font-size="11">→ Zstd L1</text>
+
+  <!-- 质量载荷 -->
+  <rect x="740" y="228" width="210" height="120" rx="8" fill="#0e1728" stroke="#a78bfa" stroke-width="1.6"/>
+  <rect x="740" y="228" width="210" height="22" rx="8" fill="rgba(167,139,250,0.15)"/>
+  <text x="845" y="243" text-anchor="middle" fill="#c4b5fd" font-size="11">质量载荷</text>
+  <text x="845" y="272" text-anchor="middle" fill="#8fa0c0" font-size="11">varint(记录数)</text>
+  <text x="845" y="290" text-anchor="middle" fill="#8fa0c0" font-size="11">[len + 原始 ASCII] × N</text>
+  <text x="845" y="312" text-anchor="middle" fill="#5f7194" font-size="11">→ Zstd L1</text>
+
+  <!-- 帧逻辑校验和箭头 -->
+  <line x1="200" y1="348" x2="940" y2="348" stroke="#8fa0c0" stroke-width="1.2" marker-end="url(#arr)" stroke-dasharray="4,3"/>
+  <text x="520" y="366" text-anchor="middle" fill="#8fa0c0" font-size="11">帧逻辑校验和覆盖三路 <tspan fill="#fbbf24">未压缩</tspan> 流（链式 XXH64，可发现 Zstd 静默错误）</text>
+
+  <!-- ============ 第 3 行：校验和覆盖 ============ -->
+  <text x="20" y="408" fill="#5f7194" font-size="13" font-weight="700" letter-spacing="1">三层完整性覆盖</text>
+
+  <g>
+    <circle cx="40" cy="428" r="5" fill="#38bdf8"/>
+    <text x="54" y="432" fill="#8fa0c0" font-size="11.5">全局头校验和 — 头部前 24 B，防版本 / 编解码器 ID 篡改</text>
+  </g>
+  <g>
+    <circle cx="40" cy="448" r="5" fill="#34d399"/>
+    <text x="54" y="452" fill="#8fa0c0" font-size="11.5">帧逻辑校验和 — 三路未压缩流链式哈希，防载荷损坏</text>
+  </g>
+  <g>
+    <circle cx="40" cy="468" r="5" fill="#fbbf24"/>
+    <text x="54" y="472" fill="#8fa0c0" font-size="11.5">Footer 滚动校验和 — 逐帧累积，防丢帧 / 重排 / 重复</text>
+  </g>
+</svg>

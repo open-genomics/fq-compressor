@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="fq-compressor (FQC v2)：把 FASTQ 压成小而可校验的归档。压缩格式设计、压缩算法设计、软件高性能架构设计。">
+  <meta name="color-scheme" content="dark">
+  <title>fq-compressor — FQC v2 设计文档站</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230e1728'/%3E%3Ctext x='16' y='22' font-size='15' font-family='monospace' fill='%2338bdf8' text-anchor='middle' font-weight='bold'%3Efq%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+
+<button class="nav-toggle" id="navToggle" aria-label="展开导航" aria-expanded="false">
+  <span class="hamburger"><span></span><span></span><span></span></span>
+  fq-compressor 目录
+</button>
+<div class="sidebar-backdrop" id="sidebarBackdrop"></div>
+
+<div class="layout">
+
+  <!-- ================= 侧栏导航 ================= -->
+  <aside class="sidebar" id="sidebar">
+    <div class="brand">
+      <span class="logo" aria-hidden="true">
+        <svg viewBox="0 0 34 34" width="34" height="34">
+          <rect x="1" y="1" width="32" height="32" rx="8" fill="#0e1728" stroke="#1c2a45"/>
+          <text x="17" y="23" font-size="14" font-family="monospace" fill="#38bdf8" text-anchor="middle" font-weight="bold">fq</text>
+        </svg>
+      </span>
+      <span>
+        <span class="brand-name">fq-compressor</span>
+        <span class="brand-sub">FQC v2 · design notes</span>
+      </span>
+    </div>
+
+    <nav class="nav" aria-label="章节导航">
+      <ul>
+        <li><a href="#overview">概览</a></li>
+      </ul>
+      <div class="nav-group-label">01 · 压缩格式设计</div>
+      <ul class="sub">
+        <li><a href="#format-identity" class="cat-format">格式身份</a></li>
+        <li><a href="#format-layout" class="cat-format">归档字节布局</a></li>
+        <li><a href="#format-integrity" class="cat-format">完整性设计</a></li>
+        <li><a href="#format-paired" class="cat-format">双端 reads</a></li>
+        <li><a href="#format-governance" class="cat-format">格式治理</a></li>
+      </ul>
+      <div class="nav-group-label">02 · 压缩算法设计</div>
+      <ul class="sub">
+        <li><a href="#algorithm-overview" class="cat-algorithm">总体思路</a></li>
+        <li><a href="#algorithm-2bit" class="cat-algorithm">2-bit 打包</a></li>
+        <li><a href="#algorithm-exceptions" class="cat-algorithm">异常碱基</a></li>
+        <li><a href="#algorithm-quality-id" class="cat-algorithm">质量值与 ID 流</a></li>
+        <li><a href="#algorithm-checksum-varint" class="cat-algorithm">校验与 varint</a></li>
+        <li><a href="#algorithm-ratio" class="cat-algorithm">端到端压缩比</a></li>
+        <li><a href="#algorithm-tradeoffs" class="cat-algorithm">设计取舍</a></li>
+      </ul>
+      <div class="nav-group-label">03 · 高性能架构</div>
+      <ul class="sub">
+        <li><a href="#arch-pipelines" class="cat-architecture">数据流流水线</a></li>
+        <li><a href="#arch-parallel" class="cat-architecture">并行执行架构</a></li>
+        <li><a href="#arch-memory" class="cat-architecture">内存模型</a></li>
+        <li><a href="#arch-profile" class="cat-architecture">Profile 判定</a></li>
+        <li><a href="#arch-failures" class="cat-architecture">故障行为</a></li>
+        <li><a href="#arch-modules" class="cat-architecture">模块划分</a></li>
+        <li><a href="#arch-performance" class="cat-architecture">性能基准</a></li>
+      </ul>
+      <ul>
+        <li><a href="#resources">相关资源</a></li>
+      </ul>
+    </nav>
+  </aside>
+
+  <!-- ================= 主内容 ================= -->
+  <main class="main">
+    <div class="content">
+
+      <!-- ===== 概览 ===== -->
+      <section class="section" id="overview" data-cat="overview">
+        <div class="hero">
+          <h1><span class="fqc">fq-compressor</span> · FQC v2 设计笔记</h1>
+          <p class="tagline">把 FASTQ 压成<b>小而可校验</b>的归档：内存可控、管道友好、压缩比约 2.8–2.9×。本页从格式、算法、架构三个视角解析其设计。</p>
+          <div class="badges">
+            <span class="badge accent-cyan">fqc-sequential/v2</span>
+            <span class="badge accent-green">C++23</span>
+            <span class="badge accent-green">CMake 3.28+</span>
+            <span class="badge accent-green">Conan 2.x</span>
+            <span class="badge">MIT</span>
+            <span class="badge">Zstd · XXH64</span>
+          </div>
+
+          <pre><code><span class="c"># 快速开始</span>
+fqc=./build/clang-release/src/fqc
+$fqc compress   -i reads.fastq.gz -o reads.fqc     <span class="c"># 压缩</span>
+$fqc decompress -i reads.fqc        -o out.fastq   <span class="c"># 解压</span>
+$fqc verify     reads.fqc                          <span class="c"># 完整解码校验，不写 FASTQ</span>
+$fqc compress   -i R1.fastq.gz -2 R2.fastq.gz -o paired.fqc <span class="c"># 双端</span></code></pre>
+
+          <div class="stat-row">
+            <div class="stat"><div class="num">2.96×</div><div class="lbl">Illumina 150 bp 压缩比</div></div>
+            <div class="stat"><div class="num">148.84</div><div class="lbl">MiB/s 压缩吞吐（并行解析）</div></div>
+            <div class="stat"><div class="num">16 GiB</div><div class="lbl">默认内存预算（最低 64 MiB）</div></div>
+            <div class="stat"><div class="num">4:1</div><div class="lbl">序列 2-bit 打包</div></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== 01 压缩格式设计 ===== -->
+      <section class="section cat-format" id="format" data-cat="format">
+        <div class="section-head">
+          <span class="section-num">01</span>
+          <h2>压缩格式设计</h2>
+        </div>
+        <p class="section-lead">FQC v2 是一种<b>顺序帧归档</b>格式（格式族 <code>fqc-sequential/v2</code>），围绕四个目标设计：内存有界、管道友好、故障边界清晰、吞吐量可量化。v1 兼容、索引、随机访问、全局 read 重排序——一概不做。</p>
+      </section>
+
+      <section class="section cat-format" id="format-identity" data-cat="format">
+        <h3><span class="kicker">Identity</span>格式身份</h3>
+        <p>归档契约标识为 <code>fqc-sequential/v2</code>，命令 <code>fqc</code>，扩展名 <code>.fqc</code>，
+        magic 字节为 <code>46 51 43 56 32 0D 0A 1A</code>——即 ASCII <code>FQCV2</code> 后跟 CR LF 与 0x1A。</p>
+        <div class="card danger">
+          <div class="card-title"><span class="tag">注意</span>扩展名不能判定格式</div>
+          <p>同名但<b>格式不兼容</b>的兄弟实现 <a href="https://github.com/open-genomics/fq-compressor-rust">fq-compressor-rust</a>
+          （Rust，<code>fqc-indexed/v2</code>）使用不同的 magic 与字节布局，两者<b>不能互相解码</b>。
+          因此 <code>.fqc</code> 扩展名不具判别力，reader 必须先检查 archive magic。</p>
+        </div>
+        <div class="kv-grid">
+          <div class="kv"><div class="k">格式族</div><div class="v">fqc-sequential/v2</div></div>
+          <div class="kv"><div class="k">命令</div><div class="v">fqc</div></div>
+          <div class="kv"><div class="k">扩展名</div><div class="v">.fqc</div></div>
+          <div class="kv"><div class="k">magic</div><div class="v">46 51 43 56 32 0D 0A 1A</div></div>
+          <div class="kv"><div class="k">外部产品形态</div><div class="v">仅 <code>fqc</code> CLI</div></div>
+        </div>
+      </section>
+
+      <section class="section cat-format" id="format-layout" data-cat="format">
+        <h3><span class="kicker">Byte Layout</span>归档字节布局</h3>
+        <p>所有整数均为<b>小端序</b>。凡是分配内存要用的大小字段，都写在对应载荷前面，<b>先校验再分配</b>。</p>
+        <div class="figure">
+          <img src="assets/format-layout.svg" alt="FQC v2 归档字节布局图" width="1180" height="500" loading="lazy">
+          <div class="figcaption">图 1 · fqc-sequential/v2 归档整体结构、单帧展开与三层完整性覆盖</div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>区域</th><th>内容</th><th>完整性 / 边界</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>全局头</code> 32 B</td>
+                <td>magic、版本、标志位、profile、流编解码器 ID</td>
+                <td>XXH64 头部校验和；严格校验版本 / 编解码器 ID</td>
+              </tr>
+              <tr>
+                <td><code>帧头</code> 72 B（每帧重复）</td>
+                <td>帧 ID、记录数、原始 / 编码流大小</td>
+                <td>帧 ID 单调递增；成对完整性不变量；逐字段及总量内存限制</td>
+              </tr>
+              <tr>
+                <td><code>ID 载荷</code></td>
+                <td>记录数、ID / 注释长度及字节</td>
+                <td>Zstd level 1</td>
+              </tr>
+              <tr>
+                <td><code>序列载荷</code></td>
+                <td>记录数、长度、2-bit A/C/G/T、精确异常</td>
+                <td>Zstd level 1</td>
+              </tr>
+              <tr>
+                <td><code>质量载荷</code></td>
+                <td>记录数、质量值长度及字节</td>
+                <td>Zstd level 1</td>
+              </tr>
+              <tr>
+                <td><code>Footer</code> 40 B</td>
+                <td>帧 / read / 碱基总计及滚动校验和</td>
+                <td>总计必须与解码状态一致</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="section cat-format" id="format-integrity" data-cat="format">
+        <h3><span class="kicker">Integrity</span>完整性设计</h3>
+        <p>三层 XXH64 校验覆盖从头部到帧尾的完整链路，用于<b>发现随机损坏</b>（非密码学认证）。</p>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>层级</th><th>覆盖范围</th><th>检测目标</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>全局头校验和</td><td>头部前 24 字节</td><td>版本 / 编解码器 ID 篡改、传输损坏</td></tr>
+              <tr><td>帧逻辑校验和</td><td>三路<b>未压缩</b>流的链式哈希</td><td>载荷数据损坏</td></tr>
+              <tr><td>Footer 滚动校验和</td><td>逐帧校验和的累积哈希</td><td>帧丢失、重复、重排序</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="card tip">
+          <div class="card-title"><span class="tag">关键设计</span>帧校验和计算在未压缩流上，而非压缩流上</div>
+          <p>这意味着即使 Zstd 解压因损坏数据产生了错误输出（而非报错），校验和不匹配仍会触发 fail-closed——能发现 Zstd 的<b>静默错误</b>。
+          逻辑帧校验和覆盖三路未压缩流；footer 校验和逐帧滚动累积，因此重排序、丢帧、重复帧、载荷损坏、总计对不上都能被检测到。</p>
+        </div>
+      </section>
+
+      <section class="section cat-format" id="format-paired" data-cat="format">
+        <h3><span class="kicker">Paired-end</span>双端 reads</h3>
+        <p>两个输入文件<b>锁步读取</b>，按 <code>R1, R2, R1, R2</code> 交替存储。两端记录数不一致直接报格式错误；双端帧的记录数必须是偶数，保证配对<b>不会跨帧</b>。解压时输出一个标准的交错 FASTQ 流。</p>
+      </section>
+
+      <section class="section cat-format" id="format-governance" data-cat="format">
+        <h3><span class="kicker">Governance</span>格式治理</h3>
+        <div class="kv-grid">
+          <div class="kv">
+            <div class="k">冻结归档</div>
+            <div class="v">保留确定性 SE / PE v2 归档 fixture 与 manifest，未来任何 reader 都必须能解码并匹配</div>
+          </div>
+          <div class="kv">
+            <div class="k">Writer 字节稳定性</div>
+            <div class="v">布局与语义稳定；压缩载荷字节不声明为 canonical，允许未来 writer 改变表示</div>
+          </div>
+          <div class="kv">
+            <div class="k">未知字段</div>
+            <div class="v">不支持的版本 / 标志 / profile / 编解码器 / 保留值，解码前一律 fail closed</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== 02 压缩算法设计 ===== -->
+      <section class="section cat-algorithm" id="algorithm" data-cat="algorithm">
+        <div class="section-head">
+          <span class="section-num">02</span>
+          <h2>压缩算法设计</h2>
+        </div>
+        <p class="section-lead">FASTQ 每条记录有四个字段：标识符（ID + 注释）、序列、<code>+</code> 分隔行、质量值。
+        其中 <code>+</code> 行不携带信息，直接丢弃；其余三个字段按<b>列式分离</b>编码为三条独立字节流，各自用 Zstd level 1 压缩后写入帧。</p>
+      </section>
+
+      <section class="section cat-algorithm" id="algorithm-overview" data-cat="algorithm">
+        <h3><span class="kicker">Columnar Separation</span>总体思路：列式分离</h3>
+        <div class="figure">
+          <img src="assets/columnar.svg" alt="列式分离示意图" width="1180" height="440" loading="lazy">
+          <div class="figcaption">图 2 · FASTQ 行式记录 → 三路列式字节流 → 各自 Zstd level 1</div>
+        </div>
+        <h4>为什么列式分离</h4>
+        <p>FASTQ 是行式格式——四个字段交替出现。但<b>同一字段在不同记录之间</b>有更强的统计相关性：</p>
+        <ul>
+          <li><b>ID</b> 共享仪器名、泳道号、坐标前缀（如 <code>@M00123:45:000000000-ABCDE:1:1101:12345:1234</code>），前缀重复率极高。</li>
+          <li><b>序列</b> 的碱基分布和 k-mer 频率在同类数据中高度一致。</li>
+          <li><b>质量值</b> 的分布由测序化学决定，同一 run 内模式相似。</li>
+        </ul>
+        <p>把三个字段分开，Zstd 的滑动窗口里全是同类数据，字典匹配效率远高于行式交错——这是压缩比的主要来源之一。</p>
+        <h4>为什么选 Zstd level 1</h4>
+        <ul>
+          <li>压缩 ~53 MiB/s，解压 ~182 MiB/s（150 bp 随机合成数据）。</li>
+          <li>相比 level 3–5，压缩比损失通常在 2–5%，但速度快 2–3 倍。</li>
+          <li>列式分离后冗余已大幅降低，更高级别的边际收益递减。</li>
+        </ul>
+      </section>
+
+      <section class="section cat-algorithm" id="algorithm-2bit" data-cat="algorithm">
+        <h3><span class="kicker">2-bit Packing</span>序列编码：2-bit 打包</h3>
+        <p>这是<b>压缩比贡献最大的单步操作</b>。大写 A/C/G/T 占绝大多数（Illumina 数据通常 &gt;99%），四个碱基各用 2 bit 表示，4 个碱基打包进 1 字节，LSB 优先：</p>
+        <pre><code>碱基 → 2-bit 值:  <span class="hl">A=0  C=1  G=2  T=3</span>
+
+序列 "ACGTACGT" 的打包结果:
+  字节 0: A(00) C(01) G(10) T(11) → 0b11_10_01_00 = 0xE4
+  字节 1: A(00) C(01) G(10) T(11) → 0xE4
+
+打包后大小 = ⌈序列长度 / 4⌉ 字节</code></pre>
+        <p>原始 FASTQ 中每个碱基占 1 字节（8 bit），打包后占 2 bit，<b>序列部分直接 4:1 压缩</b>——在 Zstd 之前就已经完成。</p>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>阶段</th><th class="num">每条记录序列大小</th><th>说明</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>原始 FASTQ</td><td class="num">150 B</td><td>1 字节 / 碱基</td></tr>
+              <tr><td>2-bit 打包后</td><td class="num">38 B</td><td>⌈150 / 4⌉ = 38</td></tr>
+              <tr><td>Zstd 后</td><td class="num">~25–30 B</td><td>随机序列的 Zstd 增益有限（熵已接近 2 bit/碱基）</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="section cat-algorithm" id="algorithm-exceptions" data-cat="algorithm">
+        <h3><span class="kicker">IUPAC Exceptions</span>异常碱基处理</h3>
+        <p>不是所有碱基都是大写 A/C/G/T。IUPAC 字母表还包括小写碱基 <code>a c g t</code>（软掩码，大小写有语义，必须保留）和简并碱基
+        <code>R Y S W K M B D H V N</code>。这些碱基无法用 2 bit 表示，按<b>异常列表</b>编码：</p>
+        <pre><code>varint(异常数量)
+对每个异常:
+  varint(位置增量)   <span class="c">← 第一个是绝对位置，后续是相对前一个异常的间距</span>
+  1 字节原始 ASCII   <span class="c">← 保留原始字符，大小写不丢失</span></code></pre>
+        <p>打包时，异常位置的 2-bit 槽填 <code>0</code>（即 A），解码时先展开 2-bit 序列，再用异常列表覆写对应位置。</p>
+        <ul>
+          <li>对 Illumina 短读长，异常列表通常为空（只有 <code>varint(0)</code> 一个字节），开销几乎为零。</li>
+          <li>对长读长（ONT / PacBio），小写和简并碱基可能较多，<b>增量编码</b>避免为每个异常分配独立对象——v2 用一趟打包 + 一趟定位遍历解决。</li>
+          <li>解码侧会重新校验每个异常字节是否为合法 IUPAC 字符，拒绝非法输入。</li>
+        </ul>
+      </section>
+
+      <section class="section cat-algorithm" id="algorithm-quality-id" data-cat="algorithm">
+        <h3><span class="kicker">Quality &amp; ID</span>质量值与 ID 流</h3>
+        <h4>质量值：最简策略——直通</h4>
+        <pre><code>varint(记录数)
+对每条记录:
+  varint(质量值长度) + 原始 ASCII 字节   <span class="c">← Phred+33，不做 delta / 游程 / 分箱 / 有损量化</span></code></pre>
+        <p>不做专门编码的原因：</p>
+        <ol class="steps">
+          <li><b>无损是硬约束。</b>质量值承载变异检测的统计权重，任何有损变换都会改变下游分析结果。</li>
+          <li><b>Zstd 已经够用。</b>字母表只有 ~94 个可打印 ASCII 字符（<code>!</code> 到 <code>~</code>），且同一 run 内分布模式重复。</li>
+          <li><b>专用编解码器尚未通过准入门槛。</b>还没有哪个专门的质量值编解码器能在足够大的真实语料上同时通过体积和吞吐量测试。</li>
+        </ol>
+        <h4>ID 流</h4>
+        <pre><code>varint(记录数)
+对每条记录:
+  varint(id 长度) + id 字节 + varint(注释长度) + 注释字节</code></pre>
+        <p>ID 和注释分开存储（FASTQ 头行以第一个空格分割），因为：解压时需要精确重建 <code>@{id}[ {comment}]</code> 格式；ID 部分的重复前缀是 Zstd 字典匹配的主要收益来源。</p>
+      </section>
+
+      <section class="section cat-algorithm" id="algorithm-checksum-varint" data-cat="algorithm">
+        <h3><span class="kicker">Checksum &amp; Varint</span>校验与 varint 编码</h3>
+        <p>三层 XXH64 校验的完整说明见<a href="#format-integrity">格式设计 · 完整性</a>。链式计算顺序：
+        <code>XXH64(质量值流, XXH64(序列流, XXH64(ID流, 0)))</code>；footer 把每帧 8 字节校验和依次喂入全局 XXH64。</p>
+        <p>所有长度、计数、位置增量均使用 LEB128 风格的无符号 varint：</p>
+        <ul>
+          <li>每字节 7 bit 有效载荷，最高位为续传标志。</li>
+          <li>最多 10 字节（64 bit），解码时检查 <code>shift == 63</code> 溢出。</li>
+          <li>小值（&lt;128）只占 1 字节，对短读长的长度字段和空异常列表非常友好。</li>
+        </ul>
+      </section>
+
+      <section class="section cat-algorithm" id="algorithm-ratio" data-cat="algorithm">
+        <h3><span class="kicker">End-to-end</span>端到端压缩比分析</h3>
+        <p>以 150 bp Illumina 随机合成数据为例（实测压缩比 ~2.95×）：</p>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>组件</th><th class="num">原始大小 / 记录</th><th class="num">压缩后估算</th><th>主要压缩手段</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>序列 (150 bp)</td><td class="num">150 B</td><td class="num">~25–30 B</td><td>2-bit 4:1 打包 + Zstd</td></tr>
+              <tr><td>质量值 (150 chars)</td><td class="num">150 B</td><td class="num">~80–100 B</td><td>Zstd 字典匹配</td></tr>
+              <tr><td>ID + 注释 (~60 chars)</td><td class="num">60 B</td><td class="num">~10–15 B</td><td>Zstd 前缀匹配</td></tr>
+              <tr><td>FASTQ 框架（<code>@ + 换行</code>）</td><td class="num">6 B</td><td class="num">0 B</td><td>丢弃，解压时重建</td></tr>
+              <tr><td><b>合计</b></td><td class="num"><b>~366 B</b></td><td class="num"><b>~120 B</b></td><td><b>~3×</b></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="card warn">
+          <div class="card-title"><span class="tag">瓶颈</span>质量值是压缩比的主要瓶颈</div>
+          <p>它占原始数据约 40%，但 Zstd 压缩后仍占较大比例。真实短读（质量符号少、分布集中）通常优于随机合成；质量字母表接近满档的长读可以更差。</p>
+        </div>
+      </section>
+
+      <section class="section cat-algorithm" id="algorithm-tradeoffs" data-cat="algorithm">
+        <h3><span class="kicker">Trade-offs</span>设计取舍</h3>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>选择</th><th>收益</th><th>代价</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>列式分离</td><td>Zstd 字典效率大幅提升</td><td>编解码需要三趟遍历</td></tr>
+              <tr><td>2-bit 打包</td><td>序列 4:1 压缩，最大单一贡献</td><td>异常碱基需要额外列表</td></tr>
+              <tr><td>Zstd level 1</td><td>高吞吐（&gt;50 MiB/s 压缩）</td><td>比高级别少 2–5% 压缩比</td></tr>
+              <tr><td>质量值不编码</td><td>实现简单，无损保证</td><td>压缩比瓶颈</td></tr>
+              <tr><td>未压缩流校验和</td><td>检测 Zstd 静默错误</td><td>校验和计算在解压后的数据上</td></tr>
+              <tr><td>增量编码异常位置</td><td>避免 per-base 对象分配</td><td>异常密集时列表较长</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ===== 03 高性能架构 ===== -->
+      <section class="section cat-architecture" id="architecture" data-cat="architecture">
+        <div class="section-head">
+          <span class="section-num">03</span>
+          <h2>软件高性能架构设计</h2>
+        </div>
+        <p class="section-lead">压缩（未压缩普通文件）是<b>多帧并行编码流水线</b>，解压是其镜像；三条命令共用同一引擎。
+        对外产品形态只有 <code>fqc</code> CLI——<code>fqc_core</code>、<code>fqc_cli</code> 与 <code>include/fqc</code> 下的头文件纯粹是为了组织源码和测试，不对外安装，也没有源码或 ABI 兼容承诺。</p>
+      </section>
+
+      <section class="section cat-architecture" id="arch-pipelines" data-cat="architecture">
+        <h3><span class="kicker">Dataflow</span>数据流流水线</h3>
+        <div class="figure">
+          <img src="assets/pipeline-compress.svg" alt="压缩流水线图" width="1180" height="340" loading="lazy">
+          <div class="figcaption">图 3 · 压缩路径：parser×K → 有界 MPMC → encoder×N → ChunkOrderer → 写盘</div>
+        </div>
+        <div class="figure">
+          <img src="assets/pipeline-decompress.svg" alt="解压流水线图" width="1180" height="340" loading="lazy">
+          <div class="figcaption">图 4 · 解压路径：reader → MPMC → decoder×N → reorder 保序 → 滚动校验 → 写出</div>
+        </div>
+        <div class="card tip">
+          <div class="card-title"><span class="tag">单引擎复用</span>verify 走与 decompress 完全相同的解码校验路径</div>
+          <p><code>verify</code> 只是把 sink 换成只计数——因此是<b>完整解码</b>，不是常数时间元数据检查；CPU / 内存成本与 <code>decompress</code> 同量级。</p>
+        </div>
+      </section>
+
+      <section class="section cat-architecture" id="arch-parallel" data-cat="architecture">
+        <h3><span class="kicker">Parallelism</span>并行执行架构</h3>
+        <p><b>帧边界天然独立</b>，是多帧并行编码的切分点。编解码器状态保持帧内局部或 worker 内局部，worker 间无需共享可变状态。</p>
+        <ul>
+          <li><b>压缩路径</b>：未压缩普通文件走阶段 H 的<b>数据并行解析</b>——K 个 parser 各自打开独立 <code>ifstream</code>，按字节块切分并做记录边界对齐，帧以 <code>(chunkId, localId)</code> 标记；N 个 encoder worker 并行编码并压缩（CPU 密集、乱序完成）；writer 用 <code>ChunkOrderer</code> 按字典序提交。两条<b>有界 MPMC 队列（深度 4）</b>解耦三段。</li>
+          <li><b>解压路径</b>：reader 线程用 <code>ArchiveReader::readRawFrame</code> 做纯 I/O 读帧（每帧带递增帧 id）；N 个 decoder worker 并行 <code>decodeRawFrame</code>；writer 线程经 reorder buffer 按帧 id 有序提交后做滚动全局校验和再交给 RecordSink。</li>
+          <li><b>非并行路径</b>：gzip / stdin / 双端走单 reader 顺序解析（双端 R1/R2 锁步不并行切块）。</li>
+        </ul>
+        <p>在途帧上界 = 两条队列深度（各 4）+ N 个 encoder（默认 4）≈ 12 帧，每帧由编码前内存预检约束，整体远低于操作预算。</p>
+        <h4>并行化演进（沿瓶颈逐步推进）</h4>
+        <ol class="steps">
+          <li><b>阶段 D</b> — 并行 encoder。</li>
+          <li><b>阶段 F</b> — 把 zstd 下沉到 encoder worker，writer 退化为纯 I/O。</li>
+          <li><b>阶段 H</b> — 对未压缩普通文件做数据并行解析。</li>
+        </ol>
+        <div class="card warn">
+          <div class="card-title"><span class="tag">克制</span>任何进一步并行都以阶段 E 的分段计时为据</div>
+          <p>在尚未证实某段成为瓶颈的前提下引入 TBB DAG 或线程池，只会把 v2 已经干掉的重复状态、输出排序和在途内存风险重新请回来。</p>
+        </div>
+      </section>
+
+      <section class="section cat-architecture" id="arch-memory" data-cat="architecture">
+        <h3><span class="kicker">Memory</span>内存模型</h3>
+        <p>CLI 默认预算 16 GiB，最低支持 64 MiB。编解码器<b>不写临时文件</b>；输出到普通文件时先写到目标旁边的临时文件，整个归档完成后再原子替换。</p>
+        <div class="figure">
+          <img src="assets/memory-model.svg" alt="压缩侧内存三道防线图" width="1180" height="360" loading="lazy">
+          <div class="figcaption">图 5 · 压缩侧内存三道防线与解压侧聚合校验</div>
+        </div>
+        <p>最大帧大小 = <code>(内存限制 − 运行时预留) / 4</code>；累积目标用 <code>/ 8</code>。在 64 MiB 限制下，发布流程实测 RSS 为 25–32 MiB。</p>
+      </section>
+
+      <section class="section cat-architecture" id="arch-profile" data-cat="architecture">
+        <h3><span class="kicker">Profile</span>Profile 判定</h3>
+        <p><code>auto</code> 模式最多采样 50,000 条记录或 512 MiB 碱基，且不超过可用操作预算的八分之一。</p>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Profile</th><th>判定特征</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Illumina</td><td>短读长（最长 ≤ 1,000 bp，平均 ≤ 500 bp）</td></tr>
+              <tr><td>ONT</td><td>多数 read 头部含 <code>runid=</code> 或 channel 标签；或长读且 ID 为 ENA / SRA / DDBJ 转写后的 run accession（<code>SRR</code> / <code>ERR</code> / <code>DRR</code> + 数字）</td></tr>
+              <tr><td>PacBio HiFi</td><td>多数头部含 <code>/ccs</code> 或 <code>hifi</code> 标记</td></tr>
+              <tr><td>PacBio CLR</td><td>多数头部含 PacBio / subread 或 movie / ZMW / subread 风格标记</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="card tip">
+          <div class="card-title"><span class="tag">不做静默猜测</span>特征模糊时明确拒绝</div>
+          <p>如果长读长输入的特征模糊、无法明确判定，会直接拒绝并提示用户传 <code>--profile</code>。Profile 会写入归档，但<b>目前所有 profile 共用同一套回退编码</b>——还没有哪个专门编解码器能同时通过体积和吞吐量的准入门槛。</p>
+        </div>
+      </section>
+
+      <section class="section cat-architecture" id="arch-failures" data-cat="architecture">
+        <h3><span class="kicker">Fail Closed</span>故障行为</h3>
+        <ul>
+          <li>覆盖已有输出必须加 <code>--force</code>；输入和输出不允许是同一个文件。</li>
+          <li>截断、未知格式 / 版本 / 编解码器、校验和不匹配、不可能的流长度、逻辑流尾部或 footer 之后出现多余字节、配对数对不上、内存超限——一律 <b>fail closed</b>，直接报错终止。</li>
+          <li><code>verify</code> 走完整解码流程（完整 zstd 解压 + 逻辑流校验 + 记录解码），不能当作常数时间 metadata check。</li>
+          <li>XXH64 用于发现随机损坏，不提供对恶意篡改的密码学认证。</li>
+          <li>v1 输入直接拒绝，没有任何部分兼容或启发式猜测的路径。</li>
+        </ul>
+      </section>
+
+      <section class="section cat-architecture" id="arch-modules" data-cat="architecture">
+        <h3><span class="kicker">Modules</span>模块划分</h3>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>命名空间</th><th>职责</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>fqc::format</code></td><td>线上格式、流编码、校验和、内存预检</td></tr>
+              <tr><td><code>fqc::commands</code></td><td>profile 判定与单引擎有界执行</td></tr>
+              <tr><td><code>fqc::io</code></td><td>FASTQ 解析、gzip 输入、文件 / stdin / stdout 流工厂</td></tr>
+              <tr><td><code>fqc::common</code></td><td>记录、结构化错误、日志</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>内部编排入口是 <code>include/fqc/commands/archive_engine.h</code>；<code>src/main.cpp</code> 里的 CLI 只做三件事：解析参数、构造请求、报告结构化错误。旧版的 ABC、SCM、v1 格式 / 索引 / 重排序映射、异步 I/O 孤岛、TBB 流水线——全部删干净了，没有留一行死代码。</p>
+      </section>
+
+      <section class="section cat-architecture" id="arch-performance" data-cat="architecture">
+        <h3><span class="kicker">Benchmarks</span>性能基准</h3>
+        <p>合成数据（阶段 H A/B 同窗口，64 MiB 内存预算，随机 FASTQ ×5 次中位数）：</p>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>数据</th><th class="num">压缩（并行解析）</th><th class="num">相对顺序解析</th><th class="num">压缩比</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Illumina-like 150 bp</td><td class="num"><b>148.84 MiB/s</b></td><td class="num">+47.7%</td><td class="num">2.96×</td></tr>
+              <tr><td>ONT-like 20 kbp</td><td class="num">与顺序路径持平</td><td class="num">—</td><td class="num">2.84×</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="card warn">
+          <div class="card-title"><span class="tag">谨慎</span>数字仅供参考</div>
+          <p>WSL2 状态波动极大（同代码同配置两次跑吞吐可差 20–85%）。真实生物语料实测见<a href="https://github.com/open-genomics/fq-compressor/blob/master/docs/real-corpus.md">docs/real-corpus.md</a>；并行化收益沿瓶颈逐步推进：长读解析占比小，并行解析收益落在噪声内。</p>
+        </div>
+      </section>
+
+      <!-- ===== 相关资源 ===== -->
+      <section class="section" id="resources" data-cat="overview">
+        <h3>相关资源</h3>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>资源</th><th>说明</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><a href="https://github.com/open-genomics/fq-compressor">GitHub 仓库</a></td><td>源码、CI、issue 跟踪</td></tr>
+              <tr><td><a href="https://github.com/open-genomics/fq-compressor/blob/master/ALGORITHM.md">ALGORITHM.md</a></td><td>压缩算法与原理（本页第 02 章来源）</td></tr>
+              <tr><td><a href="https://github.com/open-genomics/fq-compressor/blob/master/ARCHITECTURE.md">ARCHITECTURE.md</a></td><td>架构与字节布局（本页第 01 / 03 章来源）</td></tr>
+              <tr><td><a href="https://github.com/open-genomics/fq-compressor/tree/master/openspec/specs/archive-format">openspec · archive-format spec</a></td><td>顺序归档格式的规范性规格与验收场景</td></tr>
+              <tr><td><a href="https://github.com/open-genomics/fq-compressor/blob/master/docs/building.md">docs/building.md</a></td><td>构建、工具链、质量门禁</td></tr>
+              <tr><td><a href="https://github.com/open-genomics/fq-compressor/blob/master/docs/real-corpus.md">docs/real-corpus.md</a></td><td>真实生物语料验收</td></tr>
+              <tr><td><a href="https://github.com/open-genomics/fq-compressor/blob/master/CHANGELOG.md">CHANGELOG.md</a></td><td>变更记录</td></tr>
+              <tr><td><a href="https://github.com/open-genomics/fq-compressor-rust">fq-compressor-rust</a></td><td>Rust 兄弟实现（<code>fqc-indexed/v2</code>，格式不兼容）</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <footer class="site-footer">
+        <div class="links">
+          <a href="https://github.com/open-genomics/fq-compressor">仓库</a>
+          <a href="https://github.com/open-genomics/fq-compressor/blob/master/LICENSE">MIT License</a>
+          <a href="https://github.com/open-genomics/fq-compressor/actions/workflows/ci.yml">CI</a>
+        </div>
+        <p>fq-compressor (FQC v2) 设计文档站 · 内容源自仓库内 ALGORITHM.md / ARCHITECTURE.md / openspec。</p>
+      </footer>
+
+    </div>
+  </main>
+</div>
+
+<script src="assets/app.js"></script>
+</body>
+</html>

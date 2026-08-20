@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1180 440" font-family="ui-monospace, 'SF Mono', 'Cascadia Code', Consolas, monospace">
+  <!-- 列式分离：FASTQ 行式 → 三路列式流 → Zstd -->
+  <defs>
+    <marker id="arr2" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L6,3 L0,6 Z" fill="#8fa0c0"/>
+    </marker>
+  </defs>
+
+  <!-- 左：FASTQ 行式 -->
+  <text x="20" y="34" fill="#5f7194" font-size="13" font-weight="700" letter-spacing="1">FASTQ 记录流（行式）</text>
+  <rect x="20" y="48" width="300" height="150" rx="8" fill="#0e1728" stroke="#38bdf8" stroke-width="1.6"/>
+  <text x="40" y="78" fill="#f9a8d4" font-size="12.5">@M00123:45:…:1234:12345 1:N:0:1</text>
+  <text x="40" y="100" fill="#6ee7b7" font-size="12.5">ACGTACGTACGTACGTACGTACGT…</text>
+  <text x="40" y="122" fill="#8fa0c0" font-size="12.5">+</text>
+  <text x="40" y="144" fill="#c4b5fd" font-size="12.5">IIIIIIIIIIIIIIIIIIIIIIIII…</text>
+  <text x="40" y="172" fill="#5f7194" font-size="11">四字段交替出现</text>
+
+  <!-- 箭头到列式 -->
+  <line x1="170" y1="204" x2="170" y2="236" stroke="#8fa0c0" stroke-width="1.6" marker-end="url(#arr2)"/>
+  <text x="200" y="226" fill="#fbbf24" font-size="12.5" font-weight="700">列式分离</text>
+  <text x="200" y="244" fill="#8fa0c0" font-size="11">同类数据聚拢 → Zstd 字典匹配效率↑</text>
+
+  <!-- 三列 -->
+  <!-- ID 流 -->
+  <rect x="20" y="260" width="330" height="104" rx="8" fill="#0e1728" stroke="#f472b6" stroke-width="1.6"/>
+  <rect x="20" y="260" width="330" height="22" rx="8" fill="rgba(244,114,182,0.15)"/>
+  <text x="185" y="275" text-anchor="middle" fill="#f9a8d4" font-size="11">ID 流</text>
+  <text x="185" y="300" text-anchor="middle" fill="#8fa0c0" font-size="11.5">varint(记录数) + [varint(id长度) + id + 注释] × N</text>
+  <text x="185" y="322" text-anchor="middle" fill="#8fa0c0" font-size="11.5">共享仪器名 / 泳道 / 坐标前缀 → 高重复</text>
+  <text x="185" y="346" text-anchor="middle" fill="#5f7194" font-size="10.5">ID 与注释分开存，解压可精确重建头行</text>
+
+  <!-- 序列流 -->
+  <rect x="390" y="260" width="370" height="104" rx="8" fill="#0e1728" stroke="#34d399" stroke-width="1.6"/>
+  <rect x="390" y="260" width="370" height="22" rx="8" fill="rgba(52,211,153,0.15)"/>
+  <text x="575" y="275" text-anchor="middle" fill="#6ee7b7" font-size="11">序列流</text>
+  <text x="575" y="300" text-anchor="middle" fill="#8fa0c0" font-size="11.5">varint(记录数) + [2-bit 打包 + 异常列表] × N</text>
+  <text x="575" y="322" text-anchor="middle" fill="#8fa0c0" font-size="11.5">A/C/G/T → 2 bit，LSB 优先，直接 4:1</text>
+  <text x="575" y="346" text-anchor="middle" fill="#5f7194" font-size="10.5">异常 IUPAC / 小写碱基：增量位置 + 原始字节</text>
+
+  <!-- 质量流 -->
+  <rect x="800" y="260" width="360" height="104" rx="8" fill="#0e1728" stroke="#a78bfa" stroke-width="1.6"/>
+  <rect x="800" y="260" width="360" height="22" rx="8" fill="rgba(167,139,250,0.15)"/>
+  <text x="980" y="275" text-anchor="middle" fill="#c4b5fd" font-size="11">质量值流</text>
+  <text x="980" y="300" text-anchor="middle" fill="#8fa0c0" font-size="11.5">varint(记录数) + [varint(长度) + 原始 ASCII] × N</text>
+  <text x="980" y="322" text-anchor="middle" fill="#8fa0c0" font-size="11.5">Phred+33 直通，不做有损变换</text>
+  <text x="980" y="346" text-anchor="middle" fill="#5f7194" font-size="10.5">无损是硬约束</text>
+
+  <!-- Zstd 箭头 -->
+  <line x1="185" y1="370" x2="185" y2="398" stroke="#8fa0c0" stroke-width="1.6" marker-end="url(#arr2)"/>
+  <line x1="575" y1="370" x2="575" y2="398" stroke="#8fa0c0" stroke-width="1.6" marker-end="url(#arr2)"/>
+  <line x1="980" y1="370" x2="980" y2="398" stroke="#8fa0c0" stroke-width="1.6" marker-end="url(#arr2)"/>
+
+  <rect x="20" y="402" width="330" height="28" rx="6" fill="rgba(56,189,248,0.10)" stroke="rgba(56,189,248,0.35)"/>
+  <text x="185" y="420" text-anchor="middle" fill="#7dd3fc" font-size="11.5">Zstd level 1</text>
+  <rect x="390" y="402" width="370" height="28" rx="6" fill="rgba(56,189,248,0.10)" stroke="rgba(56,189,248,0.35)"/>
+  <text x="575" y="420" text-anchor="middle" fill="#7dd3fc" font-size="11.5">Zstd level 1</text>
+  <rect x="800" y="402" width="360" height="28" rx="6" fill="rgba(56,189,248,0.10)" stroke="rgba(56,189,248,0.35)"/>
+  <text x="980" y="420" text-anchor="middle" fill="#7dd3fc" font-size="11.5">Zstd level 1</text>
+</svg>

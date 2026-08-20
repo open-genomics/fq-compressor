@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1180 360" font-family="ui-monospace, 'SF Mono', 'Cascadia Code', Consolas, monospace">
+  <!-- 压缩侧内存三道防线 -->
+  <text x="20" y="36" fill="#5f7194" font-size="13" font-weight="700" letter-spacing="1">压缩侧内存三道防线 · 默认预算 16 GiB，最低 64 MiB</text>
+
+  <!-- 防线 1 -->
+  <rect x="20" y="56" width="1140" height="72" rx="10" fill="#0e1728" stroke="#38bdf8" stroke-width="1.4"/>
+  <circle cx="56" cy="92" r="17" fill="rgba(56,189,248,0.16)"/>
+  <text x="56" y="98" text-anchor="middle" fill="#7dd3fc" font-size="14" font-weight="700">1</text>
+  <text x="92" y="84" fill="#dbe6f7" font-size="14.5" font-weight="700">Profile 采样上限</text>
+  <text x="92" y="106" fill="#8fa0c0" font-size="12.5">采样最多 50,000 条记录或 512 MiB 碱基，且不超过可用操作预算的 1/8 —— 双重上限兜底</text>
+  <text x="1080" y="84" text-anchor="end" fill="#7dd3fc" font-size="11.5">采样阶段</text>
+
+  <!-- 防线 2 -->
+  <rect x="20" y="142" width="1140" height="72" rx="10" fill="#0e1728" stroke="#34d399" stroke-width="1.4"/>
+  <circle cx="56" cy="178" r="17" fill="rgba(52,211,153,0.16)"/>
+  <text x="56" y="184" text-anchor="middle" fill="#6ee7b7" font-size="14" font-weight="700">2</text>
+  <text x="92" y="170" fill="#dbe6f7" font-size="14.5" font-weight="700">帧累积目标</text>
+  <text x="92" y="192" fill="#8fa0c0" font-size="12.5">按保留记录字符串的实际容量计入开销，达到 min(请求目标, 预算推导目标) 时关帧</text>
+  <text x="1080" y="170" text-anchor="end" fill="#6ee7b7" font-size="11.5">累积阶段</text>
+
+  <!-- 防线 3 -->
+  <rect x="20" y="228" width="1140" height="72" rx="10" fill="#0e1728" stroke="#fbbf24" stroke-width="1.4"/>
+  <circle cx="56" cy="264" r="17" fill="rgba(251,191,36,0.16)"/>
+  <text x="56" y="270" text-anchor="middle" fill="#fcd34d" font-size="14" font-weight="700">3</text>
+  <text x="92" y="256" fill="#dbe6f7" font-size="14.5" font-weight="700">编码前保守峰值预检</text>
+  <text x="92" y="278" fill="#8fa0c0" font-size="12.5">精确测量所有原始流大小 + 保留容量 + Zstd 上界 + 元数据 + 运行时预留；超预算的帧直接拒绝</text>
+  <text x="1080" y="256" text-anchor="end" fill="#fcd34d" font-size="11.5">编码前</text>
+
+  <!-- 底部注 -->
+  <text x="20" y="330" fill="#8fa0c0" font-size="12.5">解压侧镜像校验：逐帧原始/编码大小 + 聚合保守峰值（编码字节 + 两份原始逻辑字节 + 解码元数据 + 运行时预留），</text>
+  <text x="20" y="350" fill="#8fa0c0" font-size="12.5">即使恶意头部让三路流各自合法，总和也过不了预算关 —— 不会 OOM，fail closed。</text>
+</svg>

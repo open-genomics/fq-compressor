@@ -1,0 +1,83 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1180 340" font-family="ui-monospace, 'SF Mono', 'Cascadia Code', Consolas, monospace">
+  <!-- 解压路径：多帧并行解码流水线 -->
+  <defs>
+    <marker id="arrd" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L6,3 L0,6 Z" fill="#8fa0c0"/>
+    </marker>
+  </defs>
+
+  <!-- A 输入 -->
+  <rect x="16" y="116" width="96" height="92" rx="8" fill="#0e1728" stroke="#fbbf24" stroke-width="1.6"/>
+  <text x="64" y="146" text-anchor="middle" fill="#fcd34d" font-size="12.5" font-weight="700">.fqc</text>
+  <text x="64" y="166" text-anchor="middle" fill="#8fa0c0" font-size="11">归档</text>
+  <text x="64" y="200" text-anchor="middle" fill="#5f7194" font-size="10">输入</text>
+
+  <line x1="116" y1="162" x2="146" y2="162" stroke="#8fa0c0" stroke-width="1.6" marker-end="url(#arrd)"/>
+
+  <!-- B reader -->
+  <rect x="150" y="86" width="216" height="176" rx="10" fill="none" stroke="#38bdf8" stroke-width="1.2" stroke-dasharray="5,4"/>
+  <text x="258" y="104" text-anchor="middle" fill="#7dd3fc" font-size="12.5" font-weight="700">reader（单线程）</text>
+  <rect x="162" y="116" width="192" height="46" rx="5" fill="rgba(56,189,248,0.10)" stroke="rgba(56,189,248,0.45)"/>
+  <text x="258" y="138" text-anchor="middle" fill="#bfe3ff" font-size="11">ArchiveReader</text>
+  <text x="258" y="154" text-anchor="middle" fill="#bfe3ff" font-size="11">校验头部 + 读帧</text>
+  <rect x="162" y="170" width="192" height="46" rx="5" fill="rgba(56,189,248,0.10)" stroke="rgba(56,189,248,0.45)"/>
+  <text x="258" y="192" text-anchor="middle" fill="#bfe3ff" font-size="11">readRawFrame（纯 I/O）</text>
+  <text x="258" y="208" text-anchor="middle" fill="#bfe3ff" font-size="11">内存预检，帧 id 递增</text>
+  <text x="258" y="248" text-anchor="middle" fill="#5f7194" font-size="10.5">读帧头 + 载荷 + 预检</text>
+
+  <line x1="370" y1="162" x2="398" y2="162" stroke="#8fa0c0" stroke-width="1.6" marker-end="url(#arrd)"/>
+
+  <!-- C MPMC -->
+  <rect x="402" y="116" width="74" height="92" rx="8" fill="#0e1728" stroke="#fbbf24" stroke-width="1.6"/>
+  <text x="439" y="144" text-anchor="middle" fill="#fcd34d" font-size="11.5" font-weight="700">MPMC</text>
+  <text x="439" y="162" text-anchor="middle" fill="#8fa0c0" font-size="10.5">有界队列</text>
+  <text x="439" y="178" text-anchor="middle" fill="#8fa0c0" font-size="10.5">深度 4</text>
+
+  <line x1="480" y1="162" x2="508" y2="162" stroke="#8fa0c0" stroke-width="1.6" marker-end="url(#arrd)"/>
+
+  <!-- D decoder×N -->
+  <rect x="512" y="86" width="216" height="176" rx="10" fill="none" stroke="#34d399" stroke-width="1.2" stroke-dasharray="5,4"/>
+  <text x="620" y="104" text-anchor="middle" fill="#6ee7b7" font-size="12.5" font-weight="700">decoder × N</text>
+  <rect x="524" y="114" width="192" height="30" rx="5" fill="rgba(52,211,153,0.10)" stroke="rgba(52,211,153,0.45)"/>
+  <text x="620" y="133" text-anchor="middle" fill="#a7f3d0" font-size="11">zstd 解压</text>
+  <rect x="524" y="148" width="192" height="30" rx="5" fill="rgba(52,211,153,0.10)" stroke="rgba(52,211,153,0.45)"/>
+  <text x="620" y="167" text-anchor="middle" fill="#a7f3d0" font-size="11">逻辑校验和验证</text>
+  <rect x="524" y="182" width="192" height="30" rx="5" fill="rgba(52,211,153,0.10)" stroke="rgba(52,211,153,0.45)"/>
+  <text x="620" y="201" text-anchor="middle" fill="#a7f3d0" font-size="11">记录解码</text>
+  <rect x="524" y="216" width="192" height="30" rx="5" fill="rgba(52,211,153,0.10)" stroke="rgba(52,211,153,0.45)"/>
+  <text x="620" y="235" text-anchor="middle" fill="#a7f3d0" font-size="11">CPU 密集、乱序完成</text>
+  <text x="620" y="252" text-anchor="middle" fill="#5f7194" font-size="10.5">decodeRawFrame</text>
+
+  <line x1="732" y1="162" x2="760" y2="162" stroke="#8fa0c0" stroke-width="1.6" marker-end="url(#arrd)"/>
+
+  <!-- E MPMC -->
+  <rect x="764" y="116" width="74" height="92" rx="8" fill="#0e1728" stroke="#fbbf24" stroke-width="1.6"/>
+  <text x="801" y="144" text-anchor="middle" fill="#fcd34d" font-size="11.5" font-weight="700">MPMC</text>
+  <text x="801" y="162" text-anchor="middle" fill="#8fa0c0" font-size="10.5">有界队列</text>
+  <text x="801" y="178" text-anchor="middle" fill="#8fa0c0" font-size="10.5">深度 4</text>
+
+  <line x1="842" y1="162" x2="870" y2="162" stroke="#8fa0c0" stroke-width="1.6" marker-end="url(#arrd)"/>
+
+  <!-- F writer / reorder -->
+  <rect x="874" y="86" width="200" height="176" rx="10" fill="none" stroke="#f472b6" stroke-width="1.2" stroke-dasharray="5,4"/>
+  <text x="974" y="104" text-anchor="middle" fill="#f9a8d4" font-size="12.5" font-weight="700">writer / reorder buffer</text>
+  <rect x="886" y="116" width="176" height="46" rx="5" fill="rgba(244,114,182,0.10)" stroke="rgba(244,114,182,0.45)"/>
+  <text x="974" y="138" text-anchor="middle" fill="#fbcfe8" font-size="11">按帧 id 有序提交</text>
+  <text x="974" y="154" text-anchor="middle" fill="#fbcfe8" font-size="11">（唯一有序端）</text>
+  <rect x="886" y="170" width="176" height="46" rx="5" fill="rgba(244,114,182,0.10)" stroke="rgba(244,114,182,0.45)"/>
+  <text x="974" y="192" text-anchor="middle" fill="#fbcfe8" font-size="11">滚动全局校验和</text>
+  <text x="974" y="208" text-anchor="middle" fill="#fbcfe8" font-size="11">→ 规范 FASTQ 写出</text>
+  <text x="974" y="248" text-anchor="middle" fill="#5f7194" font-size="10.5">decompress sink 写文件 · verify sink 只计数</text>
+
+  <line x1="1078" y1="162" x2="1102" y2="162" stroke="#8fa0c0" stroke-width="1.6" marker-end="url(#arrd)"/>
+
+  <!-- G 输出 -->
+  <rect x="1106" y="116" width="58" height="92" rx="8" fill="#0e1728" stroke="#34d399" stroke-width="1.6"/>
+  <text x="1135" y="146" text-anchor="middle" fill="#6ee7b7" font-size="11.5" font-weight="700">FASTQ</text>
+  <text x="1135" y="164" text-anchor="middle" fill="#8fa0c0" font-size="10.5">输出</text>
+
+  <!-- 底部注释 -->
+  <text x="258" y="296" text-anchor="middle" fill="#8fa0c0" font-size="11.5">I/O + 内存预检</text>
+  <text x="620" y="296" text-anchor="middle" fill="#8fa0c0" font-size="11.5">CPU 密集、乱序</text>
+  <text x="974" y="296" text-anchor="middle" fill="#8fa0c0" font-size="11.5">footer 校验在 join 后有序累积对比</text>
+</svg>
