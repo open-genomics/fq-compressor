@@ -75,6 +75,19 @@ auto findFirstRecordStart(std::istream& input,
         if (!readRawLine(input, l0, offset)) {
             return std::nullopt;
         }
+        // 候选必须是真正的行首：块边界可能落在记录行中段，getline 读出的"行"是行尾残段，
+        // 不能当记录起点。否则头部含 '@' 且边界恰好落在该 '@' 上时会把残段误判为新记录，
+        // 注入幻影记录（归档自洽、verify 无法发现，见文档）。后续行天然从行首开始。
+        if (lineStart != 0) {
+            input.clear();
+            input.seekg(static_cast<std::streamoff>(lineStart - 1));
+            const bool atLineBoundary = (input.peek() == '\n');
+            input.clear();
+            input.seekg(static_cast<std::streamoff>(offset));
+            if (!atLineBoundary) {
+                continue;
+            }
+        }
         if (l0.empty() || l0[0] != '@') {
             continue;
         }

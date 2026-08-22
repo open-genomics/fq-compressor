@@ -58,6 +58,11 @@ public:
     /// producers.
     auto push(T item, std::stop_token st = {}) -> bool {
         std::unique_lock lock(m_);
+        // close() 是生产结束信号：之后继续入队是调用方 bug，返回 false 暴露之，
+        // 否则条目会滞留在一个消费者可能已按 closed+empty 退出的队列里。
+        if (closed_) {
+            return false;
+        }
         // Count "had to block" by evaluating the wait predicate once up front;
         // the lock is held continuously, so the predicate can't change before
         // wait() re-checks it.

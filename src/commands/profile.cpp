@@ -73,7 +73,9 @@ auto detectProfile(std::span<const ReadRecord> records) -> Result<format::Datase
     std::uint64_t totalBases = 0;
     std::size_t maxLength = 0;
     for (const auto& record : records) {
-        const auto header = lowerCopy(record.id + " " + record.comment);
+        // comment 已含前导分隔空格；对直接构造的 ReadRecord（comment 无前导空格）仍兼容，
+        // 因为各特征 needle 都以子串匹配，分隔符个数不影响命中。
+        const auto header = lowerCopy(record.id + record.comment);
         if (containsAny(header, kOntHeaderNeedles)) {
             ++ontHeaders;
         }

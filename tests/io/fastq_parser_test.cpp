@@ -22,7 +22,7 @@ TEST(FastqParserTest, ParsesValidRecord) {
     ASSERT_TRUE(result.has_value());
     ASSERT_TRUE(result->has_value());
     EXPECT_EQ((**result).id, "read1");
-    EXPECT_EQ((**result).comment, "comment");
+    EXPECT_EQ((**result).comment, " comment");
     EXPECT_EQ((**result).sequence, "ACGT");
     EXPECT_EQ((**result).quality, "IIII");
 }
@@ -109,6 +109,41 @@ TEST(FastqParserTest, ReportsIOErrorWhenUnderlyingStreamFails) {
     auto result = parser.readRecord();
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, ErrorCode::kIOError);
+}
+
+// BUG-1 regression: a header ending in exactly one trailing space must not
+// drop that space on round trip. The comment field stores everything from the
+// first separator space (inclusive), so "@r1 " keeps its trailing space.
+TEST(FastqParserTest, PreservesTrailingSeparatorInComment) {
+    std::istringstream input("@r1 \nACGT\n+\nIIII\n");
+    FastqParser parser(input);
+
+    auto result = parser.readRecord();
+    ASSERT_TRUE(result.has_value());
+    ASSERT_TRUE(result->has_value());
+    EXPECT_EQ((**result).id, "r1");
+    EXPECT_EQ((**result).comment, " ");
+}
+
+// Multiple separators stay verbatim inside the comment as well.
+TEST(FastqParserTest, CommentsIncludeSeparatorSpaces) {
+    std::istringstream input("@r1   x\nACGT\n+\nIIII\n");
+    FastqParser parser(input);
+
+    auto result = parser.readRecord();
+    ASSERT_TRUE(result.has_value());
+    ASSERT_TRUE(result->has_value());
+    EXPECT_EQ((**result).id, "r1");
+    EXPECT_EQ((**result).comment, "   x");
+}
+
+// BUG-3 regression: trimTrailingCr converts a CRLF line end, so it strips
+// exactly one trailing \r. A genuine trailing \r already present in the data
+// is not a line-ending artifact and must survive.
+TEST(FastqParserTest, StripsOnlySingleLineEndingCarriageReturn) {
+    std::string line = "SEQ\r\r";
+    trimTrailingCr(line);
+    EXPECT_EQ(line, "SEQ\r");
 }
 
 }  // namespace fqc::io::test

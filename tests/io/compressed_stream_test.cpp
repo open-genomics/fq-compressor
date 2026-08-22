@@ -476,4 +476,26 @@ TEST_F(CompressedStreamTest, RoundTripGzip) {
 }
 
 }  // namespace
+
+TEST_F(CompressedStreamTest, EmptyFileWithGzipExtensionReadsAsCleanEof) {
+    // A 0-byte input named ".gz" is an empty file, not a truncated gzip
+    // member: it must open as plain empty input and read to a clean EOF
+    // instead of surfacing an I/O/format error from the gzip path.
+    auto path = tempDir_ / "empty.fastq.gz";
+    writeTestFile(path, "");
+
+    auto result = openCompressedFile(path);
+    ASSERT_TRUE(result.has_value());
+
+    // Read the way a FASTQ parser does (getline) so a failing gzip layer
+    // would surface as badbit; an empty plain file must read to a clean EOF
+    // (getline on empty input sets eof|fail, but never bad).
+    auto& stream = **result;
+    std::string line;
+    std::getline(stream, line);
+    EXPECT_TRUE(line.empty());
+    EXPECT_FALSE(stream.bad());
+    EXPECT_TRUE(stream.eof());
+}
+
 }  // namespace fqc::io

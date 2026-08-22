@@ -332,3 +332,13 @@ TEST(MpmcQueueTest, StatsStressPushesEqualPops) {
     EXPECT_GT(stats.highWater, 0U);
     EXPECT_LE(stats.highWater, 7U);  // Capacity-1 usable slots
 }
+
+// A closed queue must refuse new pushes: close() is the end-of-production
+// signal, so a producer pushing afterwards is a caller bug that should be
+// surfaced as a failed push instead of an item silently accepted into a
+// queue no consumer may revisit.
+TEST(MpmcQueueTest, RejectsPushAfterClose) {
+    MpmcQueue<int, 4> queue;
+    queue.close();
+    EXPECT_FALSE(queue.push(42));
+}

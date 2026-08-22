@@ -219,7 +219,8 @@ void logPipelineObservability(const pipeline::PipelineStats& stats) {
 [[nodiscard]] auto writeFastqRecord(std::ostream& output, const ReadRecord& record) -> VoidResult {
     output << '@' << record.id;
     if (!record.comment.empty()) {
-        output << ' ' << record.comment;
+        // comment 已含前导分隔空格（见 FastqParser），原样拼接即可，勿再补空格。
+        output << record.comment;
     }
     output << '\n' << record.sequence << "\n+\n" << record.quality << '\n';
     if (!output) {

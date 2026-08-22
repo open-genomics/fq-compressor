@@ -146,4 +146,49 @@ TEST_F(ArchiveEngineTest, RejectsPairedCountMismatchAndTinyMemoryLimit) {
     EXPECT_EQ(tinyMemory.error().code, ErrorCode::kUsageError);
 }
 
+// BUG-1 regression: a header ending in exactly one trailing space must
+// round-trip byte-identically (lossless constraint), not silently drop it.
+TEST_F(ArchiveEngineTest, RoundTripsHeaderWithTrailingSpaceByteIdentically) {
+    const std::string input = "@r1 \nACGT\n+\nIIII\n@r2 x\nTGCA\n+\nJJJJ\n";
+    temp_.writeFile("ts.fastq", input);
+    ArchiveEngine engine;
+
+    auto compressed = engine.compress({.inputPath = temp_.path() / "ts.fastq",
+                                       .matePath = {},
+                                       .outputPath = temp_.path() / "ts.fqc",
+                                       .profile = format::DatasetProfile::kIllumina,
+                                       .memoryLimitBytes = 64 * 1024 * 1024,
+                                       .forceOverwrite = true});
+    ASSERT_TRUE(compressed) << compressed.error().message;
+
+    auto decompressed = engine.decompress({.inputPath = temp_.path() / "ts.fqc",
+                                           .outputPath = temp_.path() / "ts.out.fastq",
+                                           .memoryLimitBytes = 64 * 1024 * 1024,
+                                           .forceOverwrite = true});
+    ASSERT_TRUE(decompressed) << decompressed.error().message;
+    EXPECT_EQ(temp_.readFile("ts.out.fastq"), input);
+}
+
+// BUG-1 regression: genuine trailing \r inside sequence/quality must survive
+// (only the single CRLF line-ending \r is stripped).
+TEST_F(ArchiveEngineTest, RejectsGenuineTrailingCarriageReturnsLoudly) {
+    // "SEQ\r\r\n": the last \r pairs with \n (CRLF line ending, stripped);
+    // the first is NOT a line-ending artifact. The archive format rejects \r
+    // inside sequence/quality (fail-closed), so the parser keeping one \r must
+    // make encode fail loudly instead of silently stripping both and
+    // round-tripping different data.
+    const std::string input = "@r1\nSEQ\r\r\n+\nIII\r\r\n";
+    temp_.writeFile("cr.fastq", input);
+
+    ArchiveEngine engine;
+    auto compressed = engine.compress({.inputPath = temp_.path() / "cr.fastq",
+                                       .matePath = {},
+                                       .outputPath = temp_.path() / "cr.fqc",
+                                       .profile = format::DatasetProfile::kIllumina,
+                                       .memoryLimitBytes = 64 * 1024 * 1024,
+                                       .forceOverwrite = true});
+    ASSERT_FALSE(compressed);
+    EXPECT_EQ(compressed.error().code, ErrorCode::kUsageError);
+}
+
 }  // namespace fqc::commands::test

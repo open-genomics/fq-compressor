@@ -4,6 +4,8 @@
 
 #pragma once
 
+#include "fqc/log.h"
+
 #include <cstddef>
 #include <cstdint>
 #include <map>
@@ -34,7 +36,12 @@ public:
     [[nodiscard]] auto submitFrame(std::uint64_t chunk,
                                    std::uint64_t local,
                                    T value) -> std::vector<T> {
-        pending_.emplace(std::make_pair(chunk, local), std::move(value));
+        // emplace 遇重复键会静默丢弃新条目；上游契约保证键唯一，这里防御性地告警，
+        // 让违背契约的调用立即在日志中暴露而不是无声丢帧。
+        if (!pending_.emplace(std::make_pair(chunk, local), std::move(value)).second) {
+            FQC_LOG_WARNING(
+                "ChunkOrderer: duplicate frame key (chunk={}, local={}) dropped", chunk, local);
+        }
         return drain();
     }
 

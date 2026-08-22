@@ -112,6 +112,11 @@ void appendString(Bytes& output, std::string_view value) {
 [[nodiscard]] auto readExact(std::istream& input, std::span<std::uint8_t> bytes) -> VoidResult {
     input.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
     if (input.gcount() != static_cast<std::streamsize>(bytes.size())) {
+        // badbit（而非干净 EOF）说明底层流硬失败（如损坏的 gzip 成员），属 I/O 错误，
+        // 不能伪装成"归档被截断"的格式错误，否则会误导排障方向。
+        if (input.bad()) {
+            return makeVoidError(ErrorCode::kIOError, "I/O error while reading FQC v2 archive");
+        }
         return makeVoidError(ErrorCode::kFormatError, "truncated FQC v2 archive");
     }
     return {};
@@ -875,6 +880,11 @@ auto ArchiveReader::open() -> Result<ArchiveMetadata> {
     // Fixed 8-byte magic dispatch before version/header/checksum parsing.
     std::array<std::uint8_t, 8> magicBytes{};
     if (auto result = readExact(input_, magicBytes); !result) {
+        // 保留 readExact 的错误分类：badbit（底层流硬失败，如损坏的 gzip 成员）必须按
+        // I/O 错误上报，不能统一覆盖成格式错误；只有真正的截断（干净 EOF）才是格式错误。
+        if (result.error().code == ErrorCode::kIOError) {
+            return makeError<ArchiveMetadata>(result.error());
+        }
         return makeError<ArchiveMetadata>(ErrorCode::kFormatError,
                                           "truncated FQC magic header (need 8 bytes)");
     }

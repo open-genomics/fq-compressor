@@ -44,7 +44,10 @@ auto FastqParser::readRecord() -> Result<std::optional<ReadRecord>> {
     auto spacePos = idView.find(' ');
     if (spacePos != std::string_view::npos) {
         record.id = std::string(idView.substr(0, spacePos));
-        record.comment = std::string(idView.substr(spacePos + 1));
+        // comment 保留首个分隔空格起（含该空格）的整段文本：重建时 id+comment 原样拼接，
+        // 使 "@id "（仅一个尾随空格）这样的头部也能逐字节往返（无损硬约束）。仅存 comment
+        // 文本、重建时补空格的旧口径会在 comment 为空时丢失该空格。
+        record.comment = std::string(idView.substr(spacePos));
     } else {
         record.id = std::string(idView);
     }

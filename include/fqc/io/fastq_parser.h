@@ -17,7 +17,9 @@ namespace fqc::io {
 
 /// Strip trailing `\r` left by CRLF inputs after `std::getline` consumes `\n`.
 inline void trimTrailingCr(std::string& str) {
-    while (!str.empty() && str.back() == '\r') {
+    // 只剥离与换行成对的单个 CRLF 行尾 \r；数据中真实存在的尾随 \r 不是行尾伪影，
+    // 必须保留（否则 "SEQ\r\r\n" 会丢两个字节，破坏逐字节无损）。
+    if (!str.empty() && str.back() == '\r') {
         str.pop_back();
     }
 }

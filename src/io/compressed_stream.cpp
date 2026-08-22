@@ -325,8 +325,10 @@ CompressedInputStream::CompressedInputStream(const std::filesystem::path& path)
 
     format_ = detectCompressionFormat({magic.data(), bytesRead});
 
-    // Fallback to extension-based detection
-    if (format_ == CompressionFormat::kNone && bytesRead < 2) {
+    // Fallback to extension-based detection. A 0-byte file is genuinely empty,
+    // not a truncated gzip member -- treating "empty.gz" as gzip would surface a
+    // confusing "truncated gzip" error on what is really an empty input.
+    if (format_ == CompressionFormat::kNone && bytesRead > 0 && bytesRead < 2) {
         format_ = detectCompressionFormatFromExtension(path);
     }
 

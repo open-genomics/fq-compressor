@@ -331,3 +331,48 @@ TEST(FindFirstRecordStartTest, TruncatedTailYieldsNullopt) {
     input.seekg(static_cast<std::streamoff>(base));
     EXPECT_FALSE(fqc::pipeline::findFirstRecordStart(input, base).has_value());
 }
+
+// BUG-2 regression (unit): findFirstRecordStart must NOT accept a position
+// inside a header line (an '@' that is not at a line start) as a record
+// start -- the previous worker already owns that record. It must skip the
+// false candidate and land on the next true header.
+TEST(FindFirstRecordStartTest, EmbeddedAtInsideHeaderIsNotARecordStart) {
+    const std::string fastq = "@ok\nACGT\n+\nIIII\n@r@2\nCGTA\n+\nJJJJ\n@tail\nGGCC\n+\nHHHH\n";
+    const auto embedded = static_cast<std::uint64_t>(fastq.find("@r@2")) + 2;
+    ASSERT_EQ(fastq[static_cast<std::size_t>(embedded)], '@');
+    ASSERT_NE(fastq[static_cast<std::size_t>(embedded) - 1], '\n');
+    std::istringstream input(fastq);
+    input.seekg(static_cast<std::streamoff>(embedded));
+    const auto found = fqc::pipeline::findFirstRecordStart(input, embedded);
+    ASSERT_TRUE(found.has_value()) << "scan must skip the mid-line '@' and find @tail";
+    EXPECT_NE(*found, embedded);
+    EXPECT_EQ(fastq.substr(static_cast<std::size_t>(*found), 5), "@tail");
+}
+
+// BUG-2 regression (integration): with the chunk boundary landing exactly on
+// an '@' embedded inside a header line, the parallel pipeline must not inject
+// a phantom record. The decoded record stream must equal the reference.
+TEST(ParallelParsePipelineTest, EmbeddedAtOnChunkBoundaryDoesNotDuplicateRecords) {
+    for (std::size_t pad = 4; pad <= 64; ++pad) {
+        const std::string content = "@pad\n" + std::string(pad, 'A') + "\n+\n" +
+            std::string(pad, 'I') + "\n@r@2\nCGTA\n+\nJJJJ\n@tail\nGGCC\n+\nHHHH\n";
+        const auto recPos = static_cast<std::uint64_t>(content.find("\n@r@2")) + 1;
+        const uint64_t embedded = recPos + 2;
+        const uint64_t n = static_cast<std::uint64_t>(content.size());
+        // Two workers: chunk 1 begins at ceil(n/2). Look for a pad length that
+        // puts the boundary exactly on the embedded '@'.
+        const uint64_t boundary = (n + 1) / 2;
+        if (boundary != embedded || embedded == 0 || recPos >= boundary) {
+            continue;
+        }
+        TempFastqFile input(content);
+        const auto archive = runParallel(input, {}, 0, 2, 4096);
+        const auto got = readAllRecords(archive);
+        const auto want = fqc::test::parseAllFastq(content);
+        ASSERT_EQ(got.size(), want.size())
+            << "phantom/split record at boundary=" << boundary << " pad=" << pad;
+        EXPECT_EQ(got, want);
+        return;  // one demonstration is enough
+    }
+    FAIL() << "test setup failed: no pad length hit the embedded '@' boundary";
+}

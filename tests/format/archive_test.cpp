@@ -194,6 +194,24 @@ void writeU64(std::string& bytes, std::size_t offset, std::uint64_t value) {
 
 }  // namespace
 
+/// Serves a fixed byte range once, then throws on any further fill -- mimics a
+/// hard I/O failure (e.g. a corrupt gzip member) so the reader must classify
+/// the failure as an I/O error instead of a silent truncation/format error.
+class FailingSource : public std::streambuf {
+public:
+    explicit FailingSource(std::string data) : data_(std::move(data)) {
+        setg(data_.data(), data_.data(), data_.data() + data_.size());
+    }
+
+protected:
+    int_type underflow() override {
+        throw std::runtime_error("simulated I/O failure");
+    }
+
+private:
+    std::string data_;
+};
+
 TEST(ArchiveTest, RoundTripsAllRecordFieldsAndFooter) {
     const auto records = makeRecords();
     const auto archive = writeArchive(
@@ -586,6 +604,44 @@ TEST(ArchiveTest, QualityZstdLevelOnlyTouchesQualityPayload) {
     ASSERT_TRUE(frame);
     ASSERT_TRUE(frame->has_value());
     EXPECT_EQ(**frame, records);
+}
+
+// claim4 regression: a hard I/O failure while reading the archive (e.g. a
+// corrupt gzip member beneath the stream) must be classified as kIOError, not
+// masked as a "truncated archive" format error.
+TEST(ArchiveTest, ReportsIOErrorOnStreamFailureDuringRead) {
+    std::ostringstream output(std::ios::binary);
+    ArchiveWriter writer(output, {.profile = DatasetProfile::kIllumina});
+    ASSERT_TRUE(writer.writeFrame(std::vector{ReadRecord{"r1", "", "ACGT", "IIII"}}));
+    ASSERT_TRUE(writer.finish());
+    const std::string archive = output.str();
+
+    // Serve only the archive magic, then fail the underlying stream (the
+    // failure hits the header read after the magic).
+    FailingSource source(archive.substr(0, 8));
+    std::istream input(&source);
+    ArchiveReader reader(input);
+    auto metadata = reader.open();
+    ASSERT_FALSE(metadata) << "expected a surfaced I/O failure";
+    EXPECT_EQ(metadata.error().code, ErrorCode::kIOError);
+}
+
+// claim4 regression (magic-read path): the same hard I/O failure occurring
+// during the very first magic read must also surface as kIOError, not be
+// overridden to a format error.
+TEST(ArchiveTest, ReportsIOErrorOnStreamFailureDuringMagicRead) {
+    std::ostringstream output(std::ios::binary);
+    ArchiveWriter writer(output, {.profile = DatasetProfile::kIllumina});
+    ASSERT_TRUE(writer.writeFrame(std::vector{ReadRecord{"r1", "", "ACGT", "IIII"}}));
+    ASSERT_TRUE(writer.finish());
+    const std::string archive = output.str();
+
+    FailingSource source(archive.substr(0, 0));  // fail on the magic read itself
+    std::istream input(&source);
+    ArchiveReader reader(input);
+    auto metadata = reader.open();
+    ASSERT_FALSE(metadata) << "expected a surfaced I/O failure";
+    EXPECT_EQ(metadata.error().code, ErrorCode::kIOError);
 }
 
 }  // namespace fqc::format::test
