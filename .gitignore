@@ -86,8 +86,10 @@ clang-tidy-fixes.yml
 benchmark-*.json
 benchmark-*.csv
 
-# 本地性能基线（开发参考，不入库）
-perf-baselines/
+# 本地性能基线归档：入库（见 perf-baselines/README.md 与 docs/benchmarks.md）。
+# 单次运行产生的临时工作文件不落盘在仓库内（test_performance.sh 用 mktemp），
+# 因此整个目录可直接跟踪；如需排除超大临时产物再单独加规则。
+# perf-baselines/
 
 # 真实语料切片（见 docs/real-corpus.md / scripts/fetch_real_corpus.sh）
 corpus/
@@ -97,7 +99,7 @@ corpus/
 *.profdata
 
 # Benchmark datasets (local caches and prepared subsets)
-benchmark_v2/data/
+# benchmark_v2/ 已随项目瘦身删除（见 CHANGELOG 0.2.0），此规则为残留，删除。
 
 # Python 相关
 __pycache__/
