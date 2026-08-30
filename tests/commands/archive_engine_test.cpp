@@ -3,6 +3,8 @@
 #include "fqc/commands/profile.h"
 
 #include <cstddef>
+#include <cstdlib>
+#include <filesystem>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -189,6 +191,104 @@ TEST_F(ArchiveEngineTest, RejectsGenuineTrailingCarriageReturnsLoudly) {
                                        .forceOverwrite = true});
     ASSERT_FALSE(compressed);
     EXPECT_EQ(compressed.error().code, ErrorCode::kUsageError);
+}
+
+// Unsupported compression formats (bzip2/xz/zstd) must fail closed: even
+// though the magic is recognized, the engine rejects them rather than
+// misinterpreting the compressed bytes as FASTQ.
+TEST_F(ArchiveEngineTest, RejectsUnsupportedCompressionFormatsFailClosed) {
+    // magic 字节序列按实际长度构造（含 \x00，C 字符串语义的 strlen 会截断，
+    // 必须用显式长度）；detectCompressionFormat 只认前几个 magic 字节。
+    const std::string bzip2("BZh91AY&SY\x1a\x00\x00\x00", 13);
+    const std::string zstd("\x28\xb5\x2f\xfd\x00\x00\x00\x00", 8);
+    const std::string xz("\xfd\x37\x7a\x58\x5a\x00", 6);
+    temp_.writeFile("input.bz2", bzip2);
+    temp_.writeFile("input.zst", zstd);
+    temp_.writeFile("input.xz", xz);
+
+    ArchiveEngine engine;
+    for (const char* name : {"input.bz2", "input.zst", "input.xz"}) {
+        auto result = engine.compress({.inputPath = temp_.path() / name,
+                                       .matePath = {},
+                                       .outputPath = temp_.path() / (std::string(name) + ".fqc"),
+                                       .profile = format::DatasetProfile::kIllumina,
+                                       .memoryLimitBytes = 64 * 1024 * 1024,
+                                       .forceOverwrite = true});
+        ASSERT_FALSE(result) << name;
+        EXPECT_EQ(result.error().code, ErrorCode::kIOError) << name;
+    }
+}
+
+// A mate file that ends while the primary still has records is caught before
+// any output archive is created (fail-closed, nothing partial left behind).
+TEST_F(ArchiveEngineTest, RejectsPrimaryLongerThanMateWithoutOutput) {
+    temp_.writeFile("r1.fastq", "@a/1\nACGT\n+\nIIII\n@b/1\nTGCA\n+\nIIII\n");
+    temp_.writeFile("r2.fastq", "@a/2\nTGCA\n+\nJJJJ\n");
+
+    ArchiveEngine engine;
+    auto result = engine.compress({.inputPath = temp_.path() / "r1.fastq",
+                                   .matePath = temp_.path() / "r2.fastq",
+                                   .outputPath = temp_.path() / "mismatch.fqc",
+                                   .profile = format::DatasetProfile::kIllumina,
+                                   .memoryLimitBytes = 64 * 1024 * 1024,
+                                   .forceOverwrite = true});
+    ASSERT_FALSE(result);
+    EXPECT_EQ(result.error().code, ErrorCode::kFormatError);
+    EXPECT_FALSE(std::filesystem::exists(temp_.path() / "mismatch.fqc"));
+}
+
+// gzip-compressed input via a file path (not stdin) must be read transparently
+// end to end; the input file itself is never the output target.
+TEST_F(ArchiveEngineTest, CompressesGzipFileInputTransparently) {
+    temp_.writeFile("reads.fastq", kShortFastq);
+    // 压缩输入副本为 .gz 文件。CLI 二进制调用 gzip；测试直接构造 gzip 数据太重，
+    // 这里用一个已知的 gzip 头 + 存储块的最小 gzip 流是不可靠的，因此调用系统
+    // gzip（与 compressed_stream_test 相同的依赖）。
+    // 但为保持测试环境独立性，这里用 archive 无关的最小 gzip 生成：
+    // 直接调用系统 gzip 命令。
+    const auto gzipPath = temp_.path() / "reads.fastq.gz";
+    const auto gzipCmd =
+        "gzip -c " + (temp_.path() / "reads.fastq").string() + " > " + gzipPath.string();
+    ASSERT_EQ(std::system(gzipCmd.c_str()), 0) << "system gzip failed";
+
+    ArchiveEngine engine;
+    auto compressed = engine.compress({.inputPath = gzipPath,
+                                       .matePath = {},
+                                       .outputPath = temp_.path() / "gzip.fqc",
+                                       .profile = format::DatasetProfile::kIllumina,
+                                       .memoryLimitBytes = 64 * 1024 * 1024,
+                                       .forceOverwrite = true});
+    ASSERT_TRUE(compressed) << compressed.error().message;
+    EXPECT_EQ(compressed->recordCount, 2U);
+
+    auto decompressed = engine.decompress({.inputPath = temp_.path() / "gzip.fqc",
+                                           .outputPath = temp_.path() / "restored.fastq",
+                                           .memoryLimitBytes = 64 * 1024 * 1024,
+                                           .forceOverwrite = true});
+    ASSERT_TRUE(decompressed);
+    EXPECT_EQ(temp_.readFile("restored.fastq"), kShortFastq);
+}
+
+// verify is a pure reader: on a corrupt archive it fails without creating or
+// touching any output file.
+TEST_F(ArchiveEngineTest, VerifyFailsWithoutWritingOutput) {
+    temp_.writeFile("reads.fastq", kShortFastq);
+    ArchiveEngine engine;
+    auto compressed = engine.compress({.inputPath = temp_.path() / "reads.fastq",
+                                       .matePath = {},
+                                       .outputPath = temp_.path() / "reads.fqc",
+                                       .profile = format::DatasetProfile::kIllumina,
+                                       .memoryLimitBytes = 64 * 1024 * 1024,
+                                       .forceOverwrite = true});
+    ASSERT_TRUE(compressed);
+
+    // 篡改 payload 区（全局头 32 字节之后），使校验和/解码失败。
+    auto bytes = temp_.readFile("reads.fqc");
+    bytes[32] ^= 0x01;
+    temp_.writeFile("tampered.fqc", bytes);
+
+    auto verified = engine.verify(temp_.path() / "tampered.fqc", 64 * 1024 * 1024);
+    EXPECT_FALSE(verified);
 }
 
 }  // namespace fqc::commands::test

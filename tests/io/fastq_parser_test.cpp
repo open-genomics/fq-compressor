@@ -146,4 +146,71 @@ TEST(FastqParserTest, StripsOnlySingleLineEndingCarriageReturn) {
     EXPECT_EQ(line, "SEQ\r");
 }
 
+// The final record may end without a trailing newline (EOF right after the
+// quality line). That is a clean end, not truncation.
+TEST(FastqParserTest, AcceptsFinalRecordWithoutTrailingNewline) {
+    std::istringstream input("@read1\nACGT\n+\nIIII");
+    FastqParser parser(input);
+
+    auto result = parser.readRecord();
+    ASSERT_TRUE(result.has_value());
+    ASSERT_TRUE(result->has_value());
+    EXPECT_EQ((**result).id, "read1");
+    EXPECT_EQ((**result).sequence, "ACGT");
+    EXPECT_EQ((**result).quality, "IIII");
+
+    auto eof = parser.readRecord();
+    ASSERT_TRUE(eof.has_value());
+    EXPECT_FALSE(eof->has_value());
+}
+
+// Empty sequence (or a length-zero quality) is rejected: the parser is
+// fail-closed on structurally degenerate records rather than emitting records
+// that downstream encoders would reject anyway.
+TEST(FastqParserTest, RejectsEmptySequenceAndQuality) {
+    std::istringstream input("@read1\n\n+\n\n");
+    FastqParser parser(input);
+
+    auto result = parser.readRecord();
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, ErrorCode::kFormatError);
+}
+
+// A quality line beginning with '+' is legal (quality chars are '!'..'~'), and
+// it must NOT be mistaken for the '+' separator line of a following record:
+// the separator is the line immediately after the sequence, so the next record
+// still parses correctly.
+TEST(FastqParserTest, QualityLineStartingWithPlusIsNotAHeader) {
+    std::istringstream input("@read1\nACGT\n+\n+abc\n@read2\nTGCA\n+\nJJJJ\n");
+    FastqParser parser(input);
+
+    auto first = parser.readRecord();
+    ASSERT_TRUE(first.has_value());
+    ASSERT_TRUE(first->has_value());
+    EXPECT_EQ((**first).quality, "+abc");
+
+    auto second = parser.readRecord();
+    ASSERT_TRUE(second.has_value());
+    ASSERT_TRUE(second->has_value());
+    EXPECT_EQ((**second).id, "read2");
+}
+
+// Paired-mode asymmetry in the other direction: the mate has MORE records
+// than the primary. readRecordPair must fail loudly (kFormatError) instead of
+// silently dropping the surplus mate records.
+TEST(FastqParserTest, RejectsMateWithMoreRecordsThanPrimary) {
+    std::istringstream primary("@r1/1\nACGT\n+\nIIII\n");
+    std::istringstream mate("@r1/2\nTGCA\n+\nJJJJ\n@r2/2\nACGT\n+\nJJJJ\n");
+    FastqParser primaryParser(primary);
+    FastqParser mateParser(mate);
+
+    auto first = readRecordPair(primaryParser, &mateParser);
+    ASSERT_TRUE(first.has_value());
+    ASSERT_TRUE(first->has_value());
+
+    auto second = readRecordPair(primaryParser, &mateParser);
+    ASSERT_FALSE(second.has_value());
+    EXPECT_EQ(second.error().code, ErrorCode::kFormatError);
+}
+
 }  // namespace fqc::io::test

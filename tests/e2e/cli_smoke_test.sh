@@ -122,6 +122,41 @@ PY
 expect_exit 4 "${FQC_BIN}" -q verify "${TEST_DIR}/bad-checksum.fqc"
 expect_exit 5 "${FQC_BIN}" -q verify "${TEST_DIR}/bad-codec.fqc"
 
+# CLI option boundary matrix: every rejected value is a usage error (exit 1).
+# 1000000 MiB 本身合法（engine 会按 memory limit 截断），真正越界的是超出
+# size_t 可表示的 MiB 值（uint64 max）。
+expect_exit 1 "${FQC_BIN}" -q compress -i "${TEST_DIR}/sample.fastq" \
+    -o "${TEST_DIR}/x.fqc" --frame-mib 0
+expect_exit 1 "${FQC_BIN}" -q compress -i "${TEST_DIR}/sample.fastq" \
+    -o "${TEST_DIR}/x.fqc" --frame-mib 18446744073709551615
+expect_exit 1 "${FQC_BIN}" -q compress -i "${TEST_DIR}/sample.fastq" \
+    -o "${TEST_DIR}/x.fqc" --quality-level 0
+expect_exit 1 "${FQC_BIN}" -q compress -i "${TEST_DIR}/sample.fastq" \
+    -o "${TEST_DIR}/x.fqc" --quality-level 20
+expect_exit 1 "${FQC_BIN}" -q compress -i "${TEST_DIR}/sample.fastq" \
+    -o "${TEST_DIR}/x.fqc" --parse-workers 65
+expect_exit 1 "${FQC_BIN}" -q compress -i "${TEST_DIR}/sample.fastq" \
+    -o "${TEST_DIR}/x.fqc" --memory-limit 0
+expect_exit 1 "${FQC_BIN}" -q compress -i "${TEST_DIR}/sample.fastq" \
+    -o "${TEST_DIR}/x.fqc" --memory-limit 18446744073709551615
+expect_exit 1 "${FQC_BIN}" -q compress -i "${TEST_DIR}/sample.fastq" \
+    -o "${TEST_DIR}/x.fqc" --profile nonsense
+expect_exit 1 "${FQC_BIN}" -q compress -i - -2 - -o "${TEST_DIR}/x.fqc"
+test ! -e "${TEST_DIR}/x.fqc"
+
+# In-range boundary values still work: frame-mib 1 forces multi-frame output,
+# parse-workers 0 selects the sequential reader, memory-limit 64 is the floor.
+"${FQC_BIN}" -q compress -i "${TEST_DIR}/sample.fastq" \
+    -o "${TEST_DIR}/boundary.fqc" --frame-mib 1 --parse-workers 0 --memory-limit 64
+"${FQC_BIN}" -q verify "${TEST_DIR}/boundary.fqc"
+"${FQC_BIN}" -q decompress -i "${TEST_DIR}/boundary.fqc" \
+    -o "${TEST_DIR}/boundary-restored.fastq"
+cmp -s "${TEST_DIR}/sample.fastq" "${TEST_DIR}/boundary-restored.fastq"
+
+# verify accepts stdin and rejects a non-archive on stdin with exit 3.
+"${FQC_BIN}" -q verify - < "${TEST_DIR}/sample.fqc"
+expect_exit 3 "${FQC_BIN}" -q verify - < "${TEST_DIR}/not-an-archive.fqc"
+
 # Existing outputs are protected unless --force is explicit.
 printf 'preserve this output\n' > "${TEST_DIR}/protected.fqc"
 cp "${TEST_DIR}/protected.fqc" "${TEST_DIR}/protected.before"
