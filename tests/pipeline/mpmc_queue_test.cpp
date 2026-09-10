@@ -348,7 +348,7 @@ TEST(MpmcQueueTest, RejectsPushAfterClose) {
 // unpushed instead of accepting it into a queue that is past end-of-
 // production (and whose consumers may have already drained and exited).
 TEST(MpmcQueueTest, CloseUnblocksFullPushWithoutPushing) {
-    MpmcQueue<int, 2> queue;  // holds Capacity-1 = 1 item
+    MpmcQueue<int, 2> queue;     // holds Capacity-1 = 1 item
     ASSERT_TRUE(queue.push(1));  // fill the usable slot
 
     bool returned = false;
