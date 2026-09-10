@@ -116,13 +116,18 @@ public:
     }
 
     /// Signal that production is complete (no more items will be pushed). All
-    /// blocked consumers wake, drain the remaining items, then see `nullopt`.
+    /// blocked consumers wake, drain the remaining items, then see `nullopt`;
+    /// any producer blocked on a full queue also wakes and returns `false`.
     void close() {
         {
             const std::lock_guard lock(m_);
             closed_ = true;
         }
         cvNotEmpty_.notify_all();
+        // `closed_` is part of the push predicate too, so producers parked on a
+        // full queue must be woken here as well -- otherwise they sleep forever
+        // on a condition that close() has already made true.
+        cvNotFull_.notify_all();
     }
 
     /// Advisory counters. Call after producers/consumers have joined for a
