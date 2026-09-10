@@ -342,3 +342,33 @@ TEST(MpmcQueueTest, RejectsPushAfterClose) {
     queue.close();
     EXPECT_FALSE(queue.push(42));
 }
+
+// A push already blocked on a full queue must also fail when close() races
+// it: the wait predicate includes closed_, so the wake leaves the item
+// unpushed instead of accepting it into a queue that is past end-of-
+// production (and whose consumers may have already drained and exited).
+TEST(MpmcQueueTest, CloseUnblocksFullPushWithoutPushing) {
+    MpmcQueue<int, 2> queue;  // holds Capacity-1 = 1 item
+    ASSERT_TRUE(queue.push(1));  // fill the usable slot
+
+    bool returned = false;
+    bool pushed = false;
+    std::thread producer([&] {
+        pushed = queue.push(2);  // blocks: queue is full
+        returned = true;
+    });
+    // Let the producer block on the full queue before closing.
+    for (int i = 0; i < 100000 && queue.stats().pushWaits == 0; ++i) {
+        std::this_thread::yield();
+    }
+    EXPECT_EQ(queue.stats().pushWaits, 1U);
+
+    queue.close();
+    producer.join();
+    EXPECT_TRUE(returned);
+    EXPECT_FALSE(pushed) << "a push racing close() must not land in the closed queue";
+    // The queue still holds only the original item; the raced push is lost by
+    // contract, not silently stored.
+    EXPECT_EQ(*queue.pop(), 1);
+    EXPECT_FALSE(queue.pop().has_value());
+}

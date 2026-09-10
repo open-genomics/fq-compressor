@@ -53,9 +53,10 @@ public:
     MpmcQueue(MpmcQueue&&) = delete;
     MpmcQueue& operator=(MpmcQueue&&) = delete;
 
-    /// Enqueue an item. Returns false if `st` was stop-requested; otherwise
-    /// blocks until space is available and returns true. Safe for concurrent
-    /// producers.
+    /// Enqueue an item. Returns false if `st` was stop-requested or the queue
+    /// was closed (including a close that races an already-blocked push);
+    /// otherwise blocks until space is available and returns true. Safe for
+    /// concurrent producers.
     auto push(T item, std::stop_token st = {}) -> bool {
         std::unique_lock lock(m_);
         // close() 是生产结束信号：之后继续入队是调用方 bug，返回 false 暴露之，
@@ -69,8 +70,11 @@ public:
         if (!st.stop_requested() && isFullLocked()) {
             counters_.pushWaits.fetch_add(1, std::memory_order_relaxed);
         }
-        cvNotFull_.wait(lock, st, [&] { return st.stop_requested() || !isFullLocked(); });
-        if (st.stop_requested()) {
+        // 谓词含 closed_：与 close() 竞争的阻塞 push 会醒来返回 false，而不是
+        // 在队列关闭后仍把条目塞进去——close() 语义对在途 push 同样成立。
+        cvNotFull_.wait(
+            lock, st, [&] { return st.stop_requested() || closed_ || !isFullLocked(); });
+        if (st.stop_requested() || closed_) {
             return false;
         }
         storage_[head_] = std::move(item);
