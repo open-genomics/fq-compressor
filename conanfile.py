@@ -85,6 +85,11 @@ class FQCompressorConan(ConanFile):
         tc = CMakeToolchain(self)
         # CMake policy floor for older transitive package configs
         tc.variables["CMAKE_POLICY_VERSION_MINIMUM"] = "3.5"
+        # 项目自己的 CMakePresets.json 直接引用 generators/conan_toolchain.cmake，
+        # 从不使用 conan 生成的 preset；禁用 CMakeUserPresets.json 写入，避免多个
+        # output-folder 各生成一个 conan-<build_type> preset 后 include 冲突，
+        # 导致 CMake 报 "Duplicate preset" 完全无法配置。
+        tc.user_presets_path = ""
         tc.generate()
 
         # Generate CMake find_package config files for all dependencies
