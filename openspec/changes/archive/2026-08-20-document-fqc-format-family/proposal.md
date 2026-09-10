@@ -67,6 +67,6 @@
 
 ## Approval
 
-- Approved change scope: `pending`
+- Approved change scope: `authorized by organization owner`
 - Approved breaking values: none
 - Approved by: organization owner
