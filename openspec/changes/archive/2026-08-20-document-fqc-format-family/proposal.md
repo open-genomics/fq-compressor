@@ -2,7 +2,7 @@
 
 ## Metadata
 
-- Status: `Proposed`
+- Status: `Archived`
 - Repository: `open-genomics/fq-compressor`
 - Base commit: `4e7acc78963337eb27b6784a8afe55b8e309e8e1`
 - Capability: `format-governance`

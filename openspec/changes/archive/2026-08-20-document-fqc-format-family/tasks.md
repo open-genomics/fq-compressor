@@ -40,6 +40,6 @@
 
 ## 4. Archive readiness
 
-- [ ] 4.1 Reviewer 确认 `verification.md` 的 `Ready to archive: yes`
-- [ ] 4.2 将 delta 同步到主规格
-- [ ] 4.3 按日期归档 change
+- [x] 4.1 Reviewer 确认 `verification.md` 的 `Ready to archive: yes`
+- [x] 4.2 将 delta 同步到主规格
+- [x] 4.3 按日期归档 change
