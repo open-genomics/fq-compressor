@@ -78,6 +78,7 @@ TEST(DecompressPipelineTest, BasicRunPreservesOrderAndCounts) {
     EXPECT_EQ(result->totalBases, records.size() * 150U);
     EXPECT_EQ(result->encodedBytes, archive.size());
     EXPECT_EQ(result->metadata.profile, DatasetProfile::kIllumina);
+    EXPECT_GT(result->inFlightHighWater, 0U);
 }
 
 TEST(DecompressPipelineTest, SingleDecoderPreservesOrder) {

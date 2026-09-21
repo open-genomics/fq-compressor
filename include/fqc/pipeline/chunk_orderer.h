@@ -26,8 +26,9 @@ namespace fqc::pipeline {
 /// local id equals the marker's total.
 ///
 /// Generalizes ReorderBuffer's single monotonic sequence to two levels; the
-/// writer thread owns it (single consumer, no locking). Backpressure comes
-/// from the bounded upstream queues, exactly like ReorderBuffer.
+/// writer thread owns it (single consumer, no locking). Callers must provide
+/// an in-flight credit window that also covers frames held by this orderer;
+/// bounded upstream queues alone are not sufficient.
 template <typename T>
 class ChunkOrderer {
 public:

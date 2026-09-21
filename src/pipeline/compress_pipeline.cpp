@@ -7,6 +7,7 @@
 #include "fqc/format/archive.h"
 #include "fqc/io/fastq_parser.h"
 #include "fqc/pipeline/frame_accumulator.h"
+#include "fqc/pipeline/in_flight_limiter.h"
 #include "fqc/pipeline/mpmc_queue.h"
 #include "fqc/pipeline/reorder_buffer.h"
 #include "fqc/pipeline/timing.h"
@@ -64,11 +65,16 @@ auto CompressPipeline::run(std::istream& primary,
                            format::ArchiveWriter& writer) const -> Result<PipelineStats> {
     MpmcQueue<InputFrame, kDefaultQueueDepth> queue1;
     MpmcQueue<OrderedFrame, kDefaultQueueDepth> queue2;
+    const auto inFlightLimit = MpmcQueue<InputFrame, kDefaultQueueDepth>::kUsableCapacity +
+        MpmcQueue<OrderedFrame, kDefaultQueueDepth>::kUsableCapacity + parallelism_;
+    InFlightLimiter frameLimiter(inFlightLimit);
     std::optional<Error> readerError;
     std::optional<Error> encoderError;
     std::optional<Error> writerError;
     std::mutex encoderErrorMutex;
     PipelineStats stats;
+    stats.parserWorkers = 1;
+    stats.encoderWorkers = parallelism_;
     std::uint64_t logicalBytes = 0;
 
     // Per-stage wall-clock: locals merge once at exit with relaxed fetch_add
@@ -113,10 +119,16 @@ auto CompressPipeline::run(std::istream& primary,
         FrameAccumulator accumulator(targetFrameBytes_, paired_);
 
         auto pushFrame = [&](std::vector<ReadRecord> closed) -> bool {
+            if (!frameLimiter.acquire(stopToken)) {
+                return false;
+            }
             InputFrame in{frameId++, std::move(closed)};
             const auto pushStart = Clock::now();
             const bool ok = queue1.push(std::move(in), stopToken);
             pushNs += nanosSince(pushStart);
+            if (!ok) {
+                frameLimiter.release();
+            }
             return ok;
         };
 
@@ -250,6 +262,7 @@ auto CompressPipeline::run(std::istream& primary,
                 const auto writeStart = Clock::now();
                 auto result = writer.writeCompressedFrame(std::move(frame));
                 writeNs += nanosSince(writeStart);
+                frameLimiter.release();
                 if (!result) {
                     writerError = result.error();
                     stopSource.request_stop();
@@ -288,6 +301,7 @@ auto CompressPipeline::run(std::istream& primary,
     stats.queue1Stats = queue1.stats();
     stats.queue2Stats = queue2.stats();
     stats.logicalBytes = logicalBytes;
+    stats.inFlightHighWater = frameLimiter.highWater();
 
     if (writerError.has_value()) {
         return makeError<PipelineStats>(std::move(*writerError));

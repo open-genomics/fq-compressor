@@ -22,6 +22,7 @@ struct DecompressStats {
     std::uint64_t recordCount = 0;
     std::uint64_t totalBases = 0;
     std::uint64_t encodedBytes = 0;
+    std::size_t inFlightHighWater = 0;
 };
 
 /// Concurrent decompression pipeline, the mirror image of `CompressPipeline`:

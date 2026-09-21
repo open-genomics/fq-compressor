@@ -208,4 +208,5 @@ TEST(CompressPipelineTest, StageTimingsAndQueueStatsArePopulated) {
     // must be nonzero, and the writer's pure-I/O section still runs.
     EXPECT_GT(result->timings.encoderCompressNs, 0U);
     EXPECT_GT(result->timings.writerWriteNs, 0U);
+    EXPECT_GT(result->inFlightHighWater, 0U);
 }

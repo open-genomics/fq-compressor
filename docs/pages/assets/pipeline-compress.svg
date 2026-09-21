@@ -32,14 +32,14 @@
   <rect x="404" y="116" width="74" height="92" rx="8" fill="#0e1728" stroke="#fbbf24" stroke-width="1.6"/>
   <text x="441" y="144" text-anchor="middle" fill="#fcd34d" font-size="11.5" font-weight="700">MPMC</text>
   <text x="441" y="162" text-anchor="middle" fill="#8fa0c0" font-size="10.5">有界队列</text>
-  <text x="441" y="178" text-anchor="middle" fill="#8fa0c0" font-size="10.5">深度 4</text>
+  <text x="441" y="178" text-anchor="middle" fill="#8fa0c0" font-size="10.5">槽位 4 / 可用 3</text>
   <text x="441" y="196" text-anchor="middle" fill="#5f7194" font-size="10">解耦三段</text>
 
   <line x1="482" y1="162" x2="510" y2="162" stroke="#8fa0c0" stroke-width="1.6" marker-end="url(#arrc)"/>
 
   <!-- D encoder×N -->
   <rect x="514" y="86" width="216" height="176" rx="10" fill="none" stroke="#34d399" stroke-width="1.2" stroke-dasharray="5,4"/>
-  <text x="622" y="104" text-anchor="middle" fill="#6ee7b7" font-size="12.5" font-weight="700">encoder × N（默认 4）</text>
+  <text x="622" y="104" text-anchor="middle" fill="#6ee7b7" font-size="12.5" font-weight="700">encoder × N（N≤4，默认 4）</text>
   <rect x="526" y="114" width="192" height="30" rx="5" fill="rgba(52,211,153,0.10)" stroke="rgba(52,211,153,0.45)"/>
   <text x="622" y="133" text-anchor="middle" fill="#a7f3d0" font-size="11">2-bit 打包 + measure</text>
   <rect x="526" y="148" width="192" height="30" rx="5" fill="rgba(52,211,153,0.10)" stroke="rgba(52,211,153,0.45)"/>
@@ -56,7 +56,7 @@
   <rect x="766" y="116" width="74" height="92" rx="8" fill="#0e1728" stroke="#fbbf24" stroke-width="1.6"/>
   <text x="803" y="144" text-anchor="middle" fill="#fcd34d" font-size="11.5" font-weight="700">MPMC</text>
   <text x="803" y="162" text-anchor="middle" fill="#8fa0c0" font-size="10.5">有界队列</text>
-  <text x="803" y="178" text-anchor="middle" fill="#8fa0c0" font-size="10.5">深度 4</text>
+  <text x="803" y="178" text-anchor="middle" fill="#8fa0c0" font-size="10.5">槽位 4 / 可用 3</text>
 
   <line x1="844" y1="162" x2="872" y2="162" stroke="#8fa0c0" stroke-width="1.6" marker-end="url(#arrc)"/>
 
@@ -83,5 +83,5 @@
   <text x="260" y="296" text-anchor="middle" fill="#8fa0c0" font-size="11.5">① 数据并行解析（阶段 H）</text>
   <text x="622" y="296" text-anchor="middle" fill="#8fa0c0" font-size="11.5">② 编解码 CPU 密集、乱序完成</text>
   <text x="976" y="296" text-anchor="middle" fill="#8fa0c0" font-size="11.5">③ 唯一有序端：保序提交 + 写盘</text>
-  <text x="1136" y="316" text-anchor="middle" fill="#5f7194" font-size="10.5">在途帧上界 = 队列 4 + 4 + encoder 4 ≈ 12 帧</text>
+  <text x="1136" y="316" text-anchor="middle" fill="#5f7194" font-size="10.5">credit 窗口 = 队列 3 + 3 + worker 4 = 10 帧（含 reorder）</text>
 </svg>

@@ -2,6 +2,12 @@
 
 ## [未发布]
 
+### 改进
+
+- 并行解析的 parser 扇出与 encoder 池解耦：encoder 数量采用 `min(K, 4)`，避免提高
+  `--parse-workers` 时机械地成倍创建 CPU 编码线程 → 详见
+  `docs/postmortems/2026-09-21-worker-topology.md`
+
 ### 修复
 
 - **头部尾随空格静默丢失（无损硬约束违背）**：`@id `（恰一个尾随空格）往返时丢字节。
@@ -39,6 +45,12 @@
 
 - **ChunkOrderer 重复键静默丢帧**：`submitFrame` 遇重复 `(chunk, local)` 键时输出告警日志
   （原 `emplace` 静默丢弃）。
+
+- **reorder 等待区不受队列深度约束**：writer 从有界队列取出乱序帧后，`ReorderBuffer`/
+  `ChunkOrderer` 的 pending map 仍可能持续增长，原先“队列深度 + worker 数”不是实际在途上界。
+  新增跨阶段 in-flight credit 窗口，覆盖队列、worker 和保序等待区；并行解析为每个 chunk 保留一个
+  专属 credit，避免后续 chunk 抢占全部窗口导致前置 chunk 环形等待。→ 详见
+  [docs/postmortems/2026-09-21-inflight-reorder-window.md](docs/postmortems/2026-09-21-inflight-reorder-window.md)
 
 
 ## [0.1.0] - 2026-08-21

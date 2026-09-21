@@ -32,6 +32,7 @@ using fqc::format::ArchiveWriter;
 using fqc::format::DatasetProfile;
 using fqc::pipeline::CompressPipeline;
 using fqc::pipeline::ParallelParsePipeline;
+using fqc::pipeline::PipelineStats;
 
 namespace {
 
@@ -87,13 +88,17 @@ private:
                                std::span<const ReadRecord> sample,
                                std::uint64_t sampleEnd,
                                std::size_t workers,
-                               std::size_t targetFrameBytes) -> std::string {
+                               std::size_t targetFrameBytes,
+                               PipelineStats* stats = nullptr) -> std::string {
     std::ostringstream output(std::ios::binary);
     ArchiveWriter writer(output, {.profile = DatasetProfile::kIllumina});
     ParallelParsePipeline pipeline(
         input.path(), input.size(), targetFrameBytes, sampleEnd, workers);
     auto result = pipeline.run(sample, writer);
     EXPECT_TRUE(result.has_value()) << result.error().message;
+    if (stats != nullptr && result.has_value()) {
+        *stats = *result;
+    }
     EXPECT_TRUE(writer.finish());
     return output.str();
 }
@@ -173,7 +178,22 @@ TEST(ParallelParsePipelineTest, MultiWorkerPreservesRecordOrderAndContent) {
     const std::string fastq = makeFastq(2000);
     TempFastqFile file(fastq);
 
-    const auto archive = runParallel(file, {}, 0, 4, 512);
+    PipelineStats stats;
+    const auto archive = runParallel(file, {}, 0, 4, 512, &stats);
+    EXPECT_GT(stats.inFlightHighWater, 0U);
+    EXPECT_LE(stats.inFlightHighWater, 10U);
+    EXPECT_EQ(readAllRecords(archive), fqc::test::parseAllFastq(fastq));
+}
+
+TEST(ParallelParsePipelineTest, ParserFanoutDoesNotMultiplyEncoderPool) {
+    const std::string fastq = makeFastq(2000);
+    TempFastqFile file(fastq);
+
+    PipelineStats stats;
+    const auto archive = runParallel(file, {}, 0, 8, 512, &stats);
+
+    EXPECT_EQ(stats.parserWorkers, 8U);
+    EXPECT_EQ(stats.encoderWorkers, ParallelParsePipeline::kDefaultEncoderParallelism);
     EXPECT_EQ(readAllRecords(archive), fqc::test::parseAllFastq(fastq));
 }
 

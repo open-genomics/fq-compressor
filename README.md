@@ -79,7 +79,7 @@ FASTQ 记录的信息字段——ID、序列、质量值——按**列式分离*
 压缩（未压缩普通文件）是**多帧并行编码流水线**，解压是其镜像；三条命令共用同一引擎。
 
 ```text
-压缩: parser×K 字节块切分+边界对齐 →[有界 MPMC]→ encoder×N (2-bit+校验和+zstd×3, 乱序) →[MPMC]→ ChunkOrderer 保序 → 写盘
+压缩: parser×K 字节块切分+边界对齐 →[有界 MPMC]→ encoder×N（N=min(K,4)，2-bit+校验和+zstd×3, 乱序） →[MPMC]→ ChunkOrderer 保序 → 写盘
 解压: reader 读帧+内存预检 →[MPMC]→ decoder×N (zstd+校验和+解码, 乱序) →[MPMC]→ reorder 保序 → 滚动校验和 → 写出
 ```
 

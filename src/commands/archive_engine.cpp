@@ -127,6 +127,8 @@ private:
 
 /// Per-stage wall-clock plus queue snapshots. Info level, so `-q` suppresses it.
 void logPipelineObservability(const pipeline::PipelineStats& stats) {
+    FQC_LOG_INFO(
+        "pipeline workers: parser={} encoder={}", stats.parserWorkers, stats.encoderWorkers);
     const auto& t = stats.timings;
     FQC_LOG_INFO(
         "pipeline stages (ms): reader parse={:.1f} push={:.1f} | encoder pop={:.1f} "
@@ -155,6 +157,7 @@ void logPipelineObservability(const pipeline::PipelineStats& stats) {
         q2.pushWaits,
         q2.popWaits,
         q2.highWater);
+    FQC_LOG_INFO("pipeline in-flight frames: highWater={}", stats.inFlightHighWater);
 }
 
 [[nodiscard]] auto targetFrameBytesFor(const CompressionRequest& request) noexcept -> std::size_t {
@@ -318,7 +321,9 @@ auto ArchiveEngine::compress(const CompressionRequest& request) -> Result<Operat
         inputFileSize = uncompressedRegularFileSize(request.inputPath);
     }
     Result<pipeline::PipelineStats> pipelineResult;
-    if (inputFileSize > 0) {
+    // Profile sampling may already consume a small file completely. There is
+    // no suffix to split in that case, so avoid starting empty parser chunks.
+    if (inputFileSize > primary.bytesConsumed()) {
         pipeline::ParallelParsePipeline parallelEngine(request.inputPath,
                                                        inputFileSize,
                                                        targetFrameBytesFor(request),

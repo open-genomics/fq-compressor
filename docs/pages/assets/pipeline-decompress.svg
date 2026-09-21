@@ -31,7 +31,7 @@
   <rect x="402" y="116" width="74" height="92" rx="8" fill="#0e1728" stroke="#fbbf24" stroke-width="1.6"/>
   <text x="439" y="144" text-anchor="middle" fill="#fcd34d" font-size="11.5" font-weight="700">MPMC</text>
   <text x="439" y="162" text-anchor="middle" fill="#8fa0c0" font-size="10.5">有界队列</text>
-  <text x="439" y="178" text-anchor="middle" fill="#8fa0c0" font-size="10.5">深度 4</text>
+  <text x="439" y="178" text-anchor="middle" fill="#8fa0c0" font-size="10.5">槽位 4 / 可用 3</text>
 
   <line x1="480" y1="162" x2="508" y2="162" stroke="#8fa0c0" stroke-width="1.6" marker-end="url(#arrd)"/>
 
@@ -54,7 +54,7 @@
   <rect x="764" y="116" width="74" height="92" rx="8" fill="#0e1728" stroke="#fbbf24" stroke-width="1.6"/>
   <text x="801" y="144" text-anchor="middle" fill="#fcd34d" font-size="11.5" font-weight="700">MPMC</text>
   <text x="801" y="162" text-anchor="middle" fill="#8fa0c0" font-size="10.5">有界队列</text>
-  <text x="801" y="178" text-anchor="middle" fill="#8fa0c0" font-size="10.5">深度 4</text>
+  <text x="801" y="178" text-anchor="middle" fill="#8fa0c0" font-size="10.5">槽位 4 / 可用 3</text>
 
   <line x1="842" y1="162" x2="870" y2="162" stroke="#8fa0c0" stroke-width="1.6" marker-end="url(#arrd)"/>
 

@@ -37,6 +37,9 @@ struct PipelineStats {
     std::size_t frameCount = 0;
     std::size_t recordCount = 0;
     std::uint64_t logicalBytes = 0;
+    std::size_t parserWorkers = 1;
+    std::size_t encoderWorkers = 0;
+    std::size_t inFlightHighWater = 0;
     StageTimings timings;
     QueueStats queue1Stats;
     QueueStats queue2Stats;

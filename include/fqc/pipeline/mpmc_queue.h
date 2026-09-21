@@ -27,6 +27,10 @@ struct QueueStats {
 
 /// Multi-producer multi-consumer bounded ring buffer.
 ///
+/// `Capacity` is the number of storage slots. One slot is reserved to
+/// distinguish full from empty, so the usable item capacity is
+/// `MpmcQueue::kUsableCapacity` (`Capacity - 1`).
+///
 /// A mutex plus two `condition_variable_any` serializes all producers and
 /// consumers, so the queue is safe for concurrent fan-in and fan-out.
 ///
@@ -43,9 +47,12 @@ struct QueueStats {
 /// lock-free CAS -- the pipeline's frame granularity is coarse enough that
 /// mutex contention is not the bottleneck (see ARCHITECTURE.md).
 template <typename T, std::size_t Capacity>
-requires(Capacity > 0 && (Capacity & (Capacity - 1)) == 0)
+requires(Capacity >= 2 && (Capacity & (Capacity - 1)) == 0)
 class MpmcQueue {
 public:
+    /// Number of items that fit in the ring; one slot distinguishes full from empty.
+    static constexpr std::size_t kUsableCapacity = Capacity - 1;
+
     MpmcQueue() = default;
 
     MpmcQueue(const MpmcQueue&) = delete;

@@ -12,7 +12,7 @@ v1 兼容、索引、随机访问、全局 read 重排序、第二套并行引�
 压缩路径（未压缩普通文件，阶段 H）：
   主线程    FASTQ 采样 -> profile 判定 -> 打开输出
   parser×K  按字节块切分，边界对齐到完整记录，帧标记 (chunkId, localId) --[有界 MPMC 队列]-->
-  encoder   N 个 worker 并行：2-bit 打包 + measure + 逻辑校验和 + zstd×3（CPU 密集，乱序完成）--[有界 MPMC 队列]-->
+  encoder   N 个 worker 并行：2-bit 打包 + measure + 逻辑校验和 + zstd×3（N=min(K,4)，CPU 密集，乱序完成）--[有界 MPMC 队列]-->
   writer    ChunkOrderer 按 (chunk, local) 字典序提交 -> 帧头拼装 + 写盘（纯 I/O）
 
 压缩路径（gzip / stdin / 双端）：单 reader 顺序解析 + 同上 encoder/writer；双端 R1/R2 锁步不并行切块。
@@ -89,8 +89,10 @@ RSS 为 25–32 MiB（随机化短读长和长读长 fixture）。
 压缩路径使用多帧并行编码流水线。未压缩普通文件走阶段 H 的数据并行解析：K 个 parser
 各自打开独立 ifstream，按字节块切分并做记录边界对齐，帧以 `(chunkId, localId)` 标记，
 writer 用 `ChunkOrderer` 按字典序提交。gzip / stdin / 双端仍用单 reader 顺序解析。
-N 个 encoder worker 并行编码并压缩（2-bit 打包 + measure + 逻辑校验和 + zstd×3，CPU 密集、
-乱序完成），writer 拼装帧头并写盘（纯 I/O）。两条有界 MPMC 队列（深度 4）解耦三段。
+N 个 encoder worker 并行编码并压缩（2-bit 打包 + measure + 逻辑校验和 + zstd×3，默认
+`N=min(K,4)`，CPU 密集、乱序完成），writer 拼装帧头并写盘（纯 I/O）。parser 与 encoder
+的并行度不再绑定，避免提高字节块切分度数时同步放大 CPU 编码线程。两条有界 MPMC 队列解耦三段；源端提交帧前
+必须取得 in-flight credit，writer 按序提交后归还 credit，因此保序等待区也纳入同一个在途窗口。
 encoder 状态帧内局部，worker 间无需共享可变状态。profile 采样在主线程先于流水线完成，
 采样记录作为 worker 0（并行路径）或顺序 reader 的累积器种子。
 
@@ -111,9 +113,12 @@ gzip/stdin/双端仍走单 reader。任何进一步并行都以阶段 E 的分�
 成为瓶颈的前提下引入 TBB DAG 或线程池，只会把 v2 已经干掉的重复状态、输出排序和在途
 内存风险重新请回来。真实语料数字见 `docs/real-corpus.md`。
 
-帧边界天然独立，是多帧并行编码的切分点。编解码器状态保持帧内局部或 worker 内局部。在途帧
-上界 = 两条队列深度（各 4）+ N 个 encoder（默认 4）= 12 帧，每帧由编码前内存预检约束，整体
-远低于操作预算。
+帧边界天然独立，是多帧并行编码的切分点。编解码器状态保持帧内局部或 worker 内局部。
+每条队列的模板 `Capacity` 含一个区分空/满的保留槽位，可用容量为 `Capacity - 1`。
+源端在帧进入第一条队列前取得 credit，writer 完成有序提交后归还；credit 窗口覆盖两条
+队列、worker 正在处理的帧以及 reorder/ChunkOrderer 中等待缺口的帧。源端本地尚未入队的
+累积帧另有每个 reader/parser 至多一帧的固定上界。每帧仍由编码/解码前内存预检约束，
+整体不再依赖“队列深度天然限制 reorder”的错误假设。
 
 ## 双端 reads
 

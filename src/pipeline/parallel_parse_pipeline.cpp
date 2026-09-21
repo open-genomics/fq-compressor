@@ -9,9 +9,11 @@
 #include "fqc/io/fastq_parser.h"
 #include "fqc/pipeline/chunk_orderer.h"
 #include "fqc/pipeline/frame_accumulator.h"
+#include "fqc/pipeline/in_flight_limiter.h"
 #include "fqc/pipeline/mpmc_queue.h"
 #include "fqc/pipeline/timing.h"
 
+#include <algorithm>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -45,6 +47,11 @@ struct OrderedItem {
     std::uint64_t chunk = 0;
     std::uint64_t local = 0;
     bool chunkEnd = false;
+    std::unique_ptr<format::CompressedFrame> frame;
+};
+
+struct ReadyFrame {
+    std::uint64_t chunk = 0;
     std::unique_ptr<format::CompressedFrame> frame;
 };
 
@@ -137,7 +144,8 @@ ParallelParsePipeline::ParallelParsePipeline(std::filesystem::path inputPath,
       fileSize_(fileSize),
       targetFrameBytes_(targetFrameBytes),
       sampleEndOffset_(sampleEndOffset),
-      parallelism_(parallelism == 0 ? 1 : parallelism) {}
+      parserParallelism_(parallelism == 0 ? 1 : parallelism),
+      encoderParallelism_(std::min(parserParallelism_, kDefaultEncoderParallelism)) {}
 
 // 并行解析管线按帧号维护一个有序窗口（chunk 乱序产出、严格按序提交），
 // 每个阶段的状态机交错是这一不变量所必需，拆分为独立函数反而更难推理。
@@ -146,11 +154,16 @@ auto ParallelParsePipeline::run(std::span<const ReadRecord> initialRecords,
                                 format::ArchiveWriter& writer) -> Result<PipelineStats> {
     MpmcQueue<ParseItem, kDefaultQueueDepth> queue1;
     MpmcQueue<OrderedItem, kDefaultQueueDepth> queue2;
+    const auto inFlightLimit = MpmcQueue<ParseItem, kDefaultQueueDepth>::kUsableCapacity +
+        MpmcQueue<OrderedItem, kDefaultQueueDepth>::kUsableCapacity + parserParallelism_;
+    InFlightLimiter frameLimiter(inFlightLimit, parserParallelism_);
     std::optional<Error> parseError;
     std::optional<Error> encoderError;
     std::optional<Error> writerError;
     std::mutex errorMutex;
     PipelineStats stats;
+    stats.parserWorkers = parserParallelism_;
+    stats.encoderWorkers = encoderParallelism_;
     std::atomic<std::uint64_t> logicalBytes{0};
 
     const auto wallStart = Clock::now();
@@ -179,7 +192,8 @@ auto ParallelParsePipeline::run(std::span<const ReadRecord> initialRecords,
     // sequential pipeline when K == 1). Every worker always emits exactly one
     // chunk-completion marker -- the writer's ChunkOrderer stalls without it.
     const std::uint64_t region = fileSize_ > sampleEndOffset_ ? fileSize_ - sampleEndOffset_ : 0;
-    const std::uint64_t step = region == 0 ? 0 : (region + parallelism_ - 1) / parallelism_;
+    const std::uint64_t step =
+        region == 0 ? 0 : (region + parserParallelism_ - 1) / parserParallelism_;
 
     auto parseWorker = [&](std::uint64_t workerIndex) {
         std::uint64_t parseNs = 0;
@@ -188,7 +202,20 @@ auto ParallelParsePipeline::run(std::span<const ReadRecord> initialRecords,
         std::uint64_t localId = 0;
         FrameAccumulator accumulator(targetFrameBytes_, false);
 
-        auto pushItem = [&](ParseItem item) -> bool {
+        auto pushFrame = [&](ParseItem item) -> bool {
+            if (!frameLimiter.acquire(workerIndex, stopToken)) {
+                return false;
+            }
+            const auto pushStart = Clock::now();
+            const bool ok = queue1.push(std::move(item), stopToken);
+            pushNs += nanosSince(pushStart);
+            if (!ok) {
+                frameLimiter.release(workerIndex);
+            }
+            return ok;
+        };
+
+        auto pushMarker = [&](ParseItem item) -> bool {
             const auto pushStart = Clock::now();
             const bool ok = queue1.push(std::move(item), stopToken);
             pushNs += nanosSince(pushStart);
@@ -199,7 +226,7 @@ auto ParallelParsePipeline::run(std::span<const ReadRecord> initialRecords,
             for (const auto& record : initialRecords) {
                 localLogical += canonicalFastqBytes(record);
                 if (auto closed = accumulator.append(ReadRecord(record))) {
-                    if (!pushItem(ParseItem{0, localId++, false, std::move(*closed)})) {
+                    if (!pushFrame(ParseItem{0, localId++, false, std::move(*closed)})) {
                         break;
                     }
                 }
@@ -211,7 +238,7 @@ auto ParallelParsePipeline::run(std::span<const ReadRecord> initialRecords,
 
         const std::uint64_t chunkBegin = sampleEndOffset_ + workerIndex * step;
         const std::uint64_t chunkEnd =
-            (workerIndex + 1 == parallelism_) ? fileSize_ : chunkBegin + step;
+            (workerIndex + 1 == parserParallelism_) ? fileSize_ : chunkBegin + step;
 
         // One stream per worker, shared by boundary alignment and parsing.
         std::ifstream file;
@@ -278,7 +305,7 @@ auto ParallelParsePipeline::run(std::span<const ReadRecord> initialRecords,
                 recordStart = parseBase + parser.bytesConsumed();
                 localLogical += canonicalFastqBytes(**record);
                 if (auto closed = accumulator.append(std::move(**record))) {
-                    if (!pushItem(ParseItem{workerIndex, localId++, false, std::move(*closed)})) {
+                    if (!pushFrame(ParseItem{workerIndex, localId++, false, std::move(*closed)})) {
                         break;
                     }
                 }
@@ -287,12 +314,12 @@ auto ParallelParsePipeline::run(std::span<const ReadRecord> initialRecords,
 
         if (!stopToken.stop_requested()) {
             if (auto tail = accumulator.finish()) {
-                pushItem(ParseItem{workerIndex, localId++, false, std::move(*tail)});
+                pushFrame(ParseItem{workerIndex, localId++, false, std::move(*tail)});
             }
         }
         // The marker is the ordering protocol's completeness guarantee: push
         // it even when cancelled (a rejected push under stop is harmless).
-        pushItem(ParseItem{workerIndex, localId, true, {}});
+        pushMarker(ParseItem{workerIndex, localId, true, {}});
 
         logicalBytes.fetch_add(localLogical, std::memory_order_relaxed);
         readerParseNs.fetch_add(parseNs, std::memory_order_relaxed);
@@ -300,8 +327,8 @@ auto ParallelParsePipeline::run(std::span<const ReadRecord> initialRecords,
     };
 
     std::vector<std::jthread> parsers;
-    parsers.reserve(parallelism_);
-    for (std::uint64_t i = 0; i < parallelism_; ++i) {
+    parsers.reserve(parserParallelism_);
+    for (std::uint64_t i = 0; i < parserParallelism_; ++i) {
         parsers.emplace_back(parseWorker, i);
     }
 
@@ -370,8 +397,8 @@ auto ParallelParsePipeline::run(std::span<const ReadRecord> initialRecords,
     };
 
     std::vector<std::jthread> encoders;
-    encoders.reserve(parallelism_);
-    for (std::size_t i = 0; i < parallelism_; ++i) {
+    encoders.reserve(encoderParallelism_);
+    for (std::size_t i = 0; i < encoderParallelism_; ++i) {
         encoders.emplace_back(encoderLoop);
     }
 
@@ -379,14 +406,15 @@ auto ParallelParsePipeline::run(std::span<const ReadRecord> initialRecords,
     std::jthread writerThread([&] {
         std::uint64_t popNs = 0;
         std::uint64_t writeNs = 0;
-        ChunkOrderer<std::unique_ptr<format::CompressedFrame>> orderer;
-        auto emitReady = [&](std::vector<std::unique_ptr<format::CompressedFrame>> ready) {
-            for (auto& frame : ready) {
-                stats.recordCount += frame->recordCount;
+        ChunkOrderer<ReadyFrame> orderer;
+        auto emitReady = [&](std::vector<ReadyFrame> ready) {
+            for (auto& readyFrame : ready) {
+                stats.recordCount += readyFrame.frame->recordCount;
                 stats.frameCount += 1;
                 const auto writeStart = Clock::now();
-                auto result = writer.writeCompressedFrame(std::move(frame));
+                auto result = writer.writeCompressedFrame(std::move(readyFrame.frame));
                 writeNs += nanosSince(writeStart);
+                frameLimiter.release(readyFrame.chunk);
                 if (!result) {
                     writerError = result.error();
                     stopSource.request_stop();
@@ -404,7 +432,8 @@ auto ParallelParsePipeline::run(std::span<const ReadRecord> initialRecords,
             if (out->chunkEnd) {
                 emitReady(orderer.submitChunkEnd(out->chunk, out->local));
             } else {
-                emitReady(orderer.submitFrame(out->chunk, out->local, std::move(out->frame)));
+                emitReady(orderer.submitFrame(
+                    out->chunk, out->local, ReadyFrame{out->chunk, std::move(out->frame)}));
             }
             if (writerError.has_value()) {
                 break;
@@ -440,6 +469,7 @@ auto ParallelParsePipeline::run(std::span<const ReadRecord> initialRecords,
     stats.queue1Stats = queue1.stats();
     stats.queue2Stats = queue2.stats();
     stats.logicalBytes = logicalBytes.load(std::memory_order_relaxed);
+    stats.inFlightHighWater = frameLimiter.highWater();
 
     if (writerError.has_value()) {
         return makeError<PipelineStats>(std::move(*writerError));

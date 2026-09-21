@@ -22,10 +22,9 @@ namespace fqc::pipeline {
 /// ascending id sequence even though completion was unordered.
 ///
 /// Single-threaded: the pipeline's writer thread owns the one instance, so no
-/// internal locking. The pending window is bounded *externally* by the
-/// upstream queue depth: once that queue fills, producers back-pressure, so
-/// `pending_` cannot grow without bound and no separate window cap is needed
-/// (see ARCHITECTURE.md, "execution" / "memory model").
+/// internal locking. Callers must bound the total number of frames between
+/// source submission and ordered commit; the final queue alone is insufficient
+/// because the writer can move out-of-order items into `pending_`.
 template <typename T>
 class ReorderBuffer {
 public:

@@ -5,6 +5,7 @@
 #include "fqc/pipeline/decompress_pipeline.h"
 
 #include "fqc/format/archive.h"
+#include "fqc/pipeline/in_flight_limiter.h"
 #include "fqc/pipeline/mpmc_queue.h"
 #include "fqc/pipeline/reorder_buffer.h"
 
@@ -53,6 +54,9 @@ auto DecompressPipeline::run(std::istream& input,
                              RecordSink sink) const -> Result<DecompressStats> {
     MpmcQueue<InputFrame, kDefaultQueueDepth> queue1;
     MpmcQueue<OrderedFrame, kDefaultQueueDepth> queue2;
+    const auto inFlightLimit = MpmcQueue<InputFrame, kDefaultQueueDepth>::kUsableCapacity +
+        MpmcQueue<OrderedFrame, kDefaultQueueDepth>::kUsableCapacity + parallelism_;
+    InFlightLimiter frameLimiter(inFlightLimit);
     std::optional<Error> readerError;
     std::optional<Error> decoderError;
     std::optional<Error> writerError;
@@ -107,7 +111,11 @@ auto DecompressPipeline::run(std::istream& input,
                 break;
             }
             InputFrame in{frameId++, std::make_unique<format::RawFrame>(std::move(**raw))};
+            if (!frameLimiter.acquire(stopToken)) {
+                break;
+            }
             if (!queue1.push(std::move(in), stopToken)) {
+                frameLimiter.release();
                 break;
             }
         }
@@ -166,6 +174,7 @@ auto DecompressPipeline::run(std::istream& input,
                 finalGlobalChecksum =
                     format::advanceGlobalChecksum(finalGlobalChecksum, frame->checksum);
                 auto sinkResult = sink(std::move(frame->records));
+                frameLimiter.release();
                 if (!sinkResult) {
                     writerError = sinkResult.error();
                     stopSource.request_stop();
@@ -186,6 +195,8 @@ auto DecompressPipeline::run(std::istream& input,
     // drains queue2 and exits instead of blocking on an empty pop.
     queue2.close();
     writer.join();
+
+    stats.inFlightHighWater = frameLimiter.highWater();
 
     if (writerError.has_value()) {
         return makeError<DecompressStats>(std::move(*writerError));

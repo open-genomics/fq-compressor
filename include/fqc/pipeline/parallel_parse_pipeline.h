@@ -51,6 +51,9 @@ namespace fqc::pipeline {
 /// writer    ChunkOrderer drains in (chunk, local) lexicographic order ->
 ///           writeCompressedFrame (on-disk frame id from writer counter)
 /// ```
+/// `N = min(K, kDefaultEncoderParallelism)`: parser fan-out is independently
+/// configurable, while the CPU-heavy encoder pool stays within the ordinary
+/// compression pipeline's default size.
 ///
 /// Framing note: chunk ends force a frame flush, so with K > 1 the archive's
 /// frame split points differ from the sequential pipeline's (identical
@@ -61,6 +64,8 @@ class ParallelParsePipeline {
 public:
     static constexpr std::size_t kDefaultQueueDepth = 4;
     static constexpr std::size_t kDefaultParallelism = 4;
+    static constexpr std::size_t kDefaultEncoderParallelism =
+        CompressPipeline::kDefaultEncoderParallelism;
 
     /// `sampleEndOffset` is the byte offset where parallel parsing starts
     /// (end of the profile sample consumed on the main thread).
@@ -80,7 +85,8 @@ private:
     std::uint64_t fileSize_;
     std::size_t targetFrameBytes_;
     std::uint64_t sampleEndOffset_;
-    std::size_t parallelism_;
+    std::size_t parserParallelism_;
+    std::size_t encoderParallelism_;
 };
 
 }  // namespace fqc::pipeline

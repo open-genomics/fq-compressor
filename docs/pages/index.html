@@ -387,7 +387,7 @@ $fqc compress   -i R1.fastq.gz -2 R2.fastq.gz -o paired.fqc <span class="c"># �
         <h3><span class="kicker">Dataflow</span>数据流流水线</h3>
         <div class="figure">
           <img src="assets/pipeline-compress.svg" alt="压缩流水线图" width="1180" height="340" loading="lazy">
-          <div class="figcaption">图 3 · 压缩路径：parser×K → 有界 MPMC → encoder×N → ChunkOrderer → 写盘</div>
+          <div class="figcaption">图 3 · 压缩路径：parser×K → 有界 MPMC → encoder×N（N≤4）→ ChunkOrderer → 写盘</div>
         </div>
         <div class="figure">
           <img src="assets/pipeline-decompress.svg" alt="解压流水线图" width="1180" height="340" loading="lazy">
@@ -403,11 +403,11 @@ $fqc compress   -i R1.fastq.gz -2 R2.fastq.gz -o paired.fqc <span class="c"># �
         <h3><span class="kicker">Parallelism</span>并行执行架构</h3>
         <p><b>帧边界天然独立</b>，是多帧并行编码的切分点。编解码器状态保持帧内局部或 worker 内局部，worker 间无需共享可变状态。</p>
         <ul>
-          <li><b>压缩路径</b>：未压缩普通文件走阶段 H 的<b>数据并行解析</b>——K 个 parser 各自打开独立 <code>ifstream</code>，按字节块切分并做记录边界对齐，帧以 <code>(chunkId, localId)</code> 标记；N 个 encoder worker 并行编码并压缩（CPU 密集、乱序完成）；writer 用 <code>ChunkOrderer</code> 按字典序提交。两条<b>有界 MPMC 队列（深度 4）</b>解耦三段。</li>
+          <li><b>压缩路径</b>：未压缩普通文件走阶段 H 的<b>数据并行解析</b>——K 个 parser 各自打开独立 <code>ifstream</code>，按字节块切分并做记录边界对齐，帧以 <code>(chunkId, localId)</code> 标记；N 个 encoder worker（<code>N=min(K,4)</code>）并行编码并压缩（CPU 密集、乱序完成）；writer 用 <code>ChunkOrderer</code> 按字典序提交。两条<b>有界 MPMC 队列</b>解耦三段，跨阶段 in-flight credit 同时覆盖队列、worker 和保序等待区。</li>
           <li><b>解压路径</b>：reader 线程用 <code>ArchiveReader::readRawFrame</code> 做纯 I/O 读帧（每帧带递增帧 id）；N 个 decoder worker 并行 <code>decodeRawFrame</code>；writer 线程经 reorder buffer 按帧 id 有序提交后做滚动全局校验和再交给 RecordSink。</li>
           <li><b>非并行路径</b>：gzip / stdin / 双端走单 reader 顺序解析（双端 R1/R2 锁步不并行切块）。</li>
         </ul>
-        <p>在途帧上界 = 两条队列深度（各 4）+ N 个 encoder（默认 4）≈ 12 帧，每帧由编码前内存预检约束，整体远低于操作预算。</p>
+        <p>默认 N=4 时，in-flight credit 窗口为可用队列容量 3 + 3 + worker 4 = 10 帧，包含 reorder 等待区；并行 parser 各保留一个专属 credit，源端尚未入队的局部累积帧另行计入，每帧仍由编码前内存预检约束。</p>
         <h4>并行化演进（沿瓶颈逐步推进）</h4>
         <ol class="steps">
           <li><b>阶段 D</b> — 并行 encoder。</li>

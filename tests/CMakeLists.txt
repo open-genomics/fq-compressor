@@ -110,6 +110,11 @@ fqc_add_test(mpmc_queue_test
     SOURCES pipeline/mpmc_queue_test.cpp
 )
 
+# In-flight frame credit window tests
+fqc_add_test(in_flight_limiter_test
+    SOURCES pipeline/in_flight_limiter_test.cpp
+)
+
 # Reorder buffer unit tests
 fqc_add_test(reorder_buffer_test
     SOURCES pipeline/reorder_buffer_test.cpp

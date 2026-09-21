@@ -22,7 +22,14 @@ fq-compressor 并发流水线练手路线。定位：业余练手 C++ 并发流�
 解压: reader(readRawFrame) --[MPMC]--> decoder×N --[MPMC]--> writer(reorder + 滚动校验和 + RecordSink)
 ```
 
-`jthread`+`stop_token` 协作取消；MPMC 为 mutex+CV 有界环形缓冲（带 relaxed 计数器，阶段 E）。未压缩路径在途帧由队列深度与 worker 数上界约束。WSL2 吞吐波动 ±20-85%，一切性能结论以阶段 E 的 A/B 同窗口平台为据。真实语料验收见 `docs/real-corpus.md`。
+`jthread`+`stop_token` 协作取消；MPMC 为 mutex+CV 有界环形缓冲（带 relaxed 计数器，阶段 E）。
+帧在进入第一条队列前取得 in-flight credit（并行 parser 按 chunk 保留专属 credit），writer 有序
+提交后归还，因而 reorder 等待区也受到同一窗口约束。WSL2 吞吐波动 ±20-85%，一切性能结论以阶段
+E 的 A/B 同窗口平台为据。
+
+并行解析路径中 parser 数量由 `--parse-workers` 控制，encoder 池采用 `N=min(K,4)`；解析
+扇出与 CPU 编码线程不再机械一一对应。
+真实语料验收见 `docs/real-corpus.md`。
 
 ## 阶段
 
@@ -57,10 +64,10 @@ fq-compressor 并发流水线练手路线。定位：业余练手 C++ 并发流�
 
 - 状态：完成
 - 动机：C 后写盘成瓶颈，但帧边界天然独立（见 ARCHITECTURE.md），编码可并行。
-- 练手点：MPSC 队列、reorder buffer（乱序完成按 frame id 有序提交）、乱序下内存有界、work distribution。
+- 练手点：MPMC 队列、reorder buffer（乱序完成按 frame id 有序提交）、乱序下内存有界、work distribution。
 - 做法：`reader -> [MPMC] -> N encoder -> [MPMC] -> writer(reorder 按序写)`。MpmcQueue（mutex+CV+stop_token）两端复用，ReorderBuffer 按 frameId 有序提交，N 固定默认 4，不引线程池。
-- 验证：`clang-tsan` 10/10 无竞争；64MiB random 压缩比与 C 完全一致（正确性无损）；在途帧上界 = 队列深度×2 + N = 12 帧，maxRSS 远低于预算。**未达多核近线性提升**：encoder 非当前瓶颈（reader 单线程解析、writer 单线程 zstd+IO，Amdahl），D 揭示新瓶颈为单线程两端；WSL2 吞吐波动 ±20-85% 淹没代码差异。
-- 陷阱：MPSC 先 mutex+CV 版本，别钻 lock-free CAS（✓）；reorder 窗口设上限反压（✓ 上游队列深度即上限）。
+- 验证：`clang-tsan` 10/10 无竞争；64MiB random 压缩比与 C 完全一致（正确性无损）；有界队列与共享 in-flight credit 共同限制在途窗口，maxRSS 远低于预算。**未达多核近线性提升**：encoder 非当前瓶颈（reader 单线程解析、writer 单线程 zstd+IO，Amdahl），D 揭示新瓶颈为单线程两端；WSL2 吞吐波动 ±20-85% 淹没代码差异。
+- 陷阱：MPMC 先 mutex+CV 版本，别钻 lock-free CAS（✓）；reorder 窗口必须通过 in-flight credit 设上限，不能把上游队列深度当成隐式上限。
 
 ### E. 可观测性与可靠 benchmark 平台 ★★（硬依赖，排第一）
 
@@ -81,9 +88,9 @@ fq-compressor 并发流水线练手路线。定位：业余练手 C++ 并发流�
 - 状态：完成（commit 3629f6d）
 - 动机：阶段 D 复盘确认 writer（单线程 zstd+IO）是两瓶颈之一；E 的分段计时给出量化占比。zstd 帧间独立天然可并行（每帧×每流独立 `ZSTD_compress`，`archive.cpp:337-347`）；下沉后 writer 退化为 reorder+写盘。
 - 练手点：**工作粒度再平衡**——把 CPU 密集工作从串行段迁入已有 worker 池后的背压再分析；**确定性验证方法论**（见验证）。
-- 做法：`compress()` 提出匿名命名空间（或新 `compressFrame` free 函数）；`EncodedFrame`（`archive.h:73-80`）改携压缩后流（或新 `CompressedFrame`），queue2 载荷从 raw 变 compressed；writer 只做 reorder + 帧头拼装 + 写盘。内存口径：worker 侧 `ZSTD_compressBound` scratch ×N 计入预检；在途帧 12 上界不变，单帧峰值不变，maxRSS 预期不升（queue2 载荷变小）。
+- 做法：`compress()` 提出匿名命名空间（或新 `compressFrame` free 函数）；`EncodedFrame`（`archive.h:73-80`）改携压缩后流（或新 `CompressedFrame`），queue2 载荷从 raw 变 compressed；writer 只做 reorder + 帧头拼装 + 写盘。内存口径：worker 侧 `ZSTD_compressBound` scratch ×N 计入预检；in-flight credit 覆盖 queue、worker 和 reorder 等待区，单帧峰值不变，maxRSS 预期不升（queue2 载荷变小）。
 - 验证（实测）：**归档逐字节一致 ✓**——基线（a02f694）与本提交同输入 .fqc cmp 零差异（illumina/ont × 16GiB/64MiB 两档内存限制，四组全等）。writer 段趋近纯 IO ✓——zstd+io 从 wall ~20% 降为 write ~4.6%。tsan 9/9 ✓。A/B 同窗口 delta 在噪声内（压缩 +1.5%/-2.5%）——无确定性提速，符合预期：64MiB 仅 ~2 帧，4 worker 只有 2 个有活干，架构收益是 writer 不再随帧尺寸线性增长（大输入/多帧场景受益）。
-- 陷阱复盘：①"预检乘 N"证实**不需要**——`estimateCompressionPeak` 每帧已含 raw+bound，N worker 并发 bound scratch 被在途 12 帧上界覆盖；实测 maxRSS +10-18%（~216MiB，远低于 16GiB 预算），系 bound scratch 从 writer×1 变 worker×N 的预期代价。②zstd 失败复用 encoderError + request_stop ✓。③逐字节门禁一次通过，未出现可归因差异。
+- 陷阱复盘：①"预检乘 N"证实**不需要**——`estimateCompressionPeak` 每帧已含 raw+bound，N worker 并发 bound scratch 由 in-flight credit 窗口和源端局部帧共同约束；实测 maxRSS +10-18%（~216MiB，远低于 16GiB 预算），系 bound scratch 从 writer×1 变 worker×N 的预期代价。②zstd 失败复用 encoderError + request_stop ✓。③逐字节门禁一次通过，未出现可归因差异。
 - 注意：codec ID 不变（zstd 帧自描述，解压与 level 无关），格式零破坏 ✓。
 
 ### I（可选番外）. 轻量压缩比：per-stream zstd level ★★
