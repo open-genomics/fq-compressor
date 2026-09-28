@@ -2,17 +2,17 @@
 
 - 用途：弄清业界顶级 FASTQ 压缩器的算法设计，定位 FQC v2 的谱系与差距，为 `docs/roadmap.md` 阶段 E–I 提供取舍依据。
 - 调研日期：2026-07-27。外部 benchmark 数据随数据集、工具版本、硬件变化，本文数字非本地复测，只表征量级。
-- 来源标注约定：**【本地】** 本仓库代码/文档事实（给 `文件:行号`）；**【文献】** 论文/官方文档；**【外部实测】** 第三方 benchmark（注明数据集）；**【推断】** 作者分析。
+- 来源标注约定：**【本地】** 本仓库代码/文档事实（文档引 `文件#节标题`，代码引 `文件`+符号名；不用行号，行号随编辑漂移）；**【文献】** 论文/官方文档；**【外部实测】** 第三方 benchmark（注明数据集）；**【推断】** 作者分析。
 
 ## 1. 问题背景：FASTQ 压缩的特殊性
 
-FASTQ 每条记录含标识符（ID + 注释）、序列、`+` 分隔行、质量值四个字段，三者的统计特性迥异【本地 ALGORITHM.md:21-31】：
+FASTQ 每条记录含标识符（ID + 注释）、序列、`+` 分隔行、质量值四个字段，三者的统计特性迥异【本地 ALGORITHM.md#为什么列式分离】：
 
 - **ID** 共享仪器名、泳道号、坐标前缀，前缀重复率极高——字典匹配（LZ 类）的主场。
 - **序列** 对随机化数据接近 2 bit/碱基的理论熵，但真实生物数据含大量重复/低复杂度区域，且**同一基因组的 read 彼此高度相似**——跨 read 冗余是最大的一块，但只有重排序或组装式编码才吃得到。
 - **质量值** 字母表约 94 个可打印 ASCII，分布由测序化学决定，沿 read 位置和前序质量值强相关——上下文建模（context modeling）的主场。
 
-无损是硬约束：质量值承载变异检测的统计权重，有损变换会改变下游分析结果【本地 ALGORITHM.md:115-116】。
+无损是硬约束：质量值承载变异检测的统计权重，有损变换会改变下游分析结果【本地 ALGORITHM.md#质量值编码】。
 
 **结论句：质量值是压缩比的主战场，"质量值分布决定一切专用工具的成败"**（§6 给出正反论证）。
 
@@ -25,7 +25,7 @@ FASTQ 每条记录含标识符（ID + 注释）、序列、`+` 分隔行、质�
 | 有参 | CRAM / uCRAM | 依赖参考基因组对齐，SAM/BAM 生态 |
 | 商业 | Petagene | 压缩比追平 SPRING、速度高一个数量级（§5） |
 
-划分维度：**是否用参考基因组**（有参/无参）、**是否全局重排 read**（流式/非流式）、**熵编码器**（Huffman 类 / 算术编码类）。FQC v2 是纯无参、无重排、熵编码外包给 zstd 的流式设计【本地 ARCHITECTURE.md:3-4】。
+划分维度：**是否用参考基因组**（有参/无参）、**是否全局重排 read**（流式/非流式）、**熵编码器**（Huffman 类 / 算术编码类）。FQC v2 是纯无参、无重排、熵编码外包给 zstd 的流式设计【本地 ARCHITECTURE.md 首段】。
 
 ## 3. 代表算法深潜
 
@@ -38,7 +38,7 @@ FASTQ 每条记录含标识符（ID + 注释）、序列、`+` 分隔行、质�
 
 **为什么有效**：同基因组 read 高度相似，但它们在原始文件中相距遥远，任何滑动窗口压缩器（窗口几十~几百 MB）都看不到这份冗余。重排把相似 read 聚邻后，序列流退化为"少量锚序列 + 大量短差异列表"，跨 read 冗余被显式消除。这是业界压缩比第一梯队（≈91–95% 减少，§5）的核心引擎。
 
-**代价账单**：全局重排 → 非流式（或需两趟）、内存随数据规模增长、实现复杂度高（min-hash + 比对 + 编辑脚本 + 重排映射）。本项目的 v1 坟场正是这条路线：v1 曾实现 ABC（Spring/Mincom 风格）+ ReorderMap，最终因"重排序、编码器状态与内存核算耦合在错误层级，内存上限无法强制执行"整体删除 27,835 行【本地 docs/postmortems/2026-07-13-legacy-architecture-debt.md:30-40】。
+**代价账单**：全局重排 → 非流式（或需两趟）、内存随数据规模增长、实现复杂度高（min-hash + 比对 + 编辑脚本 + 重排映射）。本项目的 v1 坟场正是这条路线：v1 曾实现 ABC（Spring/Mincom 风格）+ ReorderMap，最终因"重排序、编码器状态与内存核算耦合在错误层级，内存上限无法强制执行"整体删除 27,835 行【本地 docs/postmortems/2026-07-13-legacy-architecture-debt.md#根因/#修复】。
 
 ### 3.2 fqzcomp（2013，质量值上下文建模派）【文献】
 
@@ -46,7 +46,7 @@ FASTQ 每条记录含标识符（ID + 注释）、序列、`+` 分隔行、质�
 
 **为什么有效**：质量值沿 read 位置和前序质量强相关（测序化学的连续性），order-N 建模把码长压到接近**条件熵**而非零阶熵——这是通用压缩器（零阶/字典模型）结构上吃不到的部分。
 
-**代价账单**：每个 worker 一张稠密上下文表（内存 × worker 数）、每个符号一次全字母表累积更新（CPU 密集）。本项目 v1 的 SCM（Quality Order-2）付过同款账单："为每个 worker 分配一张稠密上下文表，并对每个符号执行全字母表累积更新"【本地 docs/postmortems/2026-07-13-legacy-architecture-debt.md:15】。另一个结构性软肋：对已经分箱的质量值（如 NovaSeq 的 2-bit 质量档）无肉可吃——外部实测中 fqzcomp 在 NovaSeq WGS 数据上反输 gzip 默认档（§5 脚注 1）。
+**代价账单**：每个 worker 一张稠密上下文表（内存 × worker 数）、每个符号一次全字母表累积更新（CPU 密集）。本项目 v1 的 SCM（Quality Order-2）付过同款账单："为每个 worker 分配一张稠密上下文表，并对每个符号执行全字母表累积更新"【本地 docs/postmortems/2026-07-13-legacy-architecture-debt.md#症状】。另一个结构性软肋：对已经分箱的质量值（如 NovaSeq 的 2-bit 质量档）无肉可吃——外部实测中 fqzcomp 在 NovaSeq WGS 数据上反输 gzip 默认档（§5 脚注 1）。
 
 ### 3.3 MFCompress（2014，轻量 Markov 派）【文献】
 
@@ -60,25 +60,25 @@ FASTQ 每条记录含标识符（ID + 注释）、序列、`+` 分隔行、质�
 
 **核心思想**：**分字段列式**——title、quality、sequence 各自聚合成独立块，序列用自研 LZ77 变体 + Huffman，质量用 Huffman；块独立、无参、流式、以速度为目标。
 
-**为什么有效**：与 FQC v2 完全相同的洞察——同一字段在不同记录间的统计相关性远高于字段间，列式让通用熵编码器的字典/频率模型命中率最大化【本地 ALGORITHM.md:21-31】。
+**为什么有效**：与 FQC v2 完全相同的洞察——同一字段在不同记录间的统计相关性远高于字段间，列式让通用熵编码器的字典/频率模型命中率最大化【本地 ALGORITHM.md#为什么列式分离】。
 
 **代价账单**：压缩比低于上下文建模派与重排序派；DSRC2 未进入 §5 的第三方对比，文献口径其压缩比介于 gzip 与 fqzcomp 之间【推断】。
 
-**FQC v2 与 DSRC2 的关系**：同一象限（分字段列式 + 通用熵编码后端、无参、流式、块/帧独立），区别是 FQC 用 zstd（LZ77 + Huffman + FSE/tANS）替代其自研 LZ + Huffman，并额外做了 2-bit 打包前置变换与三层校验【本地 src/format/archive.cpp:337-347, ALGORITHM.md:135-150】。
+**FQC v2 与 DSRC2 的关系**：同一象限（分字段列式 + 通用熵编码后端、无参、流式、块/帧独立），区别是 FQC 用 zstd（LZ77 + Huffman + FSE/tANS）替代其自研 LZ + Huffman，并额外做了 2-bit 打包前置变换与三层校验【本地 src/format/archive.cpp `compressFrame`、ALGORITHM.md#校验和设计】。
 
 ## 4. FQC v2 设计速写【本地】
 
 ```text
-FASTQ → 列式分离三条流（ALGORITHM.md:8-19）
+FASTQ → 列式分离三条流（ALGORITHM.md#总体思路）
   ├─ ID 流:      varint 长度 + 原始字节（前缀冗余留给 zstd 字典匹配）
   ├─ 序列流:     2-bit 打包（4 碱基/字节，zstd 之前先 4:1）+ 异常列表（N/简并/小写，
-  │              位置 delta 编码）（ALGORITHM.md:43-89）
-  └─ 质量流:     varint 长度 + 原始 ASCII，零变换（ALGORITHM.md:104-121）
-       ↓ 每帧 × 每流各一次 ZSTD_compress(level=1)（archive.cpp:337-347, 701-703）
-       ↓ 三层 XXH64：全局头 / 帧逻辑（未压缩流链式哈希）/ footer 滚动（ALGORITHM.md:135-150）
+  │              位置 delta 编码）（ALGORITHM.md#序列编码：2-bit 打包）
+  └─ 质量流:     varint 长度 + 原始 ASCII，零变换（ALGORITHM.md#质量值编码）
+       ↓ 每帧 × 每流各一次 ZSTD_compress(level=1)（archive.cpp `compressFrame`）
+       ↓ 三层 XXH64：全局头 / 帧逻辑（未压缩流链式哈希）/ footer 滚动（ALGORITHM.md#校验和设计）
 ```
 
-关键架构性质：帧间完全独立（并行编码的切分点，ARCHITECTURE.md:97）；编解码状态帧内局部；内存有界三道防线（ARCHITECTURE.md:69-80）；无自研熵编码、无上下文建模、无重排序、无参考基因组。
+关键架构性质：帧间完全独立（并行编码的切分点，ARCHITECTURE.md#执行架构）；编解码状态帧内局部；内存有界三道防线（ARCHITECTURE.md#内存模型）；无自研熵编码、无上下文建模、无重排序、无参考基因组。
 
 ## 5. 对比表
 
@@ -110,8 +110,8 @@ FQC v2（本仓库，单独列出，**不可与上表直接横比**，见脚注 
 4. **反转案例**：fqzcomp 在 HiSeq WES 上 8.5× 表现正常，但在 NovaSeq WGS 上 7.7× 反输 gzip -6 的 8.6×——质量值已 2-bit 分箱后，order-N 上下文建模无冗余可吃，模型开销反而拖累。另注意 fqzcomp 会把 N 碱基的质量分置 0（轻微有损）【外部实测】。
 5. uBAM/uCRAM 按 read name 排序输出，不保原始顺序；SPRING 可选保留原序【外部实测】。
 6. Petagene 为商业闭源，机制未公开；以其保序模式与吞吐特征推断含重排/专用编码【推断】。
-7. 【本地】FQC 的 2.9588×/2.8403× 出自 64 MiB **随机合成数据**（`tests/e2e/test_performance.sh`，README 性能表，docs/postmortems/2026-07-26-stage-d-parallel-encode-no-speedup.md:85），与外部真实 WES/WGS 不是同一数据集，**只表征量级，不可直接横比**。公开切片实测见 `docs/real-corpus.md`（Illumina WXS 前 200k 条 4.15×，人类 MinION 前 4k 条 1.96×）。
-8. 【本地】吞吐出自 WSL2（Ryzen 7 5800H），同机波动可达 ±20–85%（docs/postmortems/2026-07-26-stage-d-parallel-encode-no-speedup.md:55）。
+7. 【本地】FQC 的 2.9588×/2.8403× 出自 64 MiB **随机合成数据**（`tests/e2e/test_performance.sh`，README 性能表，docs/postmortems/2026-07-26-stage-d-parallel-encode-no-speedup.md#验证（不稳定环境下判定"无回归"）），与外部真实 WES/WGS 不是同一数据集，**只表征量级，不可直接横比**。公开切片实测见 `docs/real-corpus.md`（Illumina WXS 前 200k 条 4.15×，人类 MinION 前 4k 条 1.96×）。
+8. 【本地】吞吐出自 WSL2（Ryzen 7 5800H），同机波动可达 ±20–85%（docs/postmortems/2026-07-26-stage-d-parallel-encode-no-speedup.md#波动量化）。
 
 ## 6. FQC 定位与差距分析
 
@@ -126,17 +126,17 @@ FQC v2 的设计最近邻是 **DSRC 象限**：分字段列式 + 通用熵编码
 ### 6.2 差距三来源（按贡献排序）
 
 **① 质量值零变换（主差距）【本地+外部实测】**
-质量流占原始数据约 40%，且占 FQC 压缩后体积的 **67–83%**（ALGORITHM.md:160-170 端到端表：366 B → ~120 B 中质量值占 80–100 B）。业界压缩比第一梯队的主引擎正是质量值的 order-N 上下文建模 + 算术编码（§3.2/3.3）。正论证：FQC 把最大的一块原样交给 zstd level 1；反论证：fqzcomp 在 NovaSeq 分箱数据上反输 gzip（§5 脚注 4）证明质量值的可压空间 = 其分布熵，只有上下文建模吃得到，字典编码器（zstd）只能吃到表层重复。
+质量流占原始数据约 40%，且占 FQC 压缩后体积的 **67–83%**（ALGORITHM.md#端到端压缩比分析 端到端表：366 B → ~120 B 中质量值占 80–100 B）。业界压缩比第一梯队的主引擎正是质量值的 order-N 上下文建模 + 算术编码（§3.2/3.3）。正论证：FQC 把最大的一块原样交给 zstd level 1；反论证：fqzcomp 在 NovaSeq 分箱数据上反输 gzip（§5 脚注 4）证明质量值的可压空间 = 其分布熵，只有上下文建模吃得到，字典编码器（zstd）只能吃到表层重复。
 
 **② 熵编码档位（小差距）【本地】**
-zstd level 1 偏吞吐；level 1→3 仅补 2–5%（ALGORITHM.md:37-39）。即便拉满档位，也补不齐 LZ77+Huffman 与 range coder 在字节级熵上的结构差距。
+zstd level 1 偏吞吐；level 1→3 仅补 2–5%（ALGORITHM.md#为什么选 Zstd level 1）。即便拉满档位，也补不齐 LZ77+Huffman 与 range coder 在字节级熵上的结构差距。
 
 **③ 无 read 重排序（对真实数据是大头，对合成数据无影响）【文献+本地复盘】**
-SPRING 的 min-hash 聚类对真实生物数据（重复/低复杂度/同基因组 read 相似）收益巨大，这是 91–95% 减少的核心来源（§3.1）；对随机合成数据收益趋近于零。但这条路是 v1 已经付过一次的学费：重排序/编码器状态/内存核算耦合错位导致内存上限无法强制执行，27,835 行整体删除（docs/postmortems/2026-07-13-legacy-architecture-debt.md:30-40）。
+SPRING 的 min-hash 聚类对真实生物数据（重复/低复杂度/同基因组 read 相似）收益巨大，这是 91–95% 减少的核心来源（§3.1）；对随机合成数据收益趋近于零。但这条路是 v1 已经付过一次的学费：重排序/编码器状态/内存核算耦合错位导致内存上限无法强制执行，27,835 行整体删除（docs/postmortems/2026-07-13-legacy-architecture-debt.md#根因/#修复）。
 
 ### 6.3 反向论点：压缩比弱 ≠ 设计失败
 
-FQC 的目标函数是 **吞吐 × 内存有界 × 可校验 × 可回退 × 练手价值**，不是压缩比极值（README.md#高性能架构、ARCHITECTURE.md:3）。工业界同样用脚投票选吞吐：Petagene 以追平 SPRING 的压缩比 + 约 10 倍速度取胜（WGS 压缩 17 min vs 3h3m，§5）；SPRING 论文级压缩比背后是小时级的运行时间。在"不动质量值编码"的前提下，任何其他改动（序列、ID、熵编码档位）都是小头——这决定了本项目只做 §7 的轻量改进，而非全面开战。
+FQC 的目标函数是 **吞吐 × 内存有界 × 可校验 × 可回退 × 练手价值**，不是压缩比极值（README.md#高性能架构、ARCHITECTURE.md 首段）。工业界同样用脚投票选吞吐：Petagene 以追平 SPRING 的压缩比 + 约 10 倍速度取胜（WGS 压缩 17 min vs 3h3m，§5）；SPRING 论文级压缩比背后是小时级的运行时间。在"不动质量值编码"的前提下，任何其他改动（序列、ID、熵编码档位）都是小头——这决定了本项目只做 §7 的轻量改进，而非全面开战。
 
 ### 6.4 轻量改进实测（阶段 I：质量流 per-stream zstd level）【本地】
 
@@ -175,17 +175,17 @@ FQC 的目标函数是 **吞吐 × 内存有界 × 可校验 × 可回退 × 练
 ### 可借鉴（轻量、不破坏帧独立性）
 
 1. **per-stream 差异化压缩参数**（DSRC2 分字段思想的最小化）：质量流单独提升 zstd level，ID/序列保持 1。帧内局部、zstd 帧自描述（解码与 level 无关）、codec ID 不动、格式零破坏。→ 已落地为路线图**阶段 I**，见 `docs/roadmap.md`。
-2. **准入门槛制度复活**（CODEC_GATES 理念）：原台账文件已随 `benchmark_v2/` 删除，理念留存于 v1 复盘（docs/postmortems/2026-07-13-legacy-architecture-debt.md:50）与 ARCHITECTURE.md:61-62——任何 codec 改动须过"体积 + 吞吐"双门槛才合入默认值。→ 阶段 I 的判定机制。
+2. **准入门槛制度复活**（CODEC_GATES 理念）：原台账文件已随 `benchmark_v2/` 删除，理念留存于 v1 复盘（docs/postmortems/2026-07-13-legacy-architecture-debt.md#后续与教训）与 ARCHITECTURE.md#Profile——任何 codec 改动须过"体积 + 吞吐"双门槛才合入默认值。→ 阶段 I 的判定机制。
 3. **测量先行的质量流分布实验**：先做分布统计（直方图、相邻差分熵），用数据决定是否值得任何变换；不允许无测量直接上编码器。
 4. **SPRING/fqzcomp 的教训本身**：知道压缩比从哪来、账单有多大，正是本文的价值。
 
 ### 应避免（每条呼应 v1 删除历史）
 
 1. **read 重排序 / min-hash 全局聚类（SPRING 路线）**：v1 复盘根因——内存上限无法强制执行；破坏流式与帧独立。
-2. **自研算术编码 / range coder / 手写 FSE（fqzcomp/Quip 路线）**：复杂度与验证成本超练手预算；v1 SCM（Quality Order-2 稠密上下文表 + 全字母表更新）坟场（v1 复盘 :15）。
+2. **自研算术编码 / range coder / 手写 FSE（fqzcomp/Quip 路线）**：复杂度与验证成本超练手预算；v1 SCM（Quality Order-2 稠密上下文表 + 全字母表更新）坟场（docs/postmortems/2026-07-13-legacy-architecture-debt.md#症状）。
 3. **有参压缩（CRAM 路线）**：需参考基因组，项目定位外。
-4. **跨帧 zstd 字典**：破坏帧独立性——帧独立是阶段 D 并行编码的切分点（ARCHITECTURE.md:97）；且训练集外收益不稳。
-5. **有损质量值分箱**：无损是硬约束（ALGORITHM.md:115-116）。
+4. **跨帧 zstd 字典**：破坏帧独立性——帧独立是阶段 D 并行编码的切分点（ARCHITECTURE.md#执行架构）；且训练集外收益不稳。
+5. **有损质量值分箱**：无损是硬约束（ALGORITHM.md#质量值编码）。
 
 ## 8. 参考资料
 

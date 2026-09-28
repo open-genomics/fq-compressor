@@ -253,7 +253,7 @@ $fqc compress   -i R1.fastq.gz -2 R2.fastq.gz -o paired.fqc <span class="c"># �
         <p>把三个字段分开，Zstd 的滑动窗口里全是同类数据，字典匹配效率远高于行式交错——这是压缩比的主要来源之一。</p>
         <h4>为什么选 Zstd level 1</h4>
         <ul>
-          <li>压缩 ~53 MiB/s，解压 ~182 MiB/s（150 bp 随机合成数据）。</li>
+          <li>吞吐实测见仓库 README「性能」节与 <code>docs/benchmarks.md</code>（数字随平台与阶段漂移，此处不落绝对值）。</li>
           <li>相比 level 3–5，压缩比损失通常在 2–5%，但速度快 2–3 倍。</li>
           <li>列式分离后冗余已大幅降低，更高级别的边际收益递减。</li>
         </ul>

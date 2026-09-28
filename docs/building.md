@@ -34,7 +34,7 @@ cd fq-compressor
 
 CI（`.github/workflows/ci.yml`，ubuntu-24.04 + clang-18）覆盖：clang-debug 构建、全部测试
 （单元 + 集成 + 端到端）、clang-format 检查，以及 `clang-asan`（ASan+UBSan）构建与测试门禁。
-校验失败即报错，exit code 约定见 [AGENTS.md](../AGENTS.md)。
+错误码到退出码的映射见 `include/fqc/common/error.h`（`toExitCode`）。
 
 ### Sanitizer 环境限制
 

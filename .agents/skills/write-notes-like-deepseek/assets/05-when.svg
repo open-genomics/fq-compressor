@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 800" width="100%" height="100%">
+  <title>拿不准是不是非平凡时的补刀问句判定流程</title>
+  <defs>
+    <pattern id="light-grid" width="32" height="32" patternUnits="userSpaceOnUse">
+      <path d="M 32 0 L 0 0 0 32" fill="none" stroke="#e2e8f0" stroke-width="0.75"/>
+    </pattern>
+    <filter id="soft-shadow" x="-5%" y="-5%" width="110%" height="110%">
+      <feDropShadow dx="0" dy="6" stdDeviation="10" flood-color="#0f172a" flood-opacity="0.06"/>
+    </filter>
+    <marker id="arrow-gray" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8"/>
+    </marker>
+  </defs>
+
+  <style>
+    text {
+      font-family: -apple-system, 'PingFang SC', 'Noto Sans SC', 'Segoe UI', 'Microsoft YaHei', sans-serif;
+    }
+    .code { font-family: 'JetBrains Mono', monospace; }
+  </style>
+
+  <!-- Background -->
+  <rect width="100%" height="100%" fill="#f8fafc"/>
+  <rect width="100%" height="100%" fill="url(#light-grid)"/>
+
+  <!-- HEADER -->
+  <g transform="translate(80, 12)">
+    <text x="0" y="82" fill="#0f172a" font-size="40" font-weight="800">拿不准是不是非平凡？多问这一句</text>
+    <text x="0" y="120" fill="#64748b" font-size="18">左边的天天在发生，右边的一旦丢了就找不回来</text>
+  </g>
+
+  <!-- FOLLOW-UP CAPSULE -->
+  <rect x="640" y="152" width="120" height="34" rx="17" fill="#e0f2fe" stroke="#0284c7" stroke-width="1.2"/>
+  <text x="700" y="175" fill="#0369a1" font-size="14" font-weight="800" text-anchor="middle" letter-spacing="0.5">补刀问句</text>
+
+  <!-- DIAMOND -->
+  <path d="M 700 195 L 985 330 L 700 465 L 415 330 Z" fill="#ffffff" stroke="#0284c7" stroke-width="2.5" filter="url(#soft-shadow)"/>
+  <text x="700" y="305" fill="#0f172a" font-size="18" font-weight="700" text-anchor="middle">光看代码和单测，</text>
+  <text x="700" y="335" fill="#0f172a" font-size="18" font-weight="700" text-anchor="middle">后来接手的人推导得出</text>
+  <text x="700" y="365" fill="#0f172a" font-size="18" font-weight="700" text-anchor="middle">为什么这样定吗？</text>
+
+  <!-- LEFT BRANCH · 推导得出 -->
+  <rect x="388" y="252" width="108" height="34" rx="17" fill="#fef2f2" stroke="#fecaca" stroke-width="1.2"/>
+  <text x="442" y="275" fill="#dc2626" font-size="14" font-weight="800" text-anchor="middle">推导得出</text>
+  <line x1="424" y1="330" x2="396" y2="330" stroke="#94a3b8" stroke-width="2.5" marker-end="url(#arrow-gray)"/>
+
+  <!-- RIGHT BRANCH · 推导不出 -->
+  <rect x="904" y="252" width="108" height="34" rx="17" fill="#f0fdf4" stroke="#a7f3d0" stroke-width="1.2"/>
+  <text x="958" y="275" fill="#059669" font-size="14" font-weight="800" text-anchor="middle">推导不出</text>
+  <line x1="976" y1="330" x2="1004" y2="330" stroke="#94a3b8" stroke-width="2.5" marker-end="url(#arrow-gray)"/>
+
+  <!-- LEFT CARD · 多半是平凡改动 -->
+  <g transform="translate(56, 174)">
+    <rect x="0" y="0" width="340" height="312" rx="16" fill="#ffffff" stroke="#fecaca" stroke-width="1.8" filter="url(#soft-shadow)"/>
+    <text x="28" y="78" fill="#0f172a" font-size="22" font-weight="800">多半是平凡改动，<tspan fill="#dc2626">别记</tspan></text>
+    <text x="28" y="116" fill="#64748b" font-size="15">这种改动随手就能改对，写了反而是噪音。</text>
+    <rect x="24" y="146" width="292" height="42" rx="10" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.2"/>
+    <text x="32" y="173" fill="#64748b" font-size="15">改样式</text>
+    <rect x="24" y="198" width="292" height="42" rx="10" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.2"/>
+    <text x="32" y="225" fill="#64748b" font-size="15">普通增删改查</text>
+    <rect x="24" y="250" width="292" height="42" rx="10" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.2"/>
+    <text x="32" y="277" fill="#64748b" font-size="15">打版本号、依赖小补丁</text>
+  </g>
+  <text x="226" y="524" fill="#94a3b8" font-size="14" text-anchor="middle">这类改动占了日常大头</text>
+
+  <!-- RIGHT CARD · 非平凡，记 -->
+  <g transform="translate(1004, 255)">
+    <rect x="0" y="0" width="340" height="230" rx="16" fill="#ffffff" stroke="#a7f3d0" stroke-width="1.8" filter="url(#soft-shadow)"/>
+    <text x="28" y="70" fill="#059669" font-size="24" font-weight="800">非平凡，记</text>
+    <text x="28" y="110" fill="#64748b" font-size="15">理由会随人走丢，笔记就是那条线。</text>
+  </g>
+
+  <!-- BOTTOM LINE -->
+  <text x="700" y="630" fill="#64748b" font-size="15" text-anchor="middle">不确定的时候，先翻翻 <tspan class="code" fill="#0369a1" font-weight="700">rejected/</tspan> 和老笔记，大概率答案已经写过了。</text>
+</svg>

@@ -1,0 +1,166 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 800" width="100%" height="100%">
+  <title>为什么不要总索引:INDEX.md 是多分支下的冲突源,文件夹位置即状态</title>
+  <defs>
+    <pattern id="light-grid" width="32" height="32" patternUnits="userSpaceOnUse">
+      <path d="M 32 0 L 0 0 0 32" fill="none" stroke="#e2e8f0" stroke-width="0.75"/>
+    </pattern>
+    <filter id="card-shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="6" stdDeviation="10" flood-color="#0f172a" flood-opacity="0.06"/>
+    </filter>
+    <filter id="panel-shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#0f172a" flood-opacity="0.06"/>
+    </filter>
+    <marker id="arr-red" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M0 0 L8 4 L0 8 z" fill="#dc2626"/>
+    </marker>
+  </defs>
+
+  <style>
+    text {
+      font-family: -apple-system, 'PingFang SC', 'Noto Sans SC', 'Segoe UI', 'Microsoft YaHei', sans-serif;
+    }
+    .code { font-family: 'JetBrains Mono', monospace; }
+  </style>
+
+  <!-- Background -->
+  <rect width="100%" height="100%" fill="#f8fafc"/>
+  <rect width="100%" height="100%" fill="url(#light-grid)"/>
+
+  <!-- HEADER -->
+  <g transform="translate(80, 36)">
+    <text x="0" y="40" fill="#0f172a" font-size="40" font-weight="800">总索引是最抢手的冲突源，所以干脆不要它</text>
+    <text x="0" y="74" fill="#64748b" font-size="17">左边是设一个总索引的代价，右边是这套工具的做法</text>
+  </g>
+
+  <!-- LEFT CARD: 如果有一个 INDEX.md -->
+  <g transform="translate(80, 168)">
+    <rect x="0" y="0" width="600" height="548" rx="16" fill="#ffffff" stroke="#fecdd3" stroke-width="1.8" filter="url(#card-shadow)"/>
+    <path d="M 0 16 Q 0 0 16 0 L 584 0 Q 600 0 600 16 L 600 64 L 0 64 Z" fill="#fff1f2"/>
+    <text x="24" y="41" fill="#0f172a" font-size="22" font-weight="800">如果有一个 INDEX.md</text>
+    <rect x="480" y="17" width="96" height="30" rx="15" fill="#ffffff" stroke="#dc2626" stroke-width="1.2"/>
+    <text x="528" y="37" fill="#dc2626" font-size="14" font-weight="800" text-anchor="middle">反面示范</text>
+
+    <!-- PR cards -->
+    <rect x="24" y="88" width="252" height="80" rx="10" fill="#ffffff" stroke="#bae6fd" stroke-width="1.5"/>
+    <text x="40" y="120" fill="#0f172a" font-size="16" font-weight="800">分支 A 的 PR</text>
+    <text x="40" y="146" fill="#64748b" font-size="14">这条分支改了 3 篇笔记</text>
+    <rect x="24" y="188" width="252" height="80" rx="10" fill="#ffffff" stroke="#bae6fd" stroke-width="1.5"/>
+    <text x="40" y="220" fill="#0f172a" font-size="16" font-weight="800">分支 B 的 PR</text>
+    <text x="40" y="246" fill="#64748b" font-size="14">这条分支改了 2 篇笔记</text>
+
+    <!-- converge to one file -->
+    <path d="M 284 128 C 320 128 322 176 360 176" fill="none" stroke="#dc2626" stroke-width="2.2" marker-end="url(#arr-red)"/>
+    <path d="M 284 228 C 320 228 322 176 360 176" fill="none" stroke="#dc2626" stroke-width="2.2" marker-end="url(#arr-red)"/>
+    <rect x="368" y="136" width="208" height="80" rx="10" fill="#fff1f2" stroke="#dc2626" stroke-width="1.8"/>
+    <g transform="translate(384, 150)">
+      <path d="M0 0 h12 l6 6 v19 h-18 z" fill="#ffffff" stroke="#dc2626" stroke-width="1.5" stroke-linejoin="round"/>
+      <path d="M12 0 v6 h6" fill="none" stroke="#dc2626" stroke-width="1.5" stroke-linejoin="round"/>
+    </g>
+    <text x="410" y="172" class="code" font-size="17" font-weight="700" fill="#b91c1c">INDEX.md</text>
+    <text x="410" y="196" fill="#64748b" font-size="14">唯一的总索引，人人要改</text>
+
+    <!-- conflict -->
+    <text x="24" y="312" fill="#b91c1c" font-size="15" font-weight="800">两个分支都改了它，Git 只能把冲突标出来</text>
+    <rect x="24" y="324" width="552" height="156" rx="10" fill="#fff1f2" stroke="#fecdd3" stroke-width="1.2"/>
+    <text x="44" y="356" class="code" font-size="15.5" font-weight="700" fill="#dc2626">&lt;&lt;&lt;&lt;&lt;&lt;&lt; HEAD</text>
+    <text x="44" y="386" class="code" font-size="15" fill="#334155">    本月新增笔记：3 篇</text>
+    <text x="44" y="416" class="code" font-size="15.5" font-weight="700" fill="#dc2626">=======</text>
+    <text x="44" y="446" class="code" font-size="15" fill="#334155">    本月新增笔记：5 篇</text>
+    <text x="44" y="476" class="code" font-size="15.5" font-weight="700" fill="#dc2626">&gt;&gt;&gt;&gt;&gt;&gt;&gt; feature-b</text>
+
+    <!-- conclusion -->
+    <circle cx="42" cy="516" r="15" fill="#dc2626"/>
+    <text x="42" y="522" fill="#ffffff" font-size="14" font-weight="800" text-anchor="middle">✕</text>
+    <text x="72" y="524" fill="#dc2626" font-size="22" font-weight="800">每篇笔记的改动，都要抢这一个文件</text>
+  </g>
+
+  <!-- RIGHT CARD: 靠文件夹位置认状态 -->
+  <g transform="translate(720, 168)">
+    <rect x="0" y="0" width="600" height="548" rx="16" fill="#ffffff" stroke="#a7f3d0" stroke-width="1.8" filter="url(#card-shadow)"/>
+    <path d="M 0 16 Q 0 0 16 0 L 584 0 Q 600 0 600 16 L 600 64 L 0 64 Z" fill="#f0fdf4"/>
+    <text x="24" y="41" fill="#0f172a" font-size="22" font-weight="800">靠文件夹位置认状态</text>
+    <rect x="436" y="17" width="140" height="30" rx="15" fill="#ffffff" stroke="#059669" stroke-width="1.2"/>
+    <text x="506" y="37" fill="#047857" font-size="14" font-weight="800" text-anchor="middle">这套工具的做法</text>
+
+    <!-- tree root -->
+    <g transform="translate(24, 86)">
+      <path d="M1 4 Q1 1.5 3.5 1.5 h4.5 l2 2.5 h8.5 q2 0 2 2 v5.5 q0 2 -2 2 h-15 q-2 0 -2 -2 z" fill="#ffffff" stroke="#475569" stroke-width="1.5" stroke-linejoin="round"/>
+    </g>
+    <text x="60" y="110" class="code" font-size="18" font-weight="700" fill="#0f172a">.agents/notes/</text>
+    <path d="M 35 118 L 35 436" fill="none" stroke="#cbd5e1" stroke-width="1.5"/>
+    <path d="M 35 148 L 58 148 M 35 244 L 58 244 M 35 340 L 58 340 M 35 436 L 58 436" fill="none" stroke="#cbd5e1" stroke-width="1.5"/>
+
+    <!-- proposed -->
+    <g transform="translate(60, 131)">
+      <path d="M1 4 Q1 1.5 3.5 1.5 h4.5 l2 2.5 h8.5 q2 0 2 2 v5.5 q0 2 -2 2 h-15 q-2 0 -2 -2 z" fill="#fffbeb" stroke="#d97706" stroke-width="1.5" stroke-linejoin="round"/>
+    </g>
+    <text x="94" y="148" class="code" font-size="16" font-weight="700" fill="#b45309">proposed/</text>
+    <text x="240" y="148" fill="#94a3b8" font-size="14">待评审</text>
+    <g transform="translate(98, 173)">
+      <path d="M0 0 h7 l3.5 3.5 v11.5 h-10.5 z" fill="#ffffff" stroke="#d97706" stroke-width="1.3" stroke-linejoin="round"/>
+    </g>
+    <text x="120" y="184" class="code" font-size="15" fill="#334155">2026-09-08-split-sync-engine.md</text>
+    <g transform="translate(98, 205)">
+      <path d="M0 0 h7 l3.5 3.5 v11.5 h-10.5 z" fill="#ffffff" stroke="#d97706" stroke-width="1.3" stroke-linejoin="round"/>
+    </g>
+    <text x="120" y="216" class="code" font-size="15" fill="#334155">2026-09-05-note-backlinks.md</text>
+
+    <!-- implemented -->
+    <g transform="translate(60, 227)">
+      <path d="M1 4 Q1 1.5 3.5 1.5 h4.5 l2 2.5 h8.5 q2 0 2 2 v5.5 q0 2 -2 2 h-15 q-2 0 -2 -2 z" fill="#f0fdf4" stroke="#059669" stroke-width="1.5" stroke-linejoin="round"/>
+    </g>
+    <text x="94" y="244" class="code" font-size="16" font-weight="700" fill="#047857">implemented/</text>
+    <text x="240" y="244" fill="#94a3b8" font-size="14">已落地</text>
+    <g transform="translate(98, 269)">
+      <path d="M0 0 h7 l3.5 3.5 v11.5 h-10.5 z" fill="#ffffff" stroke="#059669" stroke-width="1.3" stroke-linejoin="round"/>
+    </g>
+    <text x="120" y="280" class="code" font-size="15" fill="#334155">2026-08-23-why-sqlite.md</text>
+    <g transform="translate(98, 301)">
+      <path d="M0 0 h7 l3.5 3.5 v11.5 h-10.5 z" fill="#ffffff" stroke="#059669" stroke-width="1.3" stroke-linejoin="round"/>
+    </g>
+    <text x="120" y="312" class="code" font-size="15" fill="#334155">2026-08-30-no-global-state.md</text>
+
+    <!-- rejected -->
+    <g transform="translate(60, 323)">
+      <path d="M1 4 Q1 1.5 3.5 1.5 h4.5 l2 2.5 h8.5 q2 0 2 2 v5.5 q0 2 -2 2 h-15 q-2 0 -2 -2 z" fill="#fff1f2" stroke="#dc2626" stroke-width="1.5" stroke-linejoin="round"/>
+    </g>
+    <text x="94" y="340" class="code" font-size="16" font-weight="700" fill="#b91c1c">rejected/</text>
+    <text x="240" y="340" fill="#94a3b8" font-size="14">已否决</text>
+    <g transform="translate(98, 365)">
+      <path d="M0 0 h7 l3.5 3.5 v11.5 h-10.5 z" fill="#ffffff" stroke="#dc2626" stroke-width="1.3" stroke-linejoin="round"/>
+    </g>
+    <text x="120" y="376" class="code" font-size="15" fill="#334155">2026-08-18-merge-into-index.md</text>
+    <g transform="translate(98, 397)">
+      <path d="M0 0 h7 l3.5 3.5 v11.5 h-10.5 z" fill="#ffffff" stroke="#dc2626" stroke-width="1.3" stroke-linejoin="round"/>
+    </g>
+    <text x="120" y="408" class="code" font-size="15" fill="#334155">2026-08-12-auto-summary.md</text>
+
+    <!-- archived -->
+    <g transform="translate(60, 419)">
+      <path d="M1 4 Q1 1.5 3.5 1.5 h4.5 l2 2.5 h8.5 q2 0 2 2 v5.5 q0 2 -2 2 h-15 q-2 0 -2 -2 z" fill="#f1f5f9" stroke="#64748b" stroke-width="1.5" stroke-linejoin="round"/>
+    </g>
+    <text x="94" y="436" class="code" font-size="16" font-weight="700" fill="#475569">archived/</text>
+    <text x="240" y="436" fill="#94a3b8" font-size="14">已封存</text>
+    <g transform="translate(98, 461)">
+      <path d="M0 0 h7 l3.5 3.5 v11.5 h-10.5 z" fill="#ffffff" stroke="#64748b" stroke-width="1.3" stroke-linejoin="round"/>
+    </g>
+    <text x="120" y="472" class="code" font-size="15" fill="#334155">2026-07-20-v1-folder-plan.md</text>
+    <g transform="translate(98, 493)">
+      <path d="M0 0 h7 l3.5 3.5 v11.5 h-10.5 z" fill="#ffffff" stroke="#64748b" stroke-width="1.3" stroke-linejoin="round"/>
+    </g>
+    <text x="120" y="504" class="code" font-size="15" fill="#334155">2026-06-28-weekly-digest.md</text>
+
+    <!-- conclusion -->
+    <circle cx="42" cy="524" r="15" fill="#059669"/>
+    <text x="42" y="530" fill="#ffffff" font-size="14" font-weight="800" text-anchor="middle">✓</text>
+    <text x="72" y="532" fill="#047857" font-size="22" font-weight="800">想看什么，看它在哪个文件夹</text>
+  </g>
+
+  <!-- BOTTOM NOTE -->
+  <g transform="translate(80, 736)">
+    <rect x="0" y="0" width="1240" height="52" rx="12" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5" filter="url(#panel-shadow)"/>
+    <circle cx="34" cy="26" r="14" fill="#f1f5f9" stroke="#94a3b8" stroke-width="1.2"/>
+    <text x="34" y="32" fill="#64748b" font-size="14" font-weight="800" text-anchor="middle">i</text>
+    <text x="64" y="32" fill="#475569" font-size="16" font-weight="600">一个人写代码、不开分支？这条无所谓，放着就行。</text>
+  </g>
+</svg>

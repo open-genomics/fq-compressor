@@ -105,13 +105,11 @@ encoder 状态帧内局部，worker 间无需共享可变状态。profile 采样
 `ArchiveReader::readFrame` 保留为组合 API（readRawFrame + decodeRawFrame + 顺序累积），行为
 不变。
 
-在 8 核 x86_64 WSL2 主机上，阶段 H 后 64 MiB 随机短读压缩约 149 MiB/s（相对顺序解析 +47.7%）；
-长读解析占比小，并行解析收益落在噪声内。WSL2 状态波动极大（同代码同配置两次跑吞吐可差
-20-85%），数字仅供粗略参考。并行化沿瓶颈逐步推进：阶段 D 并行了 encoder，阶段 F 把 zstd
-下沉到 encoder worker（writer 退化为纯 I/O），阶段 H 对未压缩普通文件做数据并行解析。
-gzip/stdin/双端仍走单 reader。任何进一步并行都以阶段 E 的分段计时为据；在尚未证实某段
-成为瓶颈的前提下引入 TBB DAG 或线程池，只会把 v2 已经干掉的重复状态、输出排序和在途
-内存风险重新请回来。真实语料数字见 `docs/real-corpus.md`。
+在 8 核 x86_64 WSL2 主机上，64 MiB 随机短读压缩约 149 MiB/s（相对顺序解析 +47.7%）；
+长读解析占比小，并行收益落在噪声内。WSL2 吞吐波动 ±20-85%，数字仅供粗略参考——
+性能台账见 `docs/benchmarks.md`，真实语料见 `docs/real-corpus.md`，并行化逐阶段史
+见 `docs/roadmap.md`。不引重并行框架（TBB/线程池/异步 I/O）的取舍见
+`docs/decisions/0001-no-heavy-parallel-framework.md`。
 
 帧边界天然独立，是多帧并行编码的切分点。编解码器状态保持帧内局部或 worker 内局部。
 每条队列的模板 `Capacity` 含一个区分空/满的保留槽位，可用容量为 `Capacity - 1`。

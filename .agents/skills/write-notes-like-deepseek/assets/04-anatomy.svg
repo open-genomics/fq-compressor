@@ -1,0 +1,110 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 1040" width="100%" height="100%">
+  <title>一篇 Agent Note 的解剖：Problem / Decision / Alternatives / Consequences 四节结构</title>
+  <defs>
+    <pattern id="light-grid" width="32" height="32" patternUnits="userSpaceOnUse">
+      <path d="M 32 0 L 0 0 0 32" fill="none" stroke="#e2e8f0" stroke-width="0.75"/>
+    </pattern>
+    <filter id="soft-shadow" x="-5%" y="-5%" width="110%" height="110%">
+      <feDropShadow dx="0" dy="6" stdDeviation="10" flood-color="#0f172a" flood-opacity="0.06"/>
+    </filter>
+  </defs>
+
+  <style>
+    text {
+      font-family: -apple-system, 'PingFang SC', 'Noto Sans SC', 'Segoe UI', 'Microsoft YaHei', sans-serif;
+    }
+    .code { font-family: 'JetBrains Mono', monospace; }
+  </style>
+
+  <!-- Background -->
+  <rect width="100%" height="100%" fill="#f8fafc"/>
+  <rect width="100%" height="100%" fill="url(#light-grid)"/>
+
+  <!-- HEADER -->
+  <g transform="translate(80, 8)">
+    <text x="0" y="82" fill="#0f172a" font-size="40" font-weight="800">一篇笔记长什么样：四个格子，各管一件事</text>
+    <text x="0" y="120" fill="#64748b" font-size="18">每个 ## 小节只答一个问题；被放弃的方案也留档，写清它强在哪、为何被否</text>
+  </g>
+
+  <!-- NOTE WINDOW -->
+  <g transform="translate(240, 180)">
+    <rect x="0" y="0" width="920" height="772" rx="14" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.5" filter="url(#soft-shadow)"/>
+    <path d="M 0 14 Q 0 0 14 0 L 906 0 Q 920 0 920 14 L 920 56 L 0 56 Z" fill="#f1f5f9"/>
+    <circle cx="76" cy="28" r="7.5" fill="#ff5f57"/>
+    <circle cx="100" cy="28" r="7.5" fill="#febc2e"/>
+    <circle cx="124" cy="28" r="7.5" fill="#28c840"/>
+    <rect x="170" y="11" width="580" height="34" rx="9" fill="#ffffff" stroke="#e2e8f0" stroke-width="1"/>
+    <text x="460" y="35" fill="#334155" font-size="11.5" class="code" text-anchor="middle">implemented/process/2026-07-26-dependencies-over-hand-rolling.md</text>
+    <line x1="0" y1="56" x2="920" y2="56" stroke="#e2e8f0" stroke-width="1"/>
+
+    <!-- H1 -->
+    <text x="44" y="102" fill="#0f172a" font-size="20" font-weight="800"># Agent Note: 优先选用持续维护的依赖，而非手写实现</text>
+    <text x="44" y="136" fill="#64748b" font-size="15" class="code">Status: implemented</text>
+
+    <!-- ## Problem -->
+    <text x="44" y="190" fill="#0284c7" font-size="18" font-weight="700" class="code">## Problem</text>
+    <text x="44" y="220" fill="#334155" font-size="16">没写下依赖政策，agent 自己推断出「不要加依赖」，手写解析器越积越多。</text>
+
+    <!-- ## Decision -->
+    <text x="44" y="264" fill="#059669" font-size="18" font-weight="700" class="code">## Decision</text>
+    <rect x="44" y="280" width="832" height="52" rx="12" fill="#f0fdf4" stroke="#a7f3d0" stroke-width="1.5"/>
+    <text x="66" y="313" fill="#065f46" font-size="16" font-weight="700">用维护良好的包替换手写实现。门槛：净删除、健康、契合、不重开已定案 seam</text>
+
+    <!-- ## Alternatives considered -->
+    <text x="44" y="370" fill="#dc2626" font-size="18" font-weight="700" class="code">## Alternatives considered</text>
+    <text x="352" y="371" fill="#64748b" font-size="13.5">三条全被否，但每条的理由都留底</text>
+
+    <!-- alternative 1 -->
+    <rect x="44" y="384" width="832" height="92" rx="12" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.2"/>
+    <text x="64" y="414" fill="#0f172a" font-size="17" font-weight="800">1. 维持隐性的「不加新依赖」文化</text>
+    <text x="64" y="442" fill="#059669" font-size="15" font-weight="700">✓ 最强的理由：零风险，依赖清单继续短</text>
+    <text x="64" y="466" fill="#b91c1c" font-size="15" font-weight="700">✗ 为何被否：从来不是记录过的决策；手写代码在重复生态已修过的边界</text>
+
+    <!-- alternative 2 -->
+    <rect x="44" y="481" width="832" height="92" rx="12" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.2"/>
+    <text x="64" y="511" fill="#0f172a" font-size="17" font-weight="800">2. 搞一份获批包白名单</text>
+    <text x="64" y="539" fill="#059669" font-size="15" font-weight="700">✓ 最强的理由：看起来可控</text>
+    <text x="64" y="563" fill="#b91c1c" font-size="15" font-weight="700">✗ 为何被否：白名单本身也要养；按 PR 设门槛就够</text>
+
+    <!-- alternative 3 -->
+    <rect x="44" y="578" width="832" height="92" rx="12" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.2"/>
+    <text x="64" y="608" fill="#0f172a" font-size="17" font-weight="800">3. 每个新依赖都 vendor 进源码</text>
+    <text x="64" y="636" fill="#059669" font-size="15" font-weight="700">✓ 最强的理由：能打补丁、能锁死上游</text>
+    <text x="64" y="660" fill="#b91c1c" font-size="15" font-weight="700">✗ 为何被否：把本要卸下的维护负担再背回来</text>
+
+    <!-- ## Consequences -->
+    <text x="44" y="700" fill="#d97706" font-size="18" font-weight="700" class="code">## Consequences</text>
+    <text x="44" y="730" fill="#059669" font-size="16" font-weight="700">✓ 收益：「用包 Y 换手写 X」算正规简化</text>
+    <text x="44" y="758" fill="#d97706" font-size="16" font-weight="700">✗ 代价：依赖清单会涨，供应链接触面变大</text>
+  </g>
+
+  <!-- CALLOUT · alternatives -->
+  <g>
+    <path d="M 150 252 L 150 506 L 222 506" fill="none" stroke="#94a3b8" stroke-width="1.8" stroke-dasharray="5 5"/>
+    <circle cx="250" cy="506" r="26" fill="none" stroke="#0284c7" stroke-width="3"/>
+    <line x1="271" y1="527" x2="284" y2="540" stroke="#0284c7" stroke-width="4" stroke-linecap="round"/>
+    <rect x="64" y="164" width="236" height="84" rx="12" fill="#ffffff" stroke="#bae6fd" stroke-width="1.5" filter="url(#soft-shadow)"/>
+    <circle cx="92" cy="206" r="12" fill="none" stroke="#0284c7" stroke-width="3"/>
+    <line x1="100" y1="214" x2="110" y2="224" stroke="#0284c7" stroke-width="3.5" stroke-linecap="round"/>
+    <text x="124" y="200" fill="#0f172a" font-size="15" font-weight="700">被放弃的方案，</text>
+    <text x="124" y="224" fill="#0f172a" font-size="15" font-weight="700">先写它最强的理由</text>
+  </g>
+
+  <!-- CALLOUT · consequences -->
+  <g>
+    <path d="M 1218 252 L 1218 862 L 284 862" fill="none" stroke="#94a3b8" stroke-width="1.8" stroke-dasharray="5 5"/>
+    <circle cx="250" cy="862" r="30" fill="none" stroke="#0284c7" stroke-width="3"/>
+    <line x1="271" y1="883" x2="284" y2="896" stroke="#0284c7" stroke-width="4" stroke-linecap="round"/>
+    <rect x="1100" y="164" width="264" height="84" rx="12" fill="#ffffff" stroke="#bae6fd" stroke-width="1.5" filter="url(#soft-shadow)"/>
+    <circle cx="1128" cy="206" r="12" fill="none" stroke="#0284c7" stroke-width="3"/>
+    <line x1="1136" y1="214" x2="1146" y2="224" stroke="#0284c7" stroke-width="3.5" stroke-linecap="round"/>
+    <text x="1160" y="200" fill="#0f172a" font-size="15" font-weight="700">收益和代价都要写，</text>
+    <text x="1160" y="224" fill="#0f172a" font-size="15" font-weight="700">没有代价的决定是挑选过的</text>
+  </g>
+
+  <!-- BOTTOM STRIP -->
+  <g transform="translate(80, 960)">
+    <rect x="0" y="0" width="1240" height="64" rx="12" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5" filter="url(#soft-shadow)"/>
+    <text x="620" y="41" fill="#0f172a" font-size="18" font-weight="700" text-anchor="middle">只写已经发生的事：implemented 里留<tspan fill="#d97706" font-weight="800"> ## Proposal / ## 计划 </tspan>这类标题，校验会拦</text>
+  </g>
+</svg>

@@ -45,17 +45,13 @@ cd fq-compressor && ./scripts/build.sh clang-release
 ## 快速开始
 
 ```bash
-git clone https://github.com/open-genomics/fq-compressor.git
-cd fq-compressor && ./scripts/build.sh clang-release
-fqc=./build/clang-release/src/fqc
-
-$fqc compress   -i reads.fastq.gz -o reads.fqc     # 压缩
-$fqc decompress -i reads.fqc        -o out.fastq   # 解压
-$fqc verify     reads.fqc                          # 完整解码校验，不写 FASTQ
-$fqc compress   -i R1.fastq.gz -2 R2.fastq.gz -o paired.fqc   # 双端
+fqc compress   -i reads.fastq.gz -o reads.fqc     # 压缩
+fqc decompress -i reads.fqc        -o out.fastq   # 解压
+fqc verify     reads.fqc                          # 完整解码校验，不写 FASTQ
+fqc compress   -i R1.fastq.gz -2 R2.fastq.gz -o paired.fqc   # 双端
 ```
 
-完整参数 `$fqc --help`；工具链要求与质量门禁见 [docs/building.md](docs/building.md)。
+源码构建的二进制在 `build/clang-release/src/fqc`；完整参数 `fqc --help`。
 
 > 若同时安装了 [fq-compressor-rust](https://github.com/open-genomics/fq-compressor-rust) 的 `fqc`，
 > 两个同名二进制会互相覆盖，`PATH` 中靠前者生效；用 `which fqc` 确认实际调用的实现。
@@ -83,13 +79,11 @@ FASTQ 记录的信息字段——ID、序列、质量值——按**列式分离*
 解压: reader 读帧+内存预检 →[MPMC]→ decoder×N (zstd+校验和+解码, 乱序) →[MPMC]→ reorder 保序 → 滚动校验和 → 写出
 ```
 
-* **内存有界** — 默认 16 GiB 预算、最低 64 MiB。压缩三道防线（采样上限、帧累积目标、
-  编码前保守峰值预检）；解压侧同样聚合校验，不会 OOM。
+* **内存有界** — 默认 16 GiB 预算、最低 64 MiB；压缩/解压各有保守峰值预检，不会 OOM。
 * **故障边界清晰** — 截断、未知格式/版本、校验和不匹配、内存超限一律 fail closed；
   覆盖已有输出需 `--force`。
-* **管道友好** — 支持 stdin/stdout；普通文件先写临时文件，成功后原子替换。
-* **单引擎复用** — `verify` 走与 `decompress` 完全相同的解码校验路径，只换空 sink
-  （因此是完整解码，不是常数时间元数据检查）。
+* **管道友好** — stdin/stdout 直通；普通文件先写临时文件，成功后原子替换。
+* **单引擎复用** — `verify` 与 `decompress` 走同一解码校验路径（完整解码，非元数据检查）。
 
 模块划分、内存模型、归档字节布局、并行化收束过程：见 [ARCHITECTURE.md](ARCHITECTURE.md)。
 
@@ -117,8 +111,6 @@ FASTQ 记录的信息字段——ID、序列、质量值——按**列式分离*
 ## 已知限制
 
 * 不支持随机访问、按区间提取、有损压缩、原始顺序重排；仅支持 FASTQ。
-* 合成数据不能代表真实压缩比：短读质量集中时更高，长读质量近满字母表时可以更低
-  （实测见 [docs/real-corpus.md](docs/real-corpus.md)）。
 
 ## 文档
 
@@ -127,9 +119,12 @@ FASTQ 记录的信息字段——ID、序列、质量值——按**列式分离*
 | 构建、工具链、质量与 CI | [docs/building.md](docs/building.md) |
 | 压缩算法与原理 | [ALGORITHM.md](ALGORITHM.md) |
 | 架构与字节布局 | [ARCHITECTURE.md](ARCHITECTURE.md) |
+| 性能基准台账（合成数据） | [docs/benchmarks.md](docs/benchmarks.md) |
 | 真实语料验收 | [docs/real-corpus.md](docs/real-corpus.md) |
-| 并发路线图与开发历程 | [docs/roadmap.md](docs/roadmap.md) |
-| 决策记录（ADR） | [docs/decisions/](docs/decisions/README.md) |
+| 业界调研与差距分析 | [docs/fastq-compression-survey.md](docs/fastq-compression-survey.md) |
+| 路线图与开发历程 | [docs/roadmap.md](docs/roadmap.md) · [docs/development-journey.md](docs/development-journey.md) |
+| 问题复盘 | [docs/postmortems/](docs/postmortems/README.md) |
+| 决策记录 | [docs/decisions/](docs/decisions/README.md)（ADR）· `.agents/notes/`（改动级笔记） |
 | 贡献指南 | [CONTRIBUTING.md](CONTRIBUTING.md) |
 | 安全漏洞上报 | [SECURITY.md](SECURITY.md) |
 | 变更记录 | [CHANGELOG.md](CHANGELOG.md) |

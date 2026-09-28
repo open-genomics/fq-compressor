@@ -21,17 +21,7 @@ compressed_stream 多格式过度承诺、并发同步缺注释、采样/读取�
 
 ## 路线图 A -> H
 
-| 阶段 | 知识点 | commit |
-|---|---|---|
-| A | condition_variable + mutex 阻塞同步替 yield | 94a16d4 |
-| B | jthread + stop_token 协作式取消 | bafcd79 |
-| C | 3-stage 流水线，encode 与 zstd/IO 分离 | 965c084 |
-| D | 多帧并行编码 + reorder buffer | abca33e |
-| E | relaxed 计数器 + 分段计时 + A/B benchmark | 8af51ed |
-| F | zstd 下沉到 encoder worker | 3629f6d |
-| I | 质量流 per-stream zstd level（未过门槛） | 87562df |
-| G | 解压流水线 + RecordSink | 6fae4a5 |
-| H | 未压缩文件并行解析 + ChunkOrderer | a50c0ce |
+阶段明细与逐阶段验证数据见 `docs/roadmap.md`；此处只留每步的叙事。
 
 ### A：阻塞同步（CV + mutex）
 

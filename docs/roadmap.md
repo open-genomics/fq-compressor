@@ -11,16 +11,8 @@ fq-compressor 并发流水线练手路线。定位：业余练手 C++ 并发流�
 
 ## 当前基线
 
-阶段 H 后（commit a50c0ce）。并发课程 A–H 已收束。
-
-```text
-压缩（未压缩普通文件）:
-  parser×K 字节块切分 + 边界对齐 --[MPMC 深度4]-->
-  encoder×4 (2bit打包+measure+校验和+zstd×3) --[MPMC 深度4]-->
-  writer (ChunkOrderer 按 (chunk,local) 保序 -> 帧头拼装+写盘)
-压缩（gzip / stdin / 双端）: 单 reader 顺序解析，encoder/writer 同上
-解压: reader(readRawFrame) --[MPMC]--> decoder×N --[MPMC]--> writer(reorder + 滚动校验和 + RecordSink)
-```
+阶段 H 后（commit a50c0ce）。并发课程 A–H 已收束；终态流水线形态见
+[ARCHITECTURE.md](../ARCHITECTURE.md)「数据流 / 执行架构」。
 
 `jthread`+`stop_token` 协作取消；MPMC 为 mutex+CV 有界环形缓冲（带 relaxed 计数器，阶段 E）。
 帧在进入第一条队列前取得 in-flight credit（并行 parser 按 chunk 保留专属 credit），writer 有序
@@ -86,9 +78,9 @@ E 的 A/B 同窗口平台为据。
 ### F. zstd 下沉到 encoder worker ★★★
 
 - 状态：完成（commit 3629f6d）
-- 动机：阶段 D 复盘确认 writer（单线程 zstd+IO）是两瓶颈之一；E 的分段计时给出量化占比。zstd 帧间独立天然可并行（每帧×每流独立 `ZSTD_compress`，`archive.cpp:337-347`）；下沉后 writer 退化为 reorder+写盘。
+- 动机：阶段 D 复盘确认 writer（单线程 zstd+IO）是两瓶颈之一；E 的分段计时给出量化占比。zstd 帧间独立天然可并行（每帧×每流独立 `ZSTD_compress`，`archive.cpp` `compressFrame`）；下沉后 writer 退化为 reorder+写盘。
 - 练手点：**工作粒度再平衡**——把 CPU 密集工作从串行段迁入已有 worker 池后的背压再分析；**确定性验证方法论**（见验证）。
-- 做法：`compress()` 提出匿名命名空间（或新 `compressFrame` free 函数）；`EncodedFrame`（`archive.h:73-80`）改携压缩后流（或新 `CompressedFrame`），queue2 载荷从 raw 变 compressed；writer 只做 reorder + 帧头拼装 + 写盘。内存口径：worker 侧 `ZSTD_compressBound` scratch ×N 计入预检；in-flight credit 覆盖 queue、worker 和 reorder 等待区，单帧峰值不变，maxRSS 预期不升（queue2 载荷变小）。
+- 做法：`compress()` 提出匿名命名空间（或新 `compressFrame` free 函数）；`EncodedFrame`（`archive.h`）改携压缩后流（或新 `CompressedFrame`），queue2 载荷从 raw 变 compressed；writer 只做 reorder + 帧头拼装 + 写盘。内存口径：worker 侧 `ZSTD_compressBound` scratch ×N 计入预检；in-flight credit 覆盖 queue、worker 和 reorder 等待区，单帧峰值不变，maxRSS 预期不升（queue2 载荷变小）。
 - 验证（实测）：**归档逐字节一致 ✓**——基线（a02f694）与本提交同输入 .fqc cmp 零差异（illumina/ont × 16GiB/64MiB 两档内存限制，四组全等）。writer 段趋近纯 IO ✓——zstd+io 从 wall ~20% 降为 write ~4.6%。tsan 9/9 ✓。A/B 同窗口 delta 在噪声内（压缩 +1.5%/-2.5%）——无确定性提速，符合预期：64MiB 仅 ~2 帧，4 worker 只有 2 个有活干，架构收益是 writer 不再随帧尺寸线性增长（大输入/多帧场景受益）。
 - 陷阱复盘：①"预检乘 N"证实**不需要**——`estimateCompressionPeak` 每帧已含 raw+bound，N worker 并发 bound scratch 由 in-flight credit 窗口和源端局部帧共同约束；实测 maxRSS +10-18%（~216MiB，远低于 16GiB 预算），系 bound scratch 从 writer×1 变 worker×N 的预期代价。②zstd 失败复用 encoderError + request_stop ✓。③逐字节门禁一次通过，未出现可归因差异。
 - 注意：codec ID 不变（zstd 帧自描述，解压与 level 无关），格式零破坏 ✓。
@@ -96,8 +88,8 @@ E 的 A/B 同窗口平台为据。
 ### I（可选番外）. 轻量压缩比：per-stream zstd level ★★
 
 - 状态：完成（commit 87562df）
-- 动机：调研报告 §6 差距①（质量流零变换，见 `docs/fastq-compression-survey.md`）+ ALGORITHM.md:172；紧随 F——zstd 调用点刚动过，E 平台立即可判门槛。
-- 练手点：无新并发知识——定位为**准入门槛制度练手**（CODEC_GATES 理念轻量复活，见 v1 复盘 :50 与 ARCHITECTURE.md:61-62）。
+- 动机：调研报告 §6 差距①（质量流零变换，见 `docs/fastq-compression-survey.md`）+ ALGORITHM.md#端到端压缩比分析；紧随 F——zstd 调用点刚动过，E 平台立即可判门槛。
+- 练手点：无新并发知识——定位为**准入门槛制度练手**（CODEC_GATES 理念轻量复活，见 docs/postmortems/2026-07-13-legacy-architecture-debt.md#后续与教训 与 ARCHITECTURE.md#Profile）。
 - 做法：质量流 zstd level 独立参数（扫描 3-7），ID/序列保持 1；`ArchiveOptions` 加字段；codec ID 不变、解码零改动、格式零破坏。门槛建议：压缩吞吐回退 ≤10% 且 ratio 改善 ≥3% 才合入默认值，否则只留为 CLI 选项。
 - 门槛结果：**无档位过门槛，默认保持 level 1**——准入制度按设计发挥了"阻止未经度量合入"的作用。拟真质量（Q38-41 集中）L7/L9 体积 -3.3%/-4.0% 但吞吐 -43%/-53%，L19 体积 -10.6% 但吞吐 -97%；11 符号随机质量 L3-L9 体积反而 +3-7%。`--quality-level`（1-19）仅作 CLI 实验入口。完整曲线见调研报告 §6.4（两份文档联动 ✓）。
 - 验证（实测）：默认 level=1 与阶段F基线归档逐字节一致（cmp 零差异）；level 3-19 round-trip cmp 与 verify 全通过；单测证明高层级只影响质量流载荷（ID/序列载荷跨层级逐字节一致）；clang-debug/tsan 9/9。
@@ -106,7 +98,7 @@ E 的 A/B 同窗口平台为据。
 ### G. 解压路径流水线化 + 泛型 stage 抽取 ★★★
 
 - 状态：完成（commit 6fae4a5）
-- 动机：解压纯顺序（`archive_engine.cpp:353-367`），98-122 MiB/s；帧解码（zstd 解压+decode）与 FASTQ 写出零重叠。reviews F-7 当年判"不做"理由是"吞吐非瓶颈"——在 E 有数据后重审。
+- 动机：解压纯顺序（`archive_engine.cpp` `ArchiveEngine::decompress`），98-122 MiB/s；帧解码（zstd 解压+decode）与 FASTQ 写出零重叠。reviews F-7 当年判"不做"理由是"吞吐非瓶颈"——在 E 有数据后重审。
 - 练手点：**抽象时机**——MPMC+ReorderBuffer 第二次出现、"pop-process-push 循环"第 4-6 次手写，满足设计原则 4"第三个重复模式再抽泛型"；泛型 stage 的最小接口设计（In/Out/Handler + close/stop 语义），不造 pipeline 框架。
 - 做法：`ArchiveReader::readFrame` 拆为"读帧头+载荷+预检"（reader 线程）与"zstd 解压+逻辑校验和+decodeRawStreams"（N decoder worker，乱序完成）；writer 线程 reorder 按帧 id 有序提交 → **滚动校验和 + writeFastqRecord**。`verify` 命令复用同一流水线（writer 换空 handler）——泛型 stage 的第一个复用者。落地形态：泛型面 = `RecordSink`（`std::function<VoidResult(vector<ReadRecord>)>`，逐帧按序、失败级联取消）；worker 循环保持手写。
 - 验证（实测）：新旧二进制解压同一归档**输出逐字节一致** ✓（滚动校验和尾值一致的最强形式）；round-trip cmp（16GiB/64MiB 两档）✓；archive_test 全部原样通过（readFrame 组合 API 行为不变）✓；tsan 10/10 ✓；A/B 解压 +4.2%/+2.0%（噪声内，64MiB 仅 ~2 帧）；解压 maxRSS +21-42%（~134MiB，在途多帧的预期代价）。
@@ -148,7 +140,7 @@ A -> B -> C -> D（已完成，同步底座与多级流水线）-> E -> F -> I -
 - **过早泛型 pipeline 框架**：预先造必返工。
 - **自研熵编码器（算术编码/range coder/手写 FSE）**：复杂度与验证成本超练手预算，熵编码交给 zstd（v1 SCM 已删，见 `docs/fastq-compression-survey.md` §7）。
 - **read 重排序 / 全局相似聚类（SPRING 路线）**：v1 坟场——重排序/编码器状态/内存核算耦合错位，内存上限无法强制执行（v1 复盘根因）。
-- **跨帧 zstd 字典**：破坏帧独立性——帧独立是阶段 D 并行编码的切分点（ARCHITECTURE.md:97）。
+- **跨帧 zstd 字典**：破坏帧独立性——帧独立是阶段 D 并行编码的切分点（ARCHITECTURE.md#执行架构）。
 - **有参压缩（参考基因组）**：项目定位外。
 - **gz 输入的 inflate/parse 分离并行**：除非阶段 E 数据证明 gz 路径 parse 占比超 inflate，否则不做（反投机）。
 

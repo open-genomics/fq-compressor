@@ -1,0 +1,139 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 824" width="100%" height="100%">
+  <title>落地光谱：目录结构不变，一个人 / git / 团队三档只叠加流程</title>
+  <defs>
+    <pattern id="light-grid" width="32" height="32" patternUnits="userSpaceOnUse">
+      <path d="M 32 0 L 0 0 0 32" fill="none" stroke="#e2e8f0" stroke-width="0.75"/>
+    </pattern>
+    <filter id="card-shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="6" stdDeviation="10" flood-color="#0f172a" flood-opacity="0.06"/>
+    </filter>
+    <filter id="panel-shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#0f172a" flood-opacity="0.06"/>
+    </filter>
+  </defs>
+
+  <style>
+    text {
+      font-family: -apple-system, 'PingFang SC', 'Noto Sans SC', 'Segoe UI', 'Microsoft YaHei', sans-serif;
+    }
+    .code { font-family: 'JetBrains Mono', monospace; }
+  </style>
+
+  <!-- Background -->
+  <rect width="100%" height="100%" fill="#f8fafc"/>
+  <rect width="100%" height="100%" fill="url(#light-grid)"/>
+
+  <!-- HEADER -->
+  <g transform="translate(80, 36)">
+    <text x="0" y="40" fill="#0f172a" font-size="40" font-weight="800">笔记目录人人相同，差别只在加流程</text>
+    <text x="0" y="74" fill="#64748b" font-size="17">档数越高，只多几样东西——已经有的全保留</text>
+  </g>
+
+  <!-- TIER 1: 一个人写 -->
+  <g transform="translate(80, 408)">
+    <rect x="0" y="0" width="380" height="340" rx="16" fill="#ffffff" stroke="#a7f3d0" stroke-width="1.8" filter="url(#card-shadow)"/>
+    <path d="M 0 16 Q 0 0 16 0 L 364 0 Q 380 0 380 16 L 380 60 L 0 60 Z" fill="#f0fdf4"/>
+    <rect x="20" y="15" width="84" height="30" rx="15" fill="#ffffff" stroke="#94a3b8" stroke-width="1.2"/>
+    <text x="62" y="35" fill="#64748b" font-size="14" font-weight="800" text-anchor="middle">第 1 档</text>
+    <text x="118" y="38" fill="#0f172a" font-size="21" font-weight="800">一个人写</text>
+
+    <text x="16" y="116" fill="#0f172a" font-size="16.5" font-weight="800">目录结构和团队一模一样：</text>
+    <text x="16" y="152" fill="#0f172a" font-size="16.5" font-weight="800">四个状态 × 六种分类，用到哪个建哪个</text>
+    <text x="16" y="194" class="code" font-size="12.5" fill="#475569">proposed/   implemented/   rejected/   archived/</text>
+
+    <rect x="16" y="252" width="348" height="68" rx="10" fill="#f1f5f9" stroke="#e2e8f0" stroke-width="1.2"/>
+    <text x="36" y="294" fill="#475569" font-size="16" font-weight="800">不用 git 也照常跑</text>
+    <circle cx="338" cy="286" r="12" fill="#059669"/>
+    <text x="338" y="291" fill="#ffffff" font-size="13" font-weight="800" text-anchor="middle">✓</text>
+  </g>
+
+  <!-- PLUS 1-2 -->
+  <g transform="translate(480, 500)">
+    <circle cx="0" cy="0" r="22" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5" filter="url(#card-shadow)"/>
+    <text x="0" y="8" fill="#64748b" font-size="22" font-weight="800" text-anchor="middle">+</text>
+  </g>
+
+  <!-- TIER 2: 一个人 + git -->
+  <g transform="translate(500, 288)">
+    <rect x="0" y="0" width="380" height="460" rx="16" fill="#ffffff" stroke="#a7f3d0" stroke-width="1.8" filter="url(#card-shadow)"/>
+    <path d="M 0 16 Q 0 0 16 0 L 364 0 Q 380 0 380 16 L 380 60 L 0 60 Z" fill="#f0fdf4"/>
+    <rect x="20" y="15" width="84" height="30" rx="15" fill="#ffffff" stroke="#059669" stroke-width="1.2"/>
+    <text x="62" y="35" fill="#047857" font-size="14" font-weight="800" text-anchor="middle">第 2 档</text>
+    <text x="118" y="38" fill="#0f172a" font-size="21" font-weight="800">一个人 + git</text>
+
+    <text x="16" y="112" fill="#0f172a" font-size="16.5" font-weight="800">加一条纪律：代码和笔记同一次提交</text>
+    <rect x="16" y="134" width="348" height="130" rx="10" fill="#f8fafc" stroke="#a7f3d0" stroke-width="1.2"/>
+    <text x="34" y="162" class="code" font-size="13" fill="#334155">commit 8f3a2c1</text>
+    <text x="34" y="188" class="code" font-size="13" fill="#64748b">  src/sync/store.ts                | 40 ++</text>
+    <text x="34" y="210" class="code" font-size="13" fill="#047857">  .agents/notes/.../why-sqlite.md  | 12 ++</text>
+    <text x="34" y="232" class="code" font-size="13" fill="#047857">  .agents/notes/.../no-global.md   |  8 +</text>
+
+    <text x="16" y="300" fill="#047857" font-size="14.5" font-weight="700">代码一动，笔记必须跟着动，不许掉队</text>
+
+    <rect x="16" y="326" width="348" height="68" rx="10" fill="#f0fdf4" stroke="#a7f3d0" stroke-width="1.2"/>
+    <text x="36" y="368" fill="#047857" font-size="16" font-weight="800">笔记永远不许掉队</text>
+    <circle cx="338" cy="360" r="12" fill="#059669"/>
+    <text x="338" y="365" fill="#ffffff" font-size="13" font-weight="800" text-anchor="middle">✓</text>
+
+    <text x="16" y="430" fill="#94a3b8" font-size="14">第 1 档的东西全保留，只多这条纪律</text>
+  </g>
+
+  <!-- PLUS 2-3 -->
+  <g transform="translate(900, 400)">
+    <circle cx="0" cy="0" r="22" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5" filter="url(#card-shadow)"/>
+    <text x="0" y="8" fill="#64748b" font-size="22" font-weight="800" text-anchor="middle">+</text>
+  </g>
+
+  <!-- TIER 3: 团队一起写 -->
+  <g transform="translate(920, 168)">
+    <rect x="0" y="0" width="380" height="580" rx="16" fill="#ffffff" stroke="#bae6fd" stroke-width="1.8" filter="url(#card-shadow)"/>
+    <path d="M 0 16 Q 0 0 16 0 L 364 0 Q 380 0 380 16 L 380 60 L 0 60 Z" fill="#f0f9ff"/>
+    <rect x="20" y="15" width="84" height="30" rx="15" fill="#ffffff" stroke="#0284c7" stroke-width="1.2"/>
+    <text x="62" y="35" fill="#0369a1" font-size="14" font-weight="800" text-anchor="middle">第 3 档</text>
+    <text x="118" y="38" fill="#0f172a" font-size="21" font-weight="800">团队一起写</text>
+
+    <text x="16" y="108" fill="#0f172a" font-size="17" font-weight="800">全套四个目录</text>
+    <text x="16" y="138" class="code" font-size="14" fill="#475569">proposed/      implemented/</text>
+    <text x="16" y="160" class="code" font-size="14" fill="#475569">rejected/      archived/</text>
+
+    <text x="16" y="200" fill="#0f172a" font-size="17" font-weight="800">六种分类，校验脚本只认这六种</text>
+    <rect x="16" y="220" width="170" height="32" rx="8" fill="#f0f9ff" stroke="#bae6fd" stroke-width="1.2"/>
+    <text x="101" y="241" class="code" font-size="13" fill="#0369a1" text-anchor="middle">feature</text>
+    <rect x="198" y="220" width="166" height="32" rx="8" fill="#f0f9ff" stroke="#bae6fd" stroke-width="1.2"/>
+    <text x="281" y="241" class="code" font-size="13" fill="#0369a1" text-anchor="middle">bug-fix</text>
+    <rect x="16" y="260" width="170" height="32" rx="8" fill="#f0f9ff" stroke="#bae6fd" stroke-width="1.2"/>
+    <text x="101" y="281" class="code" font-size="13" fill="#0369a1" text-anchor="middle">simplification</text>
+    <rect x="198" y="260" width="166" height="32" rx="8" fill="#f0f9ff" stroke="#bae6fd" stroke-width="1.2"/>
+    <text x="281" y="281" class="code" font-size="13" fill="#0369a1" text-anchor="middle">architecture</text>
+    <rect x="16" y="300" width="170" height="32" rx="8" fill="#f0f9ff" stroke="#bae6fd" stroke-width="1.2"/>
+    <text x="101" y="321" class="code" font-size="13" fill="#0369a1" text-anchor="middle">process</text>
+    <rect x="198" y="300" width="166" height="32" rx="8" fill="#f0f9ff" stroke="#bae6fd" stroke-width="1.2"/>
+    <text x="281" y="321" class="code" font-size="13" fill="#0369a1" text-anchor="middle">testing</text>
+
+    <rect x="16" y="352" width="348" height="1.5" fill="#e2e8f0"/>
+
+    <text x="16" y="386" fill="#0f172a" font-size="17" font-weight="800">PR 模板加一句</text>
+    <rect x="16" y="404" width="348" height="52" rx="10" fill="#f0f9ff" stroke="#bae6fd" stroke-width="1.2"/>
+    <text x="32" y="437" fill="#0369a1" font-size="15" font-weight="700">「重要改动必带一篇笔记」</text>
+
+    <text x="16" y="492" fill="#0f172a" font-size="17" font-weight="800">持续集成（CI）跑三条校验</text>
+    <rect x="16" y="510" width="156" height="34" rx="8" fill="#f0fdf4" stroke="#a7f3d0" stroke-width="1.2"/>
+    <text x="94" y="532" fill="#047857" font-size="13.5" font-weight="700" text-anchor="middle">目录 · 分类 · 链接 ✓</text>
+    <rect x="182" y="510" width="76" height="34" rx="8" fill="#f0fdf4" stroke="#a7f3d0" stroke-width="1.2"/>
+    <text x="220" y="532" fill="#047857" font-size="13.5" font-weight="700" text-anchor="middle">格式 ✓</text>
+    <rect x="268" y="510" width="96" height="34" rx="8" fill="#f0fdf4" stroke="#a7f3d0" stroke-width="1.2"/>
+    <text x="316" y="532" fill="#047857" font-size="13.5" font-weight="700" text-anchor="middle">归档封印 ✓</text>
+
+    <circle cx="38" cy="566" r="13" fill="#dc2626"/>
+    <text x="38" y="572" fill="#ffffff" font-size="13" font-weight="800" text-anchor="middle">✕</text>
+    <text x="62" y="573" fill="#dc2626" font-size="16" font-weight="800">任何一条红了，就不合入</text>
+  </g>
+
+  <!-- BOTTOM STRIP -->
+  <g transform="translate(80, 764)">
+    <rect x="0" y="0" width="1240" height="52" rx="12" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5" filter="url(#panel-shadow)"/>
+    <circle cx="34" cy="26" r="15" fill="#e0f2fe" stroke="#0284c7" stroke-width="1.5"/>
+    <text x="34" y="32" fill="#0369a1" font-size="17" font-weight="800" text-anchor="middle">+</text>
+    <text x="64" y="32" fill="#0f172a" font-size="17" font-weight="800">目录一层不变；往上加的是流程，不是结构。</text>
+  </g>
+</svg>

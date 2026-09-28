@@ -1,0 +1,146 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 780" width="100%" height="100%">
+  <title>当 AI 每天帮你交十几个 PR，代码库会怎样失控：三个失控现象</title>
+  <defs>
+    <pattern id="light-grid" width="32" height="32" patternUnits="userSpaceOnUse">
+      <path d="M 32 0 L 0 0 0 32" fill="none" stroke="#e2e8f0" stroke-width="0.75"/>
+    </pattern>
+    <filter id="soft-shadow" x="-5%" y="-5%" width="110%" height="110%">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#0f172a" flood-opacity="0.06"/>
+    </filter>
+    <marker id="ar" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+      <path d="M0 0 L8 4.5 L0 9 Z" fill="#dc2626"/>
+    </marker>
+  </defs>
+
+  <style>
+    text { font-family: -apple-system, 'PingFang SC', 'Noto Sans SC', 'Segoe UI', 'Microsoft YaHei', sans-serif; }
+    .code { font-family: 'JetBrains Mono', monospace; }
+  </style>
+
+  <!-- 背景 -->
+  <rect width="100%" height="100%" fill="#f8fafc"/>
+  <rect width="100%" height="100%" fill="url(#light-grid)"/>
+
+  <!-- 标题区 -->
+  <g transform="translate(60, 28)">
+    <text x="0" y="72" fill="#0f172a" font-size="40" font-weight="800">代码越写越快，结构烂得也越来越快</text>
+  </g>
+
+  <!-- ========== 列 1：新来的 AI，两眼一抹黑 ========== -->
+  <g transform="translate(60, 148)">
+    <rect x="0" y="0" width="400" height="500" rx="16" fill="#ffffff" stroke="#fecaca" stroke-width="1.8" filter="url(#soft-shadow)"/>
+    <circle cx="34" cy="34" r="16" fill="#dc2626"/>
+    <text x="34" y="40" fill="#ffffff" font-size="15" font-weight="800" text-anchor="middle">1</text>
+    <text x="60" y="44" fill="#0f172a" font-size="22" font-weight="800">新来的 AI，两眼一抹黑</text>
+
+    <!-- 场景插图 -->
+    <rect x="24" y="68" width="352" height="168" rx="12" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.2"/>
+    <g transform="translate(24, 68)">
+      <rect x="8" y="26" width="196" height="118" rx="10" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.4"/>
+      <circle cx="24" cy="44" r="3.5" fill="#cbd5e1"/>
+      <circle cx="37" cy="44" r="3.5" fill="#cbd5e1"/>
+      <circle cx="50" cy="44" r="3.5" fill="#cbd5e1"/>
+      <text x="62" y="48" fill="#64748b" font-size="15" class="code">新会话 · 第 1 天</text>
+      <rect x="22" y="62" width="150" height="8" rx="4" fill="#e2e8f0"/>
+      <rect x="22" y="82" width="110" height="8" rx="4" fill="#e2e8f0"/>
+      <rect x="22" y="102" width="130" height="8" rx="4" fill="#e2e8f0"/>
+      <circle cx="224" cy="34" r="16" fill="#e0f2fe" stroke="#0284c7" stroke-width="1.4"/>
+      <text x="224" y="39" fill="#0369a1" font-size="14" font-weight="800" text-anchor="middle">AI</text>
+      <rect x="212" y="64" width="124" height="30" rx="14" fill="#ffffff" stroke="#dc2626" stroke-width="1.4" stroke-dasharray="4 3"/>
+      <text x="274" y="83" fill="#b91c1c" font-size="15" font-weight="700" text-anchor="middle">为什么长这样？</text>
+      <circle cx="300" cy="118" r="18" fill="#fef2f2" stroke="#dc2626" stroke-width="1.6"/>
+      <text x="300" y="125" fill="#dc2626" font-size="20" font-weight="800" text-anchor="middle">?</text>
+    </g>
+
+    <!-- 解释 -->
+    <text x="24" y="272" fill="#475569" font-size="15">每个新会话都是一张白纸，</text>
+    <text x="24" y="298" fill="#475569" font-size="15">只看得见眼前的代码，</text>
+    <text x="24" y="324" fill="#475569" font-size="15">看不见当年为什么定成这样。</text>
+
+    <!-- 后果 -->
+    <rect x="24" y="384" width="352" height="72" rx="10" fill="#fef2f2" stroke="#fecaca" stroke-width="1.2"/>
+    <path d="M 48 402 L 64 402 L 56 422 Z" fill="#dc2626"/>
+    <text x="56" y="417" fill="#ffffff" font-size="14" font-weight="800" text-anchor="middle">!</text>
+    <text x="78" y="412" fill="#b91c1c" font-size="15" font-weight="700">后果：别扭的设计被当成</text>
+    <text x="78" y="438" fill="#b91c1c" font-size="15" font-weight="700">坏代码，顺手「优化」没了</text>
+  </g>
+
+  <!-- ========== 列 2：赶一个局部，坏一片全局 ========== -->
+  <g transform="translate(500, 148)">
+    <rect x="0" y="0" width="400" height="500" rx="16" fill="#ffffff" stroke="#fecaca" stroke-width="1.8" filter="url(#soft-shadow)"/>
+    <circle cx="34" cy="34" r="16" fill="#dc2626"/>
+    <text x="34" y="40" fill="#ffffff" font-size="15" font-weight="800" text-anchor="middle">2</text>
+    <text x="60" y="44" fill="#0f172a" font-size="22" font-weight="800">赶一个局部，坏一片全局</text>
+
+    <!-- 场景插图 -->
+    <rect x="24" y="68" width="352" height="168" rx="12" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.2"/>
+    <g transform="translate(24, 68)">
+      <rect x="8" y="16" width="210" height="30" rx="8" fill="#e0f2fe" stroke="#0284c7" stroke-width="1.4"/>
+      <text x="20" y="36" fill="#0369a1" font-size="14" font-weight="700">模块 A</text>
+      <rect x="8" y="58" width="210" height="30" rx="8" fill="#dcfce7" stroke="#059669" stroke-width="1.4"/>
+      <text x="20" y="78" fill="#047857" font-size="14" font-weight="700">模块 B</text>
+      <rect x="8" y="100" width="210" height="30" rx="8" fill="#fef3c7" stroke="#d97706" stroke-width="1.4"/>
+      <text x="20" y="120" fill="#b45309" font-size="14" font-weight="700">模块 C</text>
+      <path d="M 260 32 L 130 136" fill="none" stroke="#dc2626" stroke-width="2.5" stroke-dasharray="7 5" marker-end="url(#ar)"/>
+      <path d="M 268 116 L 284 116 L 276 136 Z" fill="#dc2626"/>
+      <text x="276" y="130" fill="#ffffff" font-size="14" font-weight="800" text-anchor="middle">!</text>
+      <text x="240" y="160" fill="#b91c1c" font-size="16" font-weight="700" text-anchor="middle">为抄近道，直穿三层</text>
+    </g>
+
+    <!-- 解释 -->
+    <text x="24" y="272" fill="#475569" font-size="15">为快速交付一个小需求，</text>
+    <text x="24" y="298" fill="#475569" font-size="15">跨层直接调用、绕过老协议、</text>
+    <text x="24" y="324" fill="#475569" font-size="15">引入互相冲突的依赖。</text>
+
+    <!-- 后果 -->
+    <rect x="24" y="384" width="352" height="72" rx="10" fill="#fef2f2" stroke="#fecaca" stroke-width="1.2"/>
+    <path d="M 48 402 L 64 402 L 56 422 Z" fill="#dc2626"/>
+    <text x="56" y="417" fill="#ffffff" font-size="14" font-weight="800" text-anchor="middle">!</text>
+    <text x="78" y="412" fill="#b91c1c" font-size="15" font-weight="700">后果：三天两头返工，</text>
+    <text x="78" y="438" fill="#b91c1c" font-size="15" font-weight="700">架构慢慢不成样子</text>
+  </g>
+
+  <!-- ========== 列 3：否决过的路，又走一遍 ========== -->
+  <g transform="translate(940, 148)">
+    <rect x="0" y="0" width="400" height="500" rx="16" fill="#ffffff" stroke="#fecaca" stroke-width="1.8" filter="url(#soft-shadow)"/>
+    <circle cx="34" cy="34" r="16" fill="#dc2626"/>
+    <text x="34" y="40" fill="#ffffff" font-size="15" font-weight="800" text-anchor="middle">3</text>
+    <text x="60" y="44" fill="#0f172a" font-size="22" font-weight="800">否决过的路，又走一遍</text>
+
+    <!-- 场景插图 -->
+    <rect x="24" y="68" width="352" height="168" rx="12" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.2"/>
+    <g transform="translate(24, 68)">
+      <text x="14" y="26" fill="#64748b" font-size="14">3 个月前的结论</text>
+      <rect x="14" y="38" width="130" height="118" rx="8" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.4"/>
+      <rect x="28" y="56" width="90" height="7" rx="3.5" fill="#e2e8f0"/>
+      <rect x="28" y="74" width="70" height="7" rx="3.5" fill="#e2e8f0"/>
+      <rect x="28" y="92" width="82" height="7" rx="3.5" fill="#e2e8f0"/>
+      <g transform="translate(79,116) rotate(-12)">
+        <rect x="-50" y="-15" width="100" height="30" rx="4" fill="#ffffff" stroke="#dc2626" stroke-width="2"/>
+        <text x="0" y="5" fill="#dc2626" font-size="16" font-weight="800" text-anchor="middle">已否决</text>
+      </g>
+      <path d="M 186 66 C 248 54 280 84 268 114 C 260 138 226 146 194 140" fill="none" stroke="#dc2626" stroke-width="2.2" marker-end="url(#ar)"/>
+      <text x="266" y="162" fill="#b91c1c" font-size="16" font-weight="700" text-anchor="middle">又提了一遍</text>
+    </g>
+
+    <!-- 解释 -->
+    <text x="24" y="272" fill="#475569" font-size="15">三个月前已证明会崩的方案，</text>
+    <text x="24" y="298" fill="#475569" font-size="15">被新会话兴致勃勃地</text>
+    <text x="24" y="324" fill="#475569" font-size="15">重新提了出来。</text>
+
+    <!-- 后果 -->
+    <rect x="24" y="384" width="352" height="72" rx="10" fill="#fef2f2" stroke="#fecaca" stroke-width="1.2"/>
+    <path d="M 48 402 L 64 402 L 56 422 Z" fill="#dc2626"/>
+    <text x="56" y="417" fill="#ffffff" font-size="14" font-weight="800" text-anchor="middle">!</text>
+    <text x="78" y="412" fill="#b91c1c" font-size="15" font-weight="700">后果：同一个坑，</text>
+    <text x="78" y="438" fill="#b91c1c" font-size="15" font-weight="700">踩第二遍</text>
+  </g>
+
+  <!-- ========== 底部转折 ========== -->
+  <g transform="translate(190, 684)">
+    <rect x="0" y="0" width="1020" height="60" rx="14" fill="#ffffff" stroke="#fecaca" stroke-width="1.6" filter="url(#soft-shadow)"/>
+    <circle cx="46" cy="30" r="16" fill="#fef2f2" stroke="#dc2626" stroke-width="1.5"/>
+    <text x="46" y="36" fill="#dc2626" font-size="18" font-weight="800" text-anchor="middle">?</text>
+    <text x="510" y="38" fill="#0f172a" font-size="21" font-weight="800" text-anchor="middle">根源：代码只说得出「是什么」，说不出「为什么」</text>
+  </g>
+</svg>

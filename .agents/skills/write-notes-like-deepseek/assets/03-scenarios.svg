@@ -1,0 +1,149 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 828" width="100%" height="100%">
+  <title>什么样的决定值得记:非平凡六触发、豁免清单与三个方向</title>
+  <defs>
+    <pattern id="light-grid" width="32" height="32" patternUnits="userSpaceOnUse">
+      <path d="M 32 0 L 0 0 0 32" fill="none" stroke="#e2e8f0" stroke-width="0.75"/>
+    </pattern>
+    <filter id="soft-shadow" x="-5%" y="-5%" width="110%" height="110%">
+      <feDropShadow dx="0" dy="6" stdDeviation="10" flood-color="#0f172a" flood-opacity="0.06"/>
+    </filter>
+  </defs>
+
+  <style>
+    text {
+      font-family: -apple-system, 'PingFang SC', 'Noto Sans SC', 'Segoe UI', 'Microsoft YaHei', sans-serif;
+    }
+    .code { font-family: 'JetBrains Mono', monospace; }
+  </style>
+
+  <!-- Background -->
+  <rect width="100%" height="100%" fill="#f8fafc"/>
+  <rect width="100%" height="100%" fill="url(#light-grid)"/>
+
+  <!-- HEADER -->
+  <g transform="translate(80, 12)">
+    <text x="0" y="82" fill="#0f172a" font-size="40" font-weight="800">判定只有一条：非平凡改动，必须留笔记</text>
+    <text x="0" y="120" fill="#64748b" font-size="18">对齐 DeepSeek Harness 的工程实践</text>
+  </g>
+
+  <!-- MAIN · lead-in -->
+  <text x="80" y="196" fill="#0f172a" font-size="20" font-weight="800">命中任何一项，就必须留笔记：</text>
+
+  <!-- ============ SIX NON-TRIVIAL ITEMS ============ -->
+  <!-- 1 行为 -->
+  <g transform="translate(80, 216)">
+    <rect x="0" y="0" width="190" height="272" rx="16" fill="#ffffff" stroke="#bae6fd" stroke-width="2" filter="url(#soft-shadow)"/>
+    <circle cx="30" cy="32" r="15" fill="#0284c7"/>
+    <text x="30" y="37" fill="#ffffff" font-size="15" font-weight="800" text-anchor="middle">1</text>
+    <text x="20" y="80" fill="#0f172a" font-size="20" font-weight="800">行为</text>
+    <text x="20" y="132" fill="#334155" font-size="15">用户看得见的功能、</text>
+    <text x="20" y="156" fill="#334155" font-size="15">顺序、默认值、报错</text>
+    <text x="20" y="180" fill="#334155" font-size="15">口径，动一个都算。</text>
+    <rect x="14" y="218" width="162" height="40" rx="10" fill="#f0fdf4" stroke="#bbf7d0" stroke-width="1.2"/>
+    <text x="95" y="244" fill="#059669" font-size="15" font-weight="700" text-anchor="middle">✓ 命中即写</text>
+  </g>
+
+  <!-- 2 架构 -->
+  <g transform="translate(290, 216)">
+    <rect x="0" y="0" width="190" height="272" rx="16" fill="#ffffff" stroke="#bae6fd" stroke-width="2" filter="url(#soft-shadow)"/>
+    <circle cx="30" cy="32" r="15" fill="#0284c7"/>
+    <text x="30" y="37" fill="#ffffff" font-size="15" font-weight="800" text-anchor="middle">2</text>
+    <text x="20" y="80" fill="#0f172a" font-size="20" font-weight="800">架构</text>
+    <text x="20" y="132" fill="#334155" font-size="15">模块怎么切、怎么</text>
+    <text x="20" y="156" fill="#334155" font-size="15">连、谁能调谁，想</text>
+    <text x="20" y="180" fill="#334155" font-size="15">错了方向，后面全</text>
+    <text x="20" y="204" fill="#334155" font-size="15">是返工。</text>
+    <rect x="14" y="218" width="162" height="40" rx="10" fill="#f0fdf4" stroke="#bbf7d0" stroke-width="1.2"/>
+    <text x="95" y="244" fill="#059669" font-size="15" font-weight="700" text-anchor="middle">✓ 命中即写</text>
+  </g>
+
+  <!-- 3 跨文件契约 -->
+  <g transform="translate(500, 216)">
+    <rect x="0" y="0" width="190" height="272" rx="16" fill="#ffffff" stroke="#bae6fd" stroke-width="2" filter="url(#soft-shadow)"/>
+    <circle cx="30" cy="32" r="15" fill="#0284c7"/>
+    <text x="30" y="37" fill="#ffffff" font-size="15" font-weight="800" text-anchor="middle">3</text>
+    <text x="20" y="80" fill="#0f172a" font-size="20" font-weight="800">跨文件契约</text>
+    <text x="20" y="132" fill="#334155" font-size="15">改一边就必须同步</text>
+    <text x="20" y="156" fill="#334155" font-size="15">改另一边的约定，</text>
+    <text x="20" y="180" fill="#334155" font-size="15">漏一处就坏。</text>
+    <rect x="14" y="218" width="162" height="40" rx="10" fill="#f0fdf4" stroke="#bbf7d0" stroke-width="1.2"/>
+    <text x="95" y="244" fill="#059669" font-size="15" font-weight="700" text-anchor="middle">✓ 命中即写</text>
+  </g>
+
+  <!-- 4 流程与工具链 -->
+  <g transform="translate(710, 216)">
+    <rect x="0" y="0" width="190" height="272" rx="16" fill="#ffffff" stroke="#bae6fd" stroke-width="2" filter="url(#soft-shadow)"/>
+    <circle cx="30" cy="32" r="15" fill="#0284c7"/>
+    <text x="30" y="37" fill="#ffffff" font-size="15" font-weight="800" text-anchor="middle">4</text>
+    <text x="20" y="80" fill="#0f172a" font-size="20" font-weight="800">流程与工具链</text>
+    <text x="20" y="132" fill="#334155" font-size="15">构建、发布、脚本</text>
+    <text x="20" y="156" fill="#334155" font-size="15">、环境变量，跑法</text>
+    <text x="20" y="180" fill="#334155" font-size="15">一变，换个机器就</text>
+    <text x="20" y="204" fill="#334155" font-size="15">露馅。</text>
+    <rect x="14" y="218" width="162" height="40" rx="10" fill="#f0fdf4" stroke="#bbf7d0" stroke-width="1.2"/>
+    <text x="95" y="244" fill="#059669" font-size="15" font-weight="700" text-anchor="middle">✓ 命中即写</text>
+  </g>
+
+  <!-- 5 测试策略 -->
+  <g transform="translate(920, 216)">
+    <rect x="0" y="0" width="190" height="272" rx="16" fill="#ffffff" stroke="#bae6fd" stroke-width="2" filter="url(#soft-shadow)"/>
+    <circle cx="30" cy="32" r="15" fill="#0284c7"/>
+    <text x="30" y="37" fill="#ffffff" font-size="15" font-weight="800" text-anchor="middle">5</text>
+    <text x="20" y="80" fill="#0f172a" font-size="20" font-weight="800">测试策略</text>
+    <text x="20" y="132" fill="#334155" font-size="15">什么必须测、什么</text>
+    <text x="20" y="156" fill="#334155" font-size="15">不测、为什么，漏</text>
+    <text x="20" y="180" fill="#334155" font-size="15">一个等于白测。</text>
+    <rect x="14" y="218" width="162" height="40" rx="10" fill="#f0fdf4" stroke="#bbf7d0" stroke-width="1.2"/>
+    <text x="95" y="244" fill="#059669" font-size="15" font-weight="700" text-anchor="middle">✓ 命中即写</text>
+  </g>
+
+  <!-- 6 落盘·网络·配置格式 -->
+  <g transform="translate(1130, 216)">
+    <rect x="0" y="0" width="190" height="272" rx="16" fill="#ffffff" stroke="#bae6fd" stroke-width="2" filter="url(#soft-shadow)"/>
+    <circle cx="30" cy="32" r="15" fill="#0284c7"/>
+    <text x="30" y="37" fill="#ffffff" font-size="15" font-weight="800" text-anchor="middle">6</text>
+    <text x="20" y="68" fill="#0f172a" font-size="20" font-weight="800">落盘 · 网络 ·</text>
+    <text x="20" y="92" fill="#0f172a" font-size="20" font-weight="800">配置格式</text>
+    <text x="20" y="132" fill="#334155" font-size="15">写进文件、发上网</text>
+    <text x="20" y="156" fill="#334155" font-size="15">络的格式和配置项，</text>
+    <text x="20" y="180" fill="#334155" font-size="15">改了就得安排迁移。</text>
+    <rect x="14" y="218" width="162" height="40" rx="10" fill="#f0fdf4" stroke="#bbf7d0" stroke-width="1.2"/>
+    <text x="95" y="244" fill="#059669" font-size="15" font-weight="700" text-anchor="middle">✓ 命中即写</text>
+  </g>
+
+  <!-- EXEMPTION STRIP -->
+  <g transform="translate(80, 512)">
+    <rect x="0" y="0" width="1240" height="64" rx="12" fill="#f1f5f9" stroke="#cbd5e1" stroke-width="1.5"/>
+    <text x="620" y="41" fill="#475569" font-size="16" font-weight="700" text-anchor="middle">纯机械局部改动直接交代码：<tspan font-weight="500">改样式 · 格式化 · 打标 · 不改行为的依赖补丁 · 常规 CRUD · 或日后会被重访的决定也算</tspan></text>
+  </g>
+
+  <!-- SUB · directions -->
+  <text x="80" y="624" fill="#0f172a" font-size="20" font-weight="800">写的时候，想清楚这笔决定守住哪个方向：</text>
+
+  <!-- 往前看 · 立新规 -->
+  <g transform="translate(80, 650)">
+    <rect x="0" y="0" width="400" height="150" rx="16" fill="#ffffff" stroke="#a7f3d0" stroke-width="2" filter="url(#soft-shadow)"/>
+    <text x="24" y="48" fill="#0f172a" font-size="22" font-weight="800">往前看 · 立新规</text>
+    <rect x="24" y="62" width="44" height="5" rx="2.5" fill="#059669"/>
+    <text x="24" y="102" fill="#334155" font-size="15">通信契约、状态流转、访问边界、不变量；</text>
+    <text x="24" y="127" fill="#334155" font-size="15">事故复盘补的规矩最硬。</text>
+  </g>
+
+  <!-- 往回看 · 记妥协 -->
+  <g transform="translate(500, 650)">
+    <rect x="0" y="0" width="400" height="150" rx="16" fill="#ffffff" stroke="#a7f3d0" stroke-width="2" filter="url(#soft-shadow)"/>
+    <text x="24" y="48" fill="#0f172a" font-size="22" font-weight="800">往回看 · 记妥协</text>
+    <rect x="24" y="62" width="44" height="5" rx="2.5" fill="#059669"/>
+    <text x="24" y="102" fill="#334155" font-size="15">为隐性约束放弃主流解法，</text>
+    <text x="24" y="127" fill="#334155" font-size="15">不记就被重走。</text>
+  </g>
+
+  <!-- 做减法 · 收窄 -->
+  <g transform="translate(920, 650)">
+    <rect x="0" y="0" width="400" height="150" rx="16" fill="#ffffff" stroke="#a7f3d0" stroke-width="2" filter="url(#soft-shadow)"/>
+    <text x="24" y="48" fill="#0f172a" font-size="22" font-weight="800">做减法 · 收窄</text>
+    <rect x="24" y="62" width="44" height="5" rx="2.5" fill="#059669"/>
+    <text x="24" y="102" fill="#334155" font-size="15">裁剪代码、砍 API，退出条件</text>
+    <text x="24" y="127" fill="#334155" font-size="15">和迁移边界。</text>
+  </g>
+</svg>

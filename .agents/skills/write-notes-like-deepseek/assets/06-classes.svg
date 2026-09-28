@@ -1,0 +1,137 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 824" width="100%" height="100%">
+  <title>六种笔记分类:feature / bug-fix / simplification / architecture / process / testing</title>
+  <defs>
+    <pattern id="light-grid" width="32" height="32" patternUnits="userSpaceOnUse">
+      <path d="M 32 0 L 0 0 0 32" fill="none" stroke="#e2e8f0" stroke-width="0.75"/>
+    </pattern>
+    <filter id="card-shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="6" stdDeviation="10" flood-color="#0f172a" flood-opacity="0.06"/>
+    </filter>
+    <filter id="panel-shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#0f172a" flood-opacity="0.06"/>
+    </filter>
+  </defs>
+
+  <style>
+    text {
+      font-family: -apple-system, 'PingFang SC', 'Noto Sans SC', 'Segoe UI', 'Microsoft YaHei', sans-serif;
+    }
+    .code { font-family: 'JetBrains Mono', monospace; }
+  </style>
+
+  <!-- Background -->
+  <rect width="100%" height="100%" fill="#f8fafc"/>
+  <rect width="100%" height="100%" fill="url(#light-grid)"/>
+
+  <!-- HEADER -->
+  <g transform="translate(80, 36)">
+    <text x="0" y="40" fill="#0f172a" font-size="40" font-weight="800">每种笔记一个格子，校验脚本会拦下第七种</text>
+    <text x="0" y="74" fill="#64748b" font-size="17">六种类别铺满所有值得记的决定；文件夹名字就是类别，脚本只认这六个——六种类别铺满每个 lifecycle,校验脚本只认这六个</text>
+  </g>
+
+  <!-- ROW 1 -->
+  <!-- 1. feature / 新能力 (blue) -->
+  <g transform="translate(80, 168)">
+    <rect x="0" y="0" width="400" height="280" rx="16" fill="#ffffff" stroke="#bae6fd" stroke-width="1.8" filter="url(#card-shadow)"/>
+    <path d="M 0 16 Q 0 0 16 0 L 384 0 Q 400 0 400 16 L 400 58 L 0 58 Z" fill="#f0f9ff"/>
+    <g transform="translate(20, 17)">
+      <path d="M1 4 Q1 1.5 3.5 1.5 h4.5 l2 2.5 h8.5 q2 0 2 2 v5.5 q0 2 -2 2 h-15 q-2 0 -2 -2 z" fill="#ffffff" stroke="#0284c7" stroke-width="1.5" stroke-linejoin="round"/>
+    </g>
+    <text x="52" y="36" class="code" font-size="13.5" font-weight="600" fill="#0369a1">.agents/notes/implemented/feature/</text>
+    <text x="20" y="104" fill="#0f172a" font-size="24" font-weight="800">新能力</text>
+    <text x="380" y="104" class="code" text-anchor="end" font-size="14" font-weight="700" fill="#0284c7">feature</text>
+    <text x="20" y="136" fill="#475569" font-size="15.5">用户或模型看得见的选择，以及为什么这么选</text>
+    <rect x="20" y="156" width="360" height="104" rx="10" fill="#f8fafc" stroke="#bae6fd" stroke-width="1.2"/>
+    <text x="36" y="188" font-size="14.5" font-weight="800" fill="#0284c7">微例子</text>
+    <text x="36" y="222" fill="#334155" font-size="15">为什么会话存储用 SQLite，而不是内存缓存</text>
+  </g>
+
+  <!-- 2. bug-fix / 修缺陷 (red) -->
+  <g transform="translate(500, 168)">
+    <rect x="0" y="0" width="400" height="280" rx="16" fill="#ffffff" stroke="#fecdd3" stroke-width="1.8" filter="url(#card-shadow)"/>
+    <path d="M 0 16 Q 0 0 16 0 L 384 0 Q 400 0 400 16 L 400 58 L 0 58 Z" fill="#fff1f2"/>
+    <g transform="translate(20, 17)">
+      <path d="M1 4 Q1 1.5 3.5 1.5 h4.5 l2 2.5 h8.5 q2 0 2 2 v5.5 q0 2 -2 2 h-15 q-2 0 -2 -2 z" fill="#ffffff" stroke="#dc2626" stroke-width="1.5" stroke-linejoin="round"/>
+    </g>
+    <text x="52" y="36" class="code" font-size="13.5" font-weight="600" fill="#b91c1c">.agents/notes/implemented/bug-fix/</text>
+    <text x="20" y="104" fill="#0f172a" font-size="24" font-weight="800">修缺陷</text>
+    <text x="380" y="104" class="code" text-anchor="end" font-size="14" font-weight="700" fill="#dc2626">bug-fix</text>
+    <text x="20" y="136" fill="#475569" font-size="15.5">修好了什么、事故补上了什么缺口</text>
+    <rect x="20" y="156" width="360" height="104" rx="10" fill="#f8fafc" stroke="#fecdd3" stroke-width="1.2"/>
+    <text x="36" y="188" font-size="14.5" font-weight="800" fill="#dc2626">微例子</text>
+    <text x="36" y="222" fill="#334155" font-size="15">一次并发锁死的完整复盘</text>
+  </g>
+
+  <!-- 3. simplification / 只删不增 (green) -->
+  <g transform="translate(920, 168)">
+    <rect x="0" y="0" width="400" height="280" rx="16" fill="#ffffff" stroke="#a7f3d0" stroke-width="1.8" filter="url(#card-shadow)"/>
+    <path d="M 0 16 Q 0 0 16 0 L 384 0 Q 400 0 400 16 L 400 58 L 0 58 Z" fill="#f0fdf4"/>
+    <g transform="translate(20, 17)">
+      <path d="M1 4 Q1 1.5 3.5 1.5 h4.5 l2 2.5 h8.5 q2 0 2 2 v5.5 q0 2 -2 2 h-15 q-2 0 -2 -2 z" fill="#ffffff" stroke="#059669" stroke-width="1.5" stroke-linejoin="round"/>
+    </g>
+    <text x="52" y="36" class="code" font-size="13.5" font-weight="600" fill="#047857">.agents/notes/implemented/simplification/</text>
+    <text x="20" y="104" fill="#0f172a" font-size="24" font-weight="800">只删不增</text>
+    <text x="380" y="104" class="code" text-anchor="end" font-size="14" font-weight="700" fill="#059669">simplification</text>
+    <text x="20" y="136" fill="#475569" font-size="15.5">只删代码、收敛暴露面，越删越清爽</text>
+    <rect x="20" y="156" width="360" height="104" rx="10" fill="#f8fafc" stroke="#a7f3d0" stroke-width="1.2"/>
+    <text x="36" y="188" font-size="14.5" font-weight="800" fill="#059669">微例子</text>
+    <text x="36" y="222" fill="#334155" font-size="15">删掉废弃的 presenter 层</text>
+  </g>
+
+  <!-- ROW 2 -->
+  <!-- 4. architecture / 定结构 (blue) -->
+  <g transform="translate(80, 466)">
+    <rect x="0" y="0" width="400" height="280" rx="16" fill="#ffffff" stroke="#bae6fd" stroke-width="1.8" filter="url(#card-shadow)"/>
+    <path d="M 0 16 Q 0 0 16 0 L 384 0 Q 400 0 400 16 L 400 58 L 0 58 Z" fill="#f0f9ff"/>
+    <g transform="translate(20, 17)">
+      <path d="M1 4 Q1 1.5 3.5 1.5 h4.5 l2 2.5 h8.5 q2 0 2 2 v5.5 q0 2 -2 2 h-15 q-2 0 -2 -2 z" fill="#ffffff" stroke="#0284c7" stroke-width="1.5" stroke-linejoin="round"/>
+    </g>
+    <text x="52" y="36" class="code" font-size="13.5" font-weight="600" fill="#0369a1">.agents/notes/implemented/architecture/</text>
+    <text x="20" y="104" fill="#0f172a" font-size="24" font-weight="800">定结构</text>
+    <text x="380" y="104" class="code" text-anchor="end" font-size="14" font-weight="700" fill="#0284c7">architecture</text>
+    <text x="20" y="136" fill="#475569" font-size="15.5">源码怎么组织、模块边界、包依赖</text>
+    <rect x="20" y="156" width="360" height="104" rx="10" fill="#f8fafc" stroke="#bae6fd" stroke-width="1.2"/>
+    <text x="36" y="188" font-size="14.5" font-weight="800" fill="#0284c7">微例子</text>
+    <text x="36" y="222" fill="#334155" font-size="15">跨插件必须走消息通道</text>
+  </g>
+
+  <!-- 5. process / 立流程 (amber) -->
+  <g transform="translate(500, 466)">
+    <rect x="0" y="0" width="400" height="280" rx="16" fill="#ffffff" stroke="#fde68a" stroke-width="1.8" filter="url(#card-shadow)"/>
+    <path d="M 0 16 Q 0 0 16 0 L 384 0 Q 400 0 400 16 L 400 58 L 0 58 Z" fill="#fffbeb"/>
+    <g transform="translate(20, 17)">
+      <path d="M1 4 Q1 1.5 3.5 1.5 h4.5 l2 2.5 h8.5 q2 0 2 2 v5.5 q0 2 -2 2 h-15 q-2 0 -2 -2 z" fill="#ffffff" stroke="#d97706" stroke-width="1.5" stroke-linejoin="round"/>
+    </g>
+    <text x="52" y="36" class="code" font-size="13.5" font-weight="600" fill="#b45309">.agents/notes/implemented/process/</text>
+    <text x="20" y="104" fill="#0f172a" font-size="24" font-weight="800">立流程</text>
+    <text x="380" y="104" class="code" text-anchor="end" font-size="14" font-weight="700" fill="#d97706">process</text>
+    <text x="20" y="136" fill="#475569" font-size="15.5">校验、发布、协作的规矩</text>
+    <rect x="20" y="156" width="360" height="104" rx="10" fill="#f8fafc" stroke="#fde68a" stroke-width="1.2"/>
+    <text x="36" y="188" font-size="14.5" font-weight="800" fill="#d97706">微例子</text>
+    <text x="36" y="222" fill="#334155" font-size="15">提交前必须跑哪个脚本</text>
+  </g>
+
+  <!-- 6. testing / 抓测试 (purple) -->
+  <g transform="translate(920, 466)">
+    <rect x="0" y="0" width="400" height="280" rx="16" fill="#ffffff" stroke="#ddd6fe" stroke-width="1.8" filter="url(#card-shadow)"/>
+    <path d="M 0 16 Q 0 0 16 0 L 384 0 Q 400 0 400 16 L 400 58 L 0 58 Z" fill="#faf5ff"/>
+    <g transform="translate(20, 17)">
+      <path d="M1 4 Q1 1.5 3.5 1.5 h4.5 l2 2.5 h8.5 q2 0 2 2 v5.5 q0 2 -2 2 h-15 q-2 0 -2 -2 z" fill="#ffffff" stroke="#7c3aed" stroke-width="1.5" stroke-linejoin="round"/>
+    </g>
+    <text x="52" y="36" class="code" font-size="13.5" font-weight="600" fill="#6d28d9">.agents/notes/implemented/testing/</text>
+    <text x="20" y="104" fill="#0f172a" font-size="24" font-weight="800">抓测试</text>
+    <text x="380" y="104" class="code" text-anchor="end" font-size="14" font-weight="700" fill="#7c3aed">testing</text>
+    <text x="20" y="136" fill="#475569" font-size="15.5">测试基建和验收策略</text>
+    <rect x="20" y="156" width="360" height="104" rx="10" fill="#f8fafc" stroke="#ddd6fe" stroke-width="1.2"/>
+    <text x="36" y="188" font-size="14.5" font-weight="800" fill="#7c3aed">微例子</text>
+    <text x="36" y="222" fill="#334155" font-size="15">性能门槛设多少、怎么量</text>
+  </g>
+
+  <!-- BOTTOM STRIP -->
+  <g transform="translate(80, 762)">
+    <rect x="0" y="0" width="1240" height="52" rx="12" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5" filter="url(#panel-shadow)"/>
+    <circle cx="34" cy="26" r="15" fill="#e0f2fe" stroke="#0284c7" stroke-width="1.5"/>
+    <text x="34" y="32" fill="#0369a1" font-size="16" font-weight="800" text-anchor="middle">!</text>
+    <text x="64" y="32" fill="#0f172a" font-size="17" font-weight="800">想新增类别？先改校验脚本——这六个格子之外，没有第七种。</text>
+  </g>
+</svg>

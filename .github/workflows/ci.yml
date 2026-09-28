@@ -152,3 +152,22 @@ jobs:
             fi
           done < <(find src -name '*.cpp' | sort)
           exit $failed
+
+  notes:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # verify-archived 的 append-only 封印对照需要基线 ref
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Verify agent notes
+        env:
+          # 对照变更前的 commit：PR 用 base.sha，push 用 event.before；
+          # 新分支 push 时 before=0000…，脚本自动降级为哈希自校验
+          AGENT_NOTE_ARCHIVE_BASE_REF: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: ./scripts/notes.sh verify

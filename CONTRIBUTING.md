@@ -8,14 +8,12 @@
 ## 快速开始
 
 ```bash
-git clone https://github.com/open-genomics/fq-compressor.git
-cd fq-compressor
 ./scripts/build.sh clang-debug      # 构建
-./scripts/test.sh clang-debug       # 运行全部测试
+./scripts/test.sh clang-debug       # 测试
 ./scripts/lint.sh format-check      # 格式检查
 ```
 
-工具链要求与质量门禁详见 [docs/building.md](docs/building.md)。
+工具链要求、preset 列表与质量门禁见 [docs/building.md](docs/building.md)。
 
 ## 提交前检查清单
 
@@ -26,6 +24,7 @@ cd fq-compressor
 | 并发/线程相关 | 追加 `./scripts/test.sh clang-tsan`（无数据竞争） |
 | 格式/归档布局改动 | 必须通过 openspec 变更流程并更新冻结 fixture（见下） |
 | 用户可见改动 | 更新 [CHANGELOG.md](CHANGELOG.md)（新增/修复/变更段） |
+| 非平凡改动（判定见 [AGENTS.md](AGENTS.md)「决策笔记」） | 附 `.agents/notes/` 笔记并通过 `./scripts/notes.sh verify` |
 
 ## 提交信息规范
 
@@ -34,21 +33,15 @@ cd fq-compressor
   `docs: 更新 XX`、`test: 增加 XX 单测`、`ci: 调整 XX 工作流`、`chore(openspec): 归档 XX`。
 - 一个提交只做一件事；关联 openspec 变更时在提交信息中注明变更 ID。
 
-## 注释与文档语言策略
+## 注释与文档语言
 
-- **公开头文件 API 注释用英文**（`include/fqc/**` 下的 Doxygen 风格 `///` 文档），
-  面向所有读者；描述接口契约、不变量与线程安全语义。
-- **实现内注释用中文**（`.cpp` 内的行内/块注释），解释"为什么"与取舍，而非复述代码。
-- 文档（README、docs/、CHANGELOG、openspec）用中文。
-- 新代码遵循上述策略；不要顺手翻写既有注释（避免无价值 diff）。
+约定见 [AGENTS.md](AGENTS.md)「注释与文档语言」：公开头文件 API 注释用英文，
+实现内注释与文档用中文；不顺手翻写既有注释。
 
 ## 代码风格
 
-- C++23，clang + libc++，4 空格缩进，100 列限制。命名、错误处理、日志约定见
-  [AGENTS.md](AGENTS.md)「代码风格」节。
-- 库代码（`src/`、`include/fqc/`）**不用异常**，错误经 `Result<T>`
-  （`std::expected<T, Error>` 别名）传播。
-- 静态分析：`clang-tidy`（`.clang-tidy` 配置，CI 门禁，`WarningsAsErrors`）不得有告警。
+约定见 [AGENTS.md](AGENTS.md)「代码风格」。补充：`clang-tidy`（`.clang-tidy` 配置，
+`WarningsAsErrors`）是 CI 门禁，任何告警即失败。
 
 ## 格式兼容性（重要）
 

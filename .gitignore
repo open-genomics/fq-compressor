@@ -169,3 +169,6 @@ ref-projects/*
 
 # Superpowers 规划文档（本地开发规划，不提交）
 docs/superpowers/plans/
+
+# scripts/notes.sh board 生成的本地看板
+/board.html
