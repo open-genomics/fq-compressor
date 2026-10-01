@@ -16,6 +16,7 @@
 |---|---|---|
 | `archive-format` | `openspec/specs/archive-format/` | Sequential v2 binary layout, header/frame/footer, checksums |
 | `format-governance` | `openspec/specs/format-governance/` | Same-name `.fqc` format family coexistence documentation contract |
+| `ci-quality` | `openspec/specs/ci-quality/` | CI quality gates: sanitizers, TSan, fuzz, release build, static analysis, notes |
 
 ## External boundaries
 

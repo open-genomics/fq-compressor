@@ -64,11 +64,14 @@
 
 1. 从 `master` 切出功能分支；本地通过全部检查清单。
 2. 提 PR 时填写 [PR 模板](.github/PULL_REQUEST_TEMPLATE.md)。
-3. 改动会触发 CI：build-and-test（clang-debug）、sanitizer（ASan+UBSan）、coverage、
-   clang-tidy、format-check 全部绿才可合入。
+3. 改动会触发 CI：build-and-test（clang-debug + format-check）、sanitizer（ASan+UBSan）、
+   thread-sanitizer（TSan，并发相关）、release-build（Release/IPO 配置）、fuzz（libFuzzer 短跑）、
+   coverage、clang-tidy、notes（决策笔记校验）全部绿才可合入。
 4. 合入方式由维护者决定（通常 squash merge）。
 
 ## 发布
 
 版本号语义化（`VERSION` 文件）；发布时维护者把 CHANGELOG「未发布」段固化为版本段、
 打 `vX.Y.Z` tag，由 `release.yml` 自动构建并附二进制到 GitHub Release。
+发布自检：**tag 名 == `VERSION` 文件内容 == CHANGELOG 新增版本节**，三者一致才打 tag
+（`fqc --version` 读自 `VERSION`，漂移会让用户与 SECURITY.md 支持表失配）。

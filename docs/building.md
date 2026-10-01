@@ -32,8 +32,10 @@ cd fq-compressor
 
 ## 质量与 CI
 
-CI（`.github/workflows/ci.yml`，ubuntu-24.04 + clang-18）覆盖：clang-debug 构建、全部测试
-（单元 + 集成 + 端到端）、clang-format 检查，以及 `clang-asan`（ASan+UBSan）构建与测试门禁。
+CI（`.github/workflows/ci.yml`，ubuntu-24.04 + clang-18）覆盖：clang-debug 构建与全部测试
+（单元 + 集成 + 端到端）、clang-format 检查、`clang-asan`（ASan+UBSan）、`clang-tsan`
+（TSan）、`clang-release-portable`（Release/IPO 配置编译 + 测试）、libFuzzer 短跑
+（parser + archive reader）、coverage、clang-tidy 与决策笔记（notes）门禁。
 错误码到退出码的映射见 `include/fqc/common/error.h`（`toExitCode`）。
 
 ### Sanitizer 环境限制
@@ -42,6 +44,10 @@ CI（`.github/workflows/ci.yml`，ubuntu-24.04 + clang-18）覆盖：clang-debug
   （泄漏检测保留为发布机检查项）。
 - ASan 下系统 libc++18 未插桩，异常对象释放会触发 alloc-dealloc-mismatch 误报，
   CI 以 `alloc_dealloc_mismatch=0` 关闭该子检查（其余 ASan/UBSan 检查保持）。
+- TSan 在 Ubuntu 24.04 runner 上需把 `vm.mmap_rnd_bits` 降到 28 才可用
+  （CI job 内已处理）。
+- libFuzzer 运行时按 libstdc++ 构建，与 libc++ 不兼容：fuzz 构建整体走 libstdc++
+  工具链（`clang-fuzz` 预设继承 `base` 而非 `clang-base`）。
 - ASan preset 的 GTest 需与项目同工具链从源码构建（CI 用 `--build=gtest*`），避免预编译包
   混链在 gtest 静态注册阶段触发 libc++ 容器注解误报（heap-buffer-overflow）。
 

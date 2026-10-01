@@ -68,6 +68,11 @@ FASTQ 记录的信息字段——ID、序列、质量值——按**列式分离*
   footer 滚动累积（发现丢帧/重排/篡改）。完整性检测，非密码学认证。
 * **varint 编码** — 所有长度、计数、位置增量用 LEB128。
 
+**无损边界**：字节级无损（`cmp` 逐字节一致）仅对 **LF-only 规范 FASTQ** 成立；CRLF
+输入会被静默规范化为 LF（行尾 `\r` 不参与往返），字段内容恰以单个 `\r` 结尾的 LF-only
+文件同理——该 `\r` 与 CRLF 行尾在字节流上不可区分。超长单行（> 64 MiB）与结构畸形的
+记录（缺 `+` 行、sequence/quality 长度不一致等）会以格式错误拒绝而非静默篡改。
+
 每步在压什么、端到端压缩比拆解、设计取舍：见 [ALGORITHM.md](ALGORITHM.md)。
 
 ## 高性能架构
@@ -125,6 +130,7 @@ FASTQ 记录的信息字段——ID、序列、质量值——按**列式分离*
 | 路线图与开发历程 | [docs/roadmap.md](docs/roadmap.md) · [docs/development-journey.md](docs/development-journey.md) |
 | 问题复盘 | [docs/postmortems/](docs/postmortems/README.md) |
 | 决策记录 | [docs/decisions/](docs/decisions/README.md)（ADR）· `.agents/notes/`（改动级笔记） |
+| 架构评审快照 | [docs/reviews/2026-07-24-architecture-review.md](docs/reviews/2026-07-24-architecture-review.md) |
 | 贡献指南 | [CONTRIBUTING.md](CONTRIBUTING.md) |
 | 安全漏洞上报 | [SECURITY.md](SECURITY.md) |
 | 变更记录 | [CHANGELOG.md](CHANGELOG.md) |

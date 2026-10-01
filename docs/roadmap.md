@@ -70,7 +70,7 @@ E 的 A/B 同窗口平台为据。
   1. `MpmcQueue` 加 relaxed 原子计数器：push/pop 次数、阻塞等待次数、高水位，run 结束打印。
   2. 分段计时：reader/encoder/writer 各 stage 用 `steady_clock` 累计墙钟占比（按帧采样，不在 push/pop 热循环内取时钟），直接产出 Amdahl 证据，替代复盘里的间接推断。
   3. benchmark 脚本加固（`tests/e2e/test_performance.sh` 基础上，已有 median-of-3/jsonl/round-trip cmp/SLA）：warmup 轮、`FQC_PERF_REPEATS` 提到 ≥5、方差/极差报告、**同状态 A/B 模式**（两个二进制路径对比，把阶段 D 复盘"切代码同状态重跑"方法论工具化）、结果归档 `perf-baselines/YYYY-MM-DD-stage-x/`。
-- 验证（实测）：clang-debug/tsan 9/9 无竞争；A/B 同窗口（基线 vs 阶段E，64MiB random ×5）压缩比 2.9588/2.8403 完全一致，压缩 delta +5.0%/0%、解压 0%/+6.6%——spread 区间高度重叠，差异在噪声内，无可见回退（✓ <2% 门槛）。同二进制 A/B delta 0-3%，平台可区分代码差异与环境噪声的阈值 ≈ ±5%（64MiB 配置）。基线归档 `perf-baselines/2026-07-27-stage-e/`。
+- 验证（实测）：clang-debug/tsan 9/9 无竞争；A/B 同窗口（基线 vs 阶段E，64MiB random ×5）压缩比 2.9588/2.8403 完全一致，压缩 delta +5.0%/0%、解压 0%/+6.6%——spread 区间高度重叠，差异在噪声内，无可见回退（✓ <2% 门槛）。同二进制 A/B delta 0-3%，平台可区分代码差异与环境噪声的阈值 ≈ ±5%（64MiB 配置）。基线归档 `perf-baselines/2026-08-30-baseline/`。
 - 陷阱：计数器别用 seq_cst 默认序（拖慢热路径）；A/B 模式禁止跨时比基线（复盘教训三）。
 - 意外收获：极差报告上线即抓到 `date +%s.%N`（CLOCK_REALTIME）在 WSL2 对时回跳产生的负时长样本——旧 median 一直静默吸收它；计时源已改 `/proc/uptime`（CLOCK_BOOTTIME）。
 - 首批 Amdahl 证据（64MiB random，wall 536ms）：reader parse 121ms（23%）、writer zstd+io 109ms（20%）、encoder 并行后 ~101ms/worker——串行两端合计 ~43%，为 F/H 的排序提供量化依据。注意 profile 采样（≤5 万条）在主线程完成、不计入 reader 段，小输入时 reader 占比被低估。
