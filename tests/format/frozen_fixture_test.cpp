@@ -72,6 +72,20 @@ TEST(FrozenFixture, SingleEndArchiveDecodesToCommittedFastq) {
     EXPECT_EQ(decoded.records, fqc::test::parseAllFastqFile(fixturePath("input_se.fastq")));
 }
 
+TEST(FrozenFixture, CommentBearingArchiveDecodesToCommittedFastq) {
+    // 覆盖含 comment 的头部语义（首个分隔空格起，重建时 id+comment 原样拼接）：
+    // comment 语义变更后旧归档在含 comment 记录上会少一个空格，此 fixture 把该
+    // 语义钉进解码兼容契约。
+    const auto decoded = decodeArchive(fixturePath("frozen_comment.fqc"));
+    EXPECT_EQ(decoded.metadata.version, kArchiveVersion);
+    EXPECT_EQ(decoded.metadata.profile, DatasetProfile::kIllumina);
+    EXPECT_FALSE(decoded.metadata.paired);
+    EXPECT_EQ(decoded.stats.frameCount, 1U);
+    EXPECT_EQ(decoded.stats.recordCount, 3U);
+    EXPECT_EQ(decoded.stats.totalBases, 150U);
+    EXPECT_EQ(decoded.records, fqc::test::parseAllFastqFile(fixturePath("input_comment.fastq")));
+}
+
 TEST(FrozenFixture, PairedEndArchiveDecodesToInterleavedFastq) {
     const auto decoded = decodeArchive(fixturePath("frozen_pe.fqc"));
     EXPECT_EQ(decoded.metadata.version, kArchiveVersion);

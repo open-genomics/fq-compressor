@@ -18,6 +18,11 @@ a decoder compatibility contract, not a canonical-writer assertion.
   - `fqc compress -i input_se.fastq -o frozen_se.fqc`
   - `fqc compress -i input_r1.fastq -2 input_r2.fastq -o frozen_pe.fqc`
 
+`frozen_comment.fqc` 由后续工作树生成（`VERSION` = 0.2.0，clang-release-portable
+预设，Conan 2.31.2 + lockfile 的 zstd 1.5.7/xxhash 0.8.3）：
+`fqc compress -i input_comment.fastq -o frozen_comment.fqc`。归档解码兼容
+由格式规范保证（fixture 只保护解码器，不承诺 writer 字节稳定，见 Notes）。
+
 ## Format constants (from `include/fqc/format/archive.h` and `src/format/archive.cpp`)
 
 | Constant | Value | Description |
@@ -56,6 +61,8 @@ a decoder compatibility contract, not a canonical-writer assertion.
 |------|--------|---------|
 | `input_se.fastq` | committed | `23e50ad22b964c4b8376e77eb59d39179b786c96da43fdd418db0338255b1846` |
 | `frozen_se.fqc` | committed | `2b1cc50edfa47dd8bd7881a4ee7bb7f4980e693c14d90d90b640fdd62ccc4edf` |
+| `input_comment.fastq` | committed | `4a22ba32ae82ffc2e31f94b32510c5f9e675efe75435eff581fad6ba7e46974b` |
+| `frozen_comment.fqc` | committed | `ebaacfd534f340773c6c7ebe667bb226e8fc013d8bbc9d86b030bf4176d22422` |
 | `input_r1.fastq` | committed | `c35654f914e3dacf19dcbc9ac526b58e0c38ef735a69c206e3444eb1bfd19d49` |
 | `input_r2.fastq` | committed | `f21799fffae7162cf93c73a70ce9729c69a52c09f32987edfe84d16761c74c72` |
 | `frozen_pe.fqc` | committed | `11845bd85fa923ebc2e9ae77a8909539a64c2877588f383e1894f6157c97c685` |
@@ -65,7 +72,12 @@ a decoder compatibility contract, not a canonical-writer assertion.
 | Archive | Profile | Paired | Frames | Records | Bases | Expected FASTQ |
 |---|---|---|---|---|---|---|
 | `frozen_se.fqc` | illumina | no | 1 | 3 | 150 | `input_se.fastq` |
+| `frozen_comment.fqc` | illumina | no | 1 | 3 | 150 | `input_comment.fastq` |
 | `frozen_pe.fqc` | illumina | yes | 1 | 6 | 300 | `input_r1.fastq`/`input_r2.fastq` interleaved (R1,R2 per pair) |
+
+`frozen_comment.fqc` 覆盖含 comment（首个分隔空格起）的头部语义：2026-08 comment
+语义变更后旧归档在含 comment 记录上解压会少一个空格（`id x` → `idx`），该 fixture
+把这一语义钉进解码兼容契约，防止回归。
 
 `tests/format/frozen_fixture_test.cpp` decodes both archives and compares
 records and metadata against these expectations.

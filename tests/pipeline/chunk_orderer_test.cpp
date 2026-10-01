@@ -50,7 +50,8 @@ TEST(ChunkOrdererTest, ChunkAdvancesOnlyAfterMarkerAndAllFrames) {
 
 TEST(ChunkOrdererTest, ZeroFrameChunkThenFrameDrainsInOrder) {
     ChunkOrderer<int> orderer;
-    orderer.submitChunkEnd(0, 0);                // chunk 0 done, cursor -> chunk 1
+    auto drained = orderer.submitChunkEnd(0, 0);  // chunk 0 done, cursor -> chunk 1
+    EXPECT_TRUE(drained.empty());
     auto ready = orderer.submitFrame(1, 0, 42);  // cursor at (1,0): immediate
     ASSERT_EQ(ready.size(), 1U);
     EXPECT_EQ(ready[0], 42);
@@ -58,14 +59,15 @@ TEST(ChunkOrdererTest, ZeroFrameChunkThenFrameDrainsInOrder) {
 
 TEST(ChunkOrdererTest, MarkerForFutureChunkDoesNotPrematurelyAdvance) {
     ChunkOrderer<int> orderer;
-    orderer.submitChunkEnd(1, 0);  // chunk 1 (empty) marker arrives before chunk 0
-    auto drained = orderer.submitFrame(0, 0, 7);
-    ASSERT_EQ(drained.size(), 1U);  // (0,0) drains immediately
-    EXPECT_EQ(drained[0], 7);
+    auto drained = orderer.submitChunkEnd(1, 0);  // chunk 1 (empty) marker arrives before chunk 0
+    EXPECT_TRUE(drained.empty());
+    auto ready = orderer.submitFrame(0, 0, 7);
+    ASSERT_EQ(ready.size(), 1U);  // (0,0) drains immediately
+    EXPECT_EQ(ready[0], 7);
     // chunk 0's marker completes it; cursor then advances over empty chunk 1.
     EXPECT_TRUE(orderer.submitChunkEnd(0, 1).empty());
     // Chunk 2 must now be the cursor: its frame drains immediately.
-    auto ready = orderer.submitFrame(2, 0, 9);
-    ASSERT_EQ(ready.size(), 1U);
-    EXPECT_EQ(ready[0], 9);
+    auto ready2 = orderer.submitFrame(2, 0, 9);
+    ASSERT_EQ(ready2.size(), 1U);
+    EXPECT_EQ(ready2[0], 9);
 }
