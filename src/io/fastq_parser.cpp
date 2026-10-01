@@ -9,7 +9,8 @@
 
 namespace fqc::io {
 
-FastqParser::FastqParser(std::istream& stream) : stream_(stream) {}
+FastqParser::FastqParser(std::istream& stream, std::size_t maxLineBytes)
+    : stream_(stream), maxLineBytes_(maxLineBytes) {}
 
 auto FastqParser::readRecord() -> Result<std::optional<ReadRecord>> {
     if (eof_) {
@@ -18,6 +19,10 @@ auto FastqParser::readRecord() -> Result<std::optional<ReadRecord>> {
 
     std::string idLine;
     if (!readLine(idLine)) {
+        if (lineTooLong_) {
+            return std::unexpected(formatError("FASTQ line exceeds maximum length of " +
+                                               std::to_string(maxLineBytes_) + " bytes"));
+        }
         if (streamError_) {
             return std::unexpected(streamReadError());
         }
@@ -26,6 +31,10 @@ auto FastqParser::readRecord() -> Result<std::optional<ReadRecord>> {
 
     while (idLine.empty()) {
         if (!readLine(idLine)) {
+            if (lineTooLong_) {
+                return std::unexpected(formatError("FASTQ line exceeds maximum length of " +
+                                                   std::to_string(maxLineBytes_) + " bytes"));
+            }
             if (streamError_) {
                 return std::unexpected(streamReadError());
             }
@@ -95,12 +104,24 @@ auto FastqParser::readLine(std::string& line) -> bool {
     // Count raw bytes before trimTrailingCr strips '\r'. getline consumes the '\n'
     // delimiter unless it stopped at EOF (eofbit set after extracting content).
     bytesConsumed_ += line.size() + (stream_.eof() ? 0 : 1);
+    // Cap the RAW line (the allocation getline already made). bytesConsumed_
+    // stays consistent so error-path offset accounting is unaffected.
+    if (line.size() > maxLineBytes_) {
+        lineTooLong_ = true;
+        return false;
+    }
     trimTrailingCr(line);
     return true;
 }
 
 auto FastqParser::readRequiredLine(std::string& line) -> VoidResult {
     if (!readLine(line)) {
+        if (lineTooLong_) {
+            return makeVoidError(ErrorCode::kFormatError,
+                                 "invalid FASTQ at line " + std::to_string(lineNumber_) +
+                                     ": FASTQ line exceeds maximum length of " +
+                                     std::to_string(maxLineBytes_) + " bytes");
+        }
         if (streamError_) {
             return std::unexpected(streamReadError());
         }

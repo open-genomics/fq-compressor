@@ -7,6 +7,7 @@
 #include "fqc/common/error.h"
 #include "fqc/common/types.h"
 #include "fqc/format/archive.h"
+#include "fqc/io/fastq_parser.h"
 #include "fqc/pipeline/compress_pipeline.h"
 
 #include <cstddef>
@@ -20,20 +21,37 @@ namespace fqc::pipeline {
 
 /// Scans forward from the stream's current position for the first structurally
 /// valid FASTQ record start and returns its absolute offset (`baseOffset` is
-/// the absolute offset of the current position). A candidate is a line
-/// starting with '@' that passes the parser-level structural check: third
-/// line starts with '+', sequence length == quality length. Content
-/// validation (IUPAC charset, etc.) deliberately stays in encodeFrame: a
-/// candidate rejected HERE on content would silently skip a record that the
-/// sequential path parses and rejects loudly. A line starting with '@' is
-/// NOT sufficient on its own -- quality lines may legitimately start with
-/// '@' (Phred+33, Q31), so failed candidates rewind one line and scanning
-/// continues. A candidate truncated by EOF mid-body is
-/// still returned, so the owning worker's parser raises the same error the
-/// sequential path would. Returns `std::nullopt` if no record starts before
-/// EOF.
+/// the absolute offset of the current position), or `std::nullopt` when the
+/// chunk holds no record start (the empty tail belongs to the previous
+/// chunk's parse region).
+///
+/// The scan is bounded. A chunk boundary can fall at most three complete lines
+/// before the next record start (the straddling record's remaining sequence /
+/// '+' / quality lines, which the previous worker parses and validates), so
+/// seven non-blank lines always contain the first record start of well-formed
+/// input. A candidate is a line starting with '@' that passes the parser-level
+/// structural check: third line starts with '+', sequence length == quality
+/// length. Content validation (IUPAC charset, etc.) deliberately stays in
+/// encodeFrame: a candidate rejected HERE on content would silently skip a
+/// record that the sequential path parses and rejects loudly. A line starting
+/// with '@' is NOT sufficient on its own -- quality lines may legitimately
+/// start with '@' (Phred+33, Q31), so such residue lines are skipped only
+/// while they can still be explained as the straddling record's tail.
+///
+/// Errors: when no structurally valid record starts within the window (and
+/// the residue-shape constraint rules out every later candidate), the
+/// alignment zone holds data the sequential parser would reject too -- a
+/// record with mismatched quality length, a missing '+' line, or garbage
+/// beyond the residue. The scan reports `kFormatError` for those instead of
+/// silently skipping bytes; only a short EOF tail (<= 3 non-blank lines that
+/// could still be the previous record's residue) is skipped, matching the
+/// conservative pre-existing behavior for that indistinguishable shape.
+///
+/// `maxLineBytes` bounds a single scanned line, mirroring FastqParser's cap.
 [[nodiscard]] auto findFirstRecordStart(std::istream& input,
-                                        std::uint64_t baseOffset) -> std::optional<std::uint64_t>;
+                                        std::uint64_t baseOffset,
+                                        std::size_t maxLineBytes = io::kDefaultMaxFastqLineBytes)
+    -> Result<std::optional<std::uint64_t>>;
 
 /// Compression pipeline whose frame production is data-parallel, in contrast
 /// to CompressPipeline's task-parallel reader:

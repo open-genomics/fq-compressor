@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <cassert>
 #include <condition_variable>
 #include <cstddef>
 #include <mutex>
@@ -19,6 +20,15 @@ namespace fqc::pipeline {
 /// reorder buffer, so queue capacity alone cannot bound total in-flight work.
 /// A source acquires one credit before enqueueing a frame; the ordered sink
 /// releases it after committing that frame.
+///
+/// Misuse contract: `owner` must be `< reservedOwners`, and every acquire must
+/// be paired with exactly one release using the same owner (a reserved-owner
+/// credit acquired when the owner's slot was busy falls back to the shared
+/// pool, which the documented FIFO-per-owner release discipline untangles).
+/// Violations are program bugs: debug builds assert on them. Release builds
+/// cannot recover the lost information -- an out-of-range owner degrades to
+/// the shared pool and an unpaired release wraps the counters around,
+/// effectively disabling the bound -- so the pairing discipline is load-bearing.
 class InFlightLimiter {
 public:
     /// `reservedOwners` gives each owner in `[0, reservedOwners)` one credit
@@ -41,12 +51,14 @@ public:
     /// Acquire one credit for `owner`, keeping one credit available to each
     /// owner even when the shared portion of the window is full.
     [[nodiscard]] auto acquire(std::size_t owner, std::stop_token st = {}) -> bool {
+        assert((owner == kNoOwner || owner < reservedInUse_.size()) &&
+               "in-flight limiter: owner index out of range");
         std::unique_lock lock(m_);
         cv_.wait(lock, st, [&] { return st.stop_requested() || canAcquireLocked(owner); });
         if (st.stop_requested()) {
             return false;
         }
-        if (owner != kNoOwner && !reservedInUse_[owner]) {
+        if (owner != kNoOwner && owner < reservedInUse_.size() && !reservedInUse_[owner]) {
             reservedInUse_[owner] = true;
         } else {
             ++sharedInFlight_;
@@ -65,15 +77,20 @@ public:
 
     /// Release one owner credit after the frame has reached the ordered sink.
     void release(std::size_t owner) {
+        assert((owner == kNoOwner || owner < reservedInUse_.size()) &&
+               "in-flight limiter: owner index out of range");
         bool reservedReleased = false;
         {
             const std::lock_guard lock(m_);
-            if (owner != kNoOwner && reservedInUse_[owner]) {
+            if (owner != kNoOwner && owner < reservedInUse_.size() && reservedInUse_[owner]) {
                 reservedInUse_[owner] = false;
                 reservedReleased = true;
             } else {
+                assert(sharedInFlight_ > 0 &&
+                       "in-flight limiter: release without a matching acquire");
                 --sharedInFlight_;
             }
+            assert(inFlight_ > 0 && "in-flight limiter: release without a matching acquire");
             --inFlight_;
         }
         if (reservedReleased) {
@@ -96,8 +113,9 @@ private:
 
     [[nodiscard]] auto canAcquireLocked(std::size_t owner) const -> bool {
         return inFlight_ < capacity_ &&
-            (owner != kNoOwner && !reservedInUse_[owner] ? true
-                                                         : sharedInFlight_ < sharedCapacity_);
+            (owner != kNoOwner && owner < reservedInUse_.size() && !reservedInUse_[owner]
+                 ? true
+                 : sharedInFlight_ < sharedCapacity_);
     }
 
     const std::size_t capacity_;

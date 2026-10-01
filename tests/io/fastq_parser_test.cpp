@@ -58,6 +58,35 @@ TEST(FastqParserTest, RejectsQualityLengthMismatch) {
     EXPECT_EQ(result.error().code, ErrorCode::kFormatError);
 }
 
+TEST(FastqParserTest, RejectsOversizedLineWithFormatError) {
+    // 行长上限把畸形/敌意输入的超长行变成干净的 kFormatError，而不是让
+    // std::string 无限增长直到 bad_alloc（在 worker 线程里会 std::terminate）。
+    // 序列行 100 字节，上限 32：前一条记录正常解析，超长行报错而非被当作 EOF
+    // 静默截断。
+    std::istringstream input("@read1\nACGT\n+\nIIII\n@read2\n" + std::string(100, 'A') + "\n+\n" +
+                             std::string(100, 'I') + "\n");
+    FastqParser parser(input, /*maxLineBytes=*/32);
+
+    auto first = parser.readRecord();
+    ASSERT_TRUE(first.has_value());
+    ASSERT_TRUE(first->has_value());
+
+    auto second = parser.readRecord();
+    ASSERT_FALSE(second.has_value());
+    EXPECT_EQ(second.error().code, ErrorCode::kFormatError);
+    EXPECT_NE(second.error().message.find("maximum length"), std::string::npos);
+}
+
+TEST(FastqParserTest, OversizedHeaderLineIsAlsoRejected) {
+    // 上限作用于所有行（含头部行），且 bytesConsumed 记账不受影响。
+    std::istringstream input("@" + std::string(64, 'x') + "\nACGT\n+\nIIII\n");
+    FastqParser parser(input, /*maxLineBytes=*/32);
+
+    auto result = parser.readRecord();
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, ErrorCode::kFormatError);
+}
+
 TEST(FastqParserTest, AcceptsUpperAndLowerCaseIupacSequenceSymbols) {
     std::istringstream input(
         "@read1\nACGTRYSWKMBDHVNacgtryswkmbdhvn\n+\n"

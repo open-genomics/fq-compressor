@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -131,6 +132,19 @@ private:
                        std::make_move_iterator((*frame)->end()));
     }
     return records;
+}
+
+// findFirstRecordStart 现在返回 Result<optional>：错误即对齐区损坏（顺序路径
+// 同样会失败），optional 为空即无记录起点。该辅助解包错误分支，让既有断言
+// 保持"optional 语义"的可读性。
+[[nodiscard]] auto alignedStart(std::istream& input,
+                                std::uint64_t base) -> std::optional<std::uint64_t> {
+    auto found = fqc::pipeline::findFirstRecordStart(input, base);
+    EXPECT_TRUE(found.has_value()) << (found.has_value() ? "" : found.error().message);
+    if (!found.has_value()) {
+        return std::nullopt;
+    }
+    return *found;
 }
 
 }  // namespace
@@ -268,6 +282,40 @@ TEST(ParallelParsePipelineTest, TruncatedTailInAlignmentZoneFailsLoudly) {
     EXPECT_EQ(result.error().code, ErrorCode::kFormatError);
 }
 
+TEST(ParallelParsePipelineTest, StructuralMismatchInAlignmentZoneFailsLoudly) {
+    // r1 的 quality 行长度与 sequence 不一致，其头部落在 worker 1 的对齐区：
+    // 旧实现的假警报回退把 r1 静默跳过、在 r2 上重新对齐，产出缺少 r1 的
+    // "合法"归档（verify 通过、数据丢失）。修复后必须与顺序路径一样报
+    // kFormatError。
+    std::string fastq = "@r0\n" + std::string(3000, 'A') + "\n+\n" + std::string(3000, 'I') + "\n";
+    fastq += "@r1\n" + std::string(50, 'A') + "\n+\n" + std::string(60, 'I') + "\n";
+    fastq += "@r2\n" + std::string(100, 'C') + "\n+\n" + std::string(100, 'I') + "\n";
+    TempFastqFile file(fastq);
+
+    std::ostringstream output(std::ios::binary);
+    ArchiveWriter writer(output, {.profile = DatasetProfile::kIllumina});
+    ParallelParsePipeline pipeline(file.path(), file.size(), 1 << 20, 0, 2);
+    auto result = pipeline.run({}, writer);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, ErrorCode::kFormatError);
+}
+
+TEST(ParallelParsePipelineTest, MissingPlusInAlignmentZoneFailsLoudly) {
+    // r1 缺 '+' 行：旧实现读到的 l2 是 @r2 的头部，假警报回退后同样静默丢弃
+    // r1 并在 r2 上完成对齐。修复后必须报 kFormatError。
+    std::string fastq = "@r0\n" + std::string(3000, 'A') + "\n+\n" + std::string(3000, 'I') + "\n";
+    fastq += "@r1\n" + std::string(50, 'A') + "\n";
+    fastq += "@r2\n" + std::string(100, 'C') + "\n+\n" + std::string(100, 'I') + "\n";
+    TempFastqFile file(fastq);
+
+    std::ostringstream output(std::ios::binary);
+    ArchiveWriter writer(output, {.profile = DatasetProfile::kIllumina});
+    ParallelParsePipeline pipeline(file.path(), file.size(), 1 << 20, 0, 2);
+    auto result = pipeline.run({}, writer);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, ErrorCode::kFormatError);
+}
+
 // =============================================================================
 // findFirstRecordStart unit tests
 // =============================================================================
@@ -275,7 +323,7 @@ TEST(ParallelParsePipelineTest, TruncatedTailInAlignmentZoneFailsLoudly) {
 TEST(FindFirstRecordStartTest, HeaderAtBaseIsReturned) {
     const std::string fastq = makeFastq(3);
     std::istringstream input(fastq);
-    EXPECT_EQ(fqc::pipeline::findFirstRecordStart(input, 0), 0U);
+    EXPECT_EQ(alignedStart(input, 0), 0U);
 }
 
 TEST(FindFirstRecordStartTest, MidRecordBaseAlignsToNextHeader) {
@@ -286,7 +334,7 @@ TEST(FindFirstRecordStartTest, MidRecordBaseAlignsToNextHeader) {
     const std::uint64_t base = fastq.find('\n') + 3;
     std::istringstream input(fastq);
     input.seekg(static_cast<std::streamoff>(base));
-    const auto found = fqc::pipeline::findFirstRecordStart(input, base);
+    const auto found = alignedStart(input, base);
     ASSERT_TRUE(found.has_value());
     EXPECT_EQ(fastq[static_cast<std::size_t>(*found)], '@');
     // The aligned start must be the second record's header.
@@ -295,16 +343,18 @@ TEST(FindFirstRecordStartTest, MidRecordBaseAlignsToNextHeader) {
 
 TEST(FindFirstRecordStartTest, AtQualityLineIsNotARecordStart) {
     const std::string fastq = makeFastq(3, 150, /*atQuality=*/true);
-    // Point exactly at the '@' quality line of record 0.
+    // Point one byte into the '+' line of record 0: the discarded residue
+    // starts with '+', so the '@' quality line that follows is recognized as
+    // a quality-line residue (skipped) and scanning lands on record 1's header.
     const auto plusPos = fastq.find("\n+\n");
-    const std::uint64_t qualityStart = static_cast<std::uint64_t>(plusPos) + 3;
-    ASSERT_EQ(fastq[static_cast<std::size_t>(qualityStart)], '@');
+    const std::uint64_t residueBase = static_cast<std::uint64_t>(plusPos) + 1;
+    ASSERT_EQ(fastq[static_cast<std::size_t>(residueBase)], '+');
     std::istringstream input(fastq);
-    input.seekg(static_cast<std::streamoff>(qualityStart));
-    const auto found = fqc::pipeline::findFirstRecordStart(input, qualityStart);
+    input.seekg(static_cast<std::streamoff>(residueBase));
+    const auto found = alignedStart(input, residueBase);
     ASSERT_TRUE(found.has_value());
     // Must skip the false candidate and land on record 1's header.
-    EXPECT_GT(*found, qualityStart);
+    EXPECT_GT(*found, residueBase);
     EXPECT_EQ(fastq.substr(static_cast<std::size_t>(*found), 7), "@read_1");
 }
 
@@ -316,7 +366,7 @@ TEST(FindFirstRecordStartTest, MalformedSequenceCandidateIsAccepted) {
     const auto badPos = static_cast<std::uint64_t>(fastq.find("@bad"));
     std::istringstream input(fastq);
     input.seekg(static_cast<std::streamoff>(badPos));
-    EXPECT_EQ(fqc::pipeline::findFirstRecordStart(input, badPos), badPos);
+    EXPECT_EQ(alignedStart(input, badPos), badPos);
 }
 
 TEST(FindFirstRecordStartTest, TruncatedMidBodyCandidateIsReturned) {
@@ -329,7 +379,7 @@ TEST(FindFirstRecordStartTest, TruncatedMidBodyCandidateIsReturned) {
     const std::uint64_t base = static_cast<std::uint64_t>(fastq.find('\n')) + 3;
     std::istringstream input(fastq);
     input.seekg(static_cast<std::streamoff>(base));
-    EXPECT_EQ(fqc::pipeline::findFirstRecordStart(input, base), truncPos);
+    EXPECT_EQ(alignedStart(input, base), truncPos);
 }
 
 TEST(FindFirstRecordStartTest, BareAtLineAtEofYieldsNullopt) {
@@ -340,7 +390,7 @@ TEST(FindFirstRecordStartTest, BareAtLineAtEofYieldsNullopt) {
     const std::uint64_t qualityStart = static_cast<std::uint64_t>(fastq.find("\n+\n")) + 3;
     std::istringstream input(fastq);
     input.seekg(static_cast<std::streamoff>(qualityStart));
-    EXPECT_FALSE(fqc::pipeline::findFirstRecordStart(input, qualityStart).has_value());
+    EXPECT_FALSE(alignedStart(input, qualityStart).has_value());
 }
 
 TEST(FindFirstRecordStartTest, TruncatedTailYieldsNullopt) {
@@ -349,7 +399,7 @@ TEST(FindFirstRecordStartTest, TruncatedTailYieldsNullopt) {
     const std::uint64_t base = fastq.find('\n') + 2;
     std::istringstream input(fastq);
     input.seekg(static_cast<std::streamoff>(base));
-    EXPECT_FALSE(fqc::pipeline::findFirstRecordStart(input, base).has_value());
+    EXPECT_FALSE(alignedStart(input, base).has_value());
 }
 
 // BUG-2 regression (unit): findFirstRecordStart must NOT accept a position
@@ -363,10 +413,81 @@ TEST(FindFirstRecordStartTest, EmbeddedAtInsideHeaderIsNotARecordStart) {
     ASSERT_NE(fastq[static_cast<std::size_t>(embedded) - 1], '\n');
     std::istringstream input(fastq);
     input.seekg(static_cast<std::streamoff>(embedded));
-    const auto found = fqc::pipeline::findFirstRecordStart(input, embedded);
+    const auto found = alignedStart(input, embedded);
     ASSERT_TRUE(found.has_value()) << "scan must skip the mid-line '@' and find @tail";
     EXPECT_NE(*found, embedded);
     EXPECT_EQ(fastq.substr(static_cast<std::size_t>(*found), 5), "@tail");
+}
+
+// =============================================================================
+// BUG-3 regression: 对齐区内的结构畸形不得被静默跳过
+// =============================================================================
+
+TEST(FindFirstRecordStartTest, QualityLengthMismatchCandidateIsReturned) {
+    // r1 的 quality 行长度与 sequence 不一致：结构拒绝且非质量行残段（其前无 '+'
+    // 锚点）→ 扫描必须返回 r1，让 worker 的 parser 报与顺序路径相同的 kFormatError，
+    // 而不是跳过它命中 r2（静默丢）。
+    const std::string fastq = "@r0\nACGT\n+\nIIII\n@r1\nACG\n+\nIIII\n@r2\nACGT\n+\nIIII\n";
+    const std::uint64_t r1Pos = static_cast<std::uint64_t>(fastq.find("@r1"));
+    const std::uint64_t base = 2;  // 落在 "@r0" 头部行中段
+    std::istringstream input(fastq);
+    input.seekg(static_cast<std::streamoff>(base));
+    auto found = fqc::pipeline::findFirstRecordStart(input, base);
+    ASSERT_TRUE(found.has_value()) << (found.has_value() ? "" : found.error().message);
+    ASSERT_TRUE(found->has_value());
+    EXPECT_EQ(*found, r1Pos);
+}
+
+TEST(FindFirstRecordStartTest, MissingPlusLineCandidateIsReturned) {
+    // 缺 '+' 行的记录：@r1 结构拒绝（其第三行是 @r2 的头，非 '+'）且非质量行残段
+    // → 返回 @r1 让 parser 报错，而不是静默丢弃 r1、把 @r2 当合法记录。
+    const std::string fastq = "@r0\nACGT\n+\nIIII\n@r1\nACGT\n@r2\nACGT\n+\nIIII\n";
+    const std::uint64_t r1Pos = static_cast<std::uint64_t>(fastq.find("@r1"));
+    const std::uint64_t base = 2;
+    std::istringstream input(fastq);
+    input.seekg(static_cast<std::streamoff>(base));
+    auto found = fqc::pipeline::findFirstRecordStart(input, base);
+    ASSERT_TRUE(found.has_value()) << (found.has_value() ? "" : found.error().message);
+    ASSERT_TRUE(found->has_value());
+    EXPECT_EQ(*found, r1Pos);
+}
+
+TEST(FindFirstRecordStartTest, BlankLinesInAlignmentZoneAreSkipped) {
+    // 记录之间的空行与顺序路径一样跳过：残段（'+' + quality）之后的空行不能
+    // 阻止对齐到 @next。
+    const std::string fastq = "@ok\nACGT\n+\nIIII\n\n\n@next\nCGTA\n+\nJJJJ\n";
+    const std::uint64_t base = static_cast<std::uint64_t>(fastq.find('\n')) + 2;
+    std::istringstream input(fastq);
+    input.seekg(static_cast<std::streamoff>(base));
+    const auto found = alignedStart(input, base);
+    ASSERT_TRUE(found.has_value());
+    EXPECT_EQ(*found, static_cast<std::uint64_t>(fastq.find("@next")));
+}
+
+TEST(FindFirstRecordStartTest, CorruptTailWithoutAtYieldsError) {
+    // EOF 前的 2 个非空行既不是可行残段（[+'-',qual] 要求首行以 '+' 开头），
+    // 也没有可交给 parser 的 '@' 候选：顺序路径会以 "expected '@'" 拒绝，
+    // 扫描必须同样报错而不是返回空（静默截断）。
+    const std::string fastq = "@ok\nACGT\n+\nIIII\ngarbage1\ngarbage2\n";
+    const std::uint64_t base = static_cast<std::uint64_t>(fastq.find('\n')) + 2;
+    std::istringstream input(fastq);
+    input.seekg(static_cast<std::streamoff>(base));
+    auto found = fqc::pipeline::findFirstRecordStart(input, base);
+    ASSERT_FALSE(found.has_value());
+    EXPECT_EQ(found.error().code, ErrorCode::kFormatError);
+}
+
+TEST(FindFirstRecordStartTest, OversizedLineInAlignmentZoneYieldsError) {
+    // 行长上限：对齐扫描与 parser 使用同一上限，超长行以 kFormatError 拒绝，
+    // 而不是把整行读进内存后再静默跳过。
+    const std::string fastq = "@ok\nACGT\n+\nIIII\n@big\n" + std::string(100, 'A') + "\n+\n" +
+        std::string(100, 'I') + "\n";
+    const std::uint64_t base = static_cast<std::uint64_t>(fastq.find('\n')) + 2;
+    std::istringstream input(fastq);
+    input.seekg(static_cast<std::streamoff>(base));
+    auto found = fqc::pipeline::findFirstRecordStart(input, base, /*maxLineBytes=*/32);
+    ASSERT_FALSE(found.has_value());
+    EXPECT_EQ(found.error().code, ErrorCode::kFormatError);
 }
 
 // BUG-2 regression (integration): with the chunk boundary landing exactly on
@@ -395,4 +516,19 @@ TEST(ParallelParsePipelineTest, EmbeddedAtOnChunkBoundaryDoesNotDuplicateRecords
         return;  // one demonstration is enough
     }
     FAIL() << "test setup failed: no pad length hit the embedded '@' boundary";
+}
+
+// 对抗性回归：畸形记录只有 id 行（缺 body）、下一条记录头被吞时（@r1\n@r2\n…），
+// 对齐扫描若把 @r2 当合法记录返回会静默丢掉 @r1——顺序路径对 @r1 报 "expected '+'"。
+TEST(FindFirstRecordStartTest, MalformedEmptyBodyCandidateIsReturned) {
+    const std::string fastq = "@ok\nACGT\n+\nIIII\n@r1\n@r2\nCGTA\n+\nJJJJ\n@tail\nGGCC\n+\nHHHH\n";
+    // base 落在 @ok 的 qual 行中段：残段丢弃后窗口第一行是 @r1（对齐区内）
+    const std::uint64_t base = static_cast<std::uint64_t>(fastq.find("\n+\n")) + 3 + 2;
+    std::istringstream input(fastq);
+    input.seekg(static_cast<std::streamoff>(base));
+    auto found = fqc::pipeline::findFirstRecordStart(input, base);
+    ASSERT_TRUE(found.has_value()) << (found.has_value() ? "" : found.error().message);
+    ASSERT_TRUE(found->has_value());
+    // 必须返回 @r1（让 parser 报错），而不是跳过它命中 @r2
+    EXPECT_EQ(fastq.substr(static_cast<std::size_t>(**found), 3), "@r1");
 }

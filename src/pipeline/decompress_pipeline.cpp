@@ -16,6 +16,8 @@
 #include <mutex>
 #include <optional>
 #include <stop_token>
+#include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -40,6 +42,13 @@ struct OrderedFrame {
     std::uint64_t frameId{};
     std::unique_ptr<format::DecodedFrame> frame;
 };
+
+// 流水线 worker 的异常屏障消息。jthread 函数体逃逸的异常会直接 std::terminate
+// （main 的 catch-all 看不到线程内异常），这里统一转成 kInternalError 记录，
+// 由调用方配合 request_stop() 完成协作取消。
+[[nodiscard]] auto workerCrashError(std::string_view stage, const char* detail) -> Error {
+    return Error{ErrorCode::kInternalError, std::string(stage) + " worker terminated: " + detail};
+}
 
 }  // namespace
 
@@ -81,72 +90,93 @@ auto DecompressPipeline::run(std::istream& input,
     // decoder workers. records/bases and the rolling checksum accumulate on
     // the writer side.
     std::jthread reader([&] {
-        format::ArchiveReader archiveReader(input, maxFrameBytes_, memoryLimitBytes_);
-        auto opened = archiveReader.open();
-        if (!opened) {
-            readerError = opened.error();
-            stopSource.request_stop();
-            queue1.close();
-            return;
-        }
-        metadata = *opened;
-
-        std::uint64_t frameId = 0;
-        while (!stopToken.stop_requested()) {
-            auto raw = archiveReader.readRawFrame();
-            if (!raw) {
-                readerError = raw.error();
+        try {
+            format::ArchiveReader archiveReader(input, maxFrameBytes_, memoryLimitBytes_);
+            auto opened = archiveReader.open();
+            if (!opened) {
+                readerError = opened.error();
                 stopSource.request_stop();
-                break;
-            }
-            if (!raw->has_value()) {
-                auto footer = archiveReader.footer();
-                if (!footer) {
-                    readerError = footer.error();
-                    stopSource.request_stop();
-                    break;
+            } else {
+                metadata = *opened;
+
+                std::uint64_t frameId = 0;
+                while (!stopToken.stop_requested()) {
+                    auto raw = archiveReader.readRawFrame();
+                    if (!raw) {
+                        readerError = raw.error();
+                        stopSource.request_stop();
+                        break;
+                    }
+                    if (!raw->has_value()) {
+                        auto footer = archiveReader.footer();
+                        if (!footer) {
+                            readerError = footer.error();
+                            stopSource.request_stop();
+                            break;
+                        }
+                        footerData = *footer;
+                        readerSawFooter = true;
+                        break;
+                    }
+                    InputFrame in{frameId++, std::make_unique<format::RawFrame>(std::move(**raw))};
+                    if (!frameLimiter.acquire(stopToken)) {
+                        break;
+                    }
+                    if (!queue1.push(std::move(in), stopToken)) {
+                        frameLimiter.release();
+                        break;
+                    }
                 }
-                footerData = *footer;
-                readerSawFooter = true;
-                break;
+                encodedBytes = archiveReader.stats().encodedBytes;
             }
-            InputFrame in{frameId++, std::make_unique<format::RawFrame>(std::move(**raw))};
-            if (!frameLimiter.acquire(stopToken)) {
-                break;
-            }
-            if (!queue1.push(std::move(in), stopToken)) {
-                frameLimiter.release();
-                break;
-            }
+        } catch (const std::exception& error) {
+            readerError = workerCrashError("decompress reader", error.what());
+            stopSource.request_stop();
+        } catch (...) {
+            readerError = workerCrashError("decompress reader", "unknown exception");
+            stopSource.request_stop();
         }
-        encodedBytes = archiveReader.stats().encodedBytes;
         queue1.close();
     });
 
     // N decoder workers: decodeRawFrame is pure computation. Workers do not
     // close queue2; the main thread closes it after join.
     auto decoderLoop = [&] {
-        while (!stopToken.stop_requested()) {
-            auto in = queue1.pop(stopToken);
-            if (!in.has_value()) {
-                break;
-            }
-            auto decoded = format::decodeRawFrame(*in->frame);
-            if (!decoded) {
-                {
-                    const std::lock_guard lk(decoderErrorMutex);
-                    if (!decoderError) {
-                        decoderError = decoded.error();
-                    }
+        try {
+            while (!stopToken.stop_requested()) {
+                auto in = queue1.pop(stopToken);
+                if (!in.has_value()) {
+                    break;
                 }
-                stopSource.request_stop();
-                break;
+                auto decoded = format::decodeRawFrame(*in->frame);
+                if (!decoded) {
+                    {
+                        const std::lock_guard lk(decoderErrorMutex);
+                        if (!decoderError) {
+                            decoderError = decoded.error();
+                        }
+                    }
+                    stopSource.request_stop();
+                    break;
+                }
+                OrderedFrame out{in->frameId,
+                                 std::make_unique<format::DecodedFrame>(std::move(*decoded))};
+                if (!queue2.push(std::move(out), stopToken)) {
+                    break;
+                }
             }
-            OrderedFrame out{in->frameId,
-                             std::make_unique<format::DecodedFrame>(std::move(*decoded))};
-            if (!queue2.push(std::move(out), stopToken)) {
-                break;
+        } catch (const std::exception& error) {
+            const std::lock_guard lk(decoderErrorMutex);
+            if (!decoderError) {
+                decoderError = workerCrashError("decompress decoder", error.what());
             }
+            stopSource.request_stop();
+        } catch (...) {
+            const std::lock_guard lk(decoderErrorMutex);
+            if (!decoderError) {
+                decoderError = workerCrashError("decompress decoder", "unknown exception");
+            }
+            stopSource.request_stop();
         }
     };
 
@@ -160,30 +190,38 @@ auto DecompressPipeline::run(std::istream& input,
     // checksum (order-dependent -- must stay on this thread) and invoke the
     // sink. A sink failure cancels the pipeline.
     std::jthread writer([&] {
-        ReorderBuffer<std::unique_ptr<format::DecodedFrame>> reorder;
-        while (!stopToken.stop_requested()) {
-            auto out = queue2.pop(stopToken);
-            if (!out.has_value()) {
-                break;
-            }
-            auto ready = reorder.submit(out->frameId, std::move(out->frame));
-            for (auto& frame : ready) {
-                stats.frameCount += 1;
-                stats.recordCount += frame->recordCount;
-                stats.totalBases += frame->totalBases;
-                finalGlobalChecksum =
-                    format::advanceGlobalChecksum(finalGlobalChecksum, frame->checksum);
-                auto sinkResult = sink(std::move(frame->records));
-                frameLimiter.release();
-                if (!sinkResult) {
-                    writerError = sinkResult.error();
-                    stopSource.request_stop();
+        try {
+            ReorderBuffer<std::unique_ptr<format::DecodedFrame>> reorder;
+            while (!stopToken.stop_requested()) {
+                auto out = queue2.pop(stopToken);
+                if (!out.has_value()) {
+                    break;
+                }
+                auto ready = reorder.submit(out->frameId, std::move(out->frame));
+                for (auto& frame : ready) {
+                    stats.frameCount += 1;
+                    stats.recordCount += frame->recordCount;
+                    stats.totalBases += frame->totalBases;
+                    finalGlobalChecksum =
+                        format::advanceGlobalChecksum(finalGlobalChecksum, frame->checksum);
+                    auto sinkResult = sink(std::move(frame->records));
+                    frameLimiter.release();
+                    if (!sinkResult) {
+                        writerError = sinkResult.error();
+                        stopSource.request_stop();
+                        break;
+                    }
+                }
+                if (writerError.has_value()) {
                     break;
                 }
             }
-            if (writerError.has_value()) {
-                break;
-            }
+        } catch (const std::exception& error) {
+            writerError = workerCrashError("decompress writer", error.what());
+            stopSource.request_stop();
+        } catch (...) {
+            writerError = workerCrashError("decompress writer", "unknown exception");
+            stopSource.request_stop();
         }
     });
 

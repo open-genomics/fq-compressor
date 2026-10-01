@@ -21,6 +21,8 @@
 #include <optional>
 #include <span>
 #include <stop_token>
+#include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -46,6 +48,13 @@ struct OrderedFrame {
     std::uint64_t frameId{};
     std::unique_ptr<format::CompressedFrame> frame;
 };
+
+// 流水线 worker 的异常屏障消息。jthread 函数体逃逸的异常会直接 std::terminate
+// （main 的 catch-all 看不到线程内异常），这里统一转成 kInternalError 记录，
+// 由调用方配合 request_stop() 完成协作取消。
+[[nodiscard]] auto workerCrashError(std::string_view stage, const char* detail) -> Error {
+    return Error{ErrorCode::kInternalError, std::string(stage) + " worker terminated: " + detail};
+}
 
 }  // namespace
 
@@ -108,73 +117,80 @@ auto CompressPipeline::run(std::istream& primary,
     std::jthread reader([&] {
         std::uint64_t parseNs = 0;
         std::uint64_t pushNs = 0;
+        try {
+            io::FastqParser parser(primary);
+            std::optional<io::FastqParser> mateParser;
+            if (mate != nullptr) {
+                mateParser.emplace(*mate);
+            }
 
-        io::FastqParser parser(primary);
-        std::optional<io::FastqParser> mateParser;
-        if (mate != nullptr) {
-            mateParser.emplace(*mate);
-        }
+            std::uint64_t frameId = 0;
+            FrameAccumulator accumulator(targetFrameBytes_, paired_);
 
-        std::uint64_t frameId = 0;
-        FrameAccumulator accumulator(targetFrameBytes_, paired_);
+            auto pushFrame = [&](std::vector<ReadRecord> closed) -> bool {
+                if (!frameLimiter.acquire(stopToken)) {
+                    return false;
+                }
+                InputFrame in{frameId++, std::move(closed)};
+                const auto pushStart = Clock::now();
+                const bool ok = queue1.push(std::move(in), stopToken);
+                pushNs += nanosSince(pushStart);
+                if (!ok) {
+                    frameLimiter.release();
+                }
+                return ok;
+            };
 
-        auto pushFrame = [&](std::vector<ReadRecord> closed) -> bool {
-            if (!frameLimiter.acquire(stopToken)) {
-                return false;
-            }
-            InputFrame in{frameId++, std::move(closed)};
-            const auto pushStart = Clock::now();
-            const bool ok = queue1.push(std::move(in), stopToken);
-            pushNs += nanosSince(pushStart);
-            if (!ok) {
-                frameLimiter.release();
-            }
-            return ok;
-        };
+            auto append = [&](ReadRecord record) -> bool {
+                logicalBytes += canonicalFastqBytes(record);
+                if (auto closed = accumulator.append(std::move(record))) {
+                    return pushFrame(std::move(*closed));
+                }
+                return true;
+            };
 
-        auto append = [&](ReadRecord record) -> bool {
-            logicalBytes += canonicalFastqBytes(record);
-            if (auto closed = accumulator.append(std::move(record))) {
-                return pushFrame(std::move(*closed));
-            }
-            return true;
-        };
-
-        for (const auto& record : initialRecords) {
-            if (stopToken.stop_requested()) {
-                break;
-            }
-            if (!append(record)) {
-                break;
-            }
-        }
-
-        while (!stopToken.stop_requested()) {
-            const auto parseStart = Clock::now();
-            auto pair = io::readRecordPair(parser, mateParser ? &*mateParser : nullptr);
-            parseNs += nanosSince(parseStart);
-            if (!pair) {
-                readerError = pair.error();
-                stopSource.request_stop();
-                break;
-            }
-            if (!pair->has_value()) {
-                break;
-            }
-            if (!append(std::move((*pair)->first))) {
-                break;
-            }
-            if ((*pair)->second) {
-                if (!append(std::move(*(*pair)->second))) {
+            for (const auto& record : initialRecords) {
+                if (stopToken.stop_requested()) {
+                    break;
+                }
+                if (!append(record)) {
                     break;
                 }
             }
-        }
 
-        if (!stopToken.stop_requested()) {
-            if (auto tail = accumulator.finish()) {
-                pushFrame(std::move(*tail));
+            while (!stopToken.stop_requested()) {
+                const auto parseStart = Clock::now();
+                auto pair = io::readRecordPair(parser, mateParser ? &*mateParser : nullptr);
+                parseNs += nanosSince(parseStart);
+                if (!pair) {
+                    readerError = pair.error();
+                    stopSource.request_stop();
+                    break;
+                }
+                if (!pair->has_value()) {
+                    break;
+                }
+                if (!append(std::move((*pair)->first))) {
+                    break;
+                }
+                if ((*pair)->second) {
+                    if (!append(std::move(*(*pair)->second))) {
+                        break;
+                    }
+                }
             }
+
+            if (!stopToken.stop_requested()) {
+                if (auto tail = accumulator.finish()) {
+                    pushFrame(std::move(*tail));
+                }
+            }
+        } catch (const std::exception& error) {
+            readerError = workerCrashError("compress reader", error.what());
+            stopSource.request_stop();
+        } catch (...) {
+            readerError = workerCrashError("compress reader", "unknown exception");
+            stopSource.request_stop();
         }
         queue1.close();
         readerParseNs.store(parseNs, std::memory_order_relaxed);
@@ -188,47 +204,61 @@ auto CompressPipeline::run(std::istream& primary,
         std::uint64_t encodeNs = 0;
         std::uint64_t compressNs = 0;
         std::uint64_t pushNs = 0;
-        while (!stopToken.stop_requested()) {
-            const auto popStart = Clock::now();
-            auto in = queue1.pop(stopToken);
-            popNs += nanosSince(popStart);
-            if (!in.has_value()) {
-                break;
-            }
-            const auto encodeStart = Clock::now();
-            auto encoded = format::encodeFrame(in->records, writer.options());
-            encodeNs += nanosSince(encodeStart);
-            if (!encoded) {
-                {
-                    const std::lock_guard lk(encoderErrorMutex);
-                    if (!encoderError) {
-                        encoderError = encoded.error();
-                    }
+        try {
+            while (!stopToken.stop_requested()) {
+                const auto popStart = Clock::now();
+                auto in = queue1.pop(stopToken);
+                popNs += nanosSince(popStart);
+                if (!in.has_value()) {
+                    break;
                 }
-                stopSource.request_stop();
-                break;
-            }
-            const auto compressStart = Clock::now();
-            auto compressed =
-                format::compressFrame(std::move(*encoded), writer.options().qualityZstdLevel);
-            compressNs += nanosSince(compressStart);
-            if (!compressed) {
-                {
-                    const std::lock_guard lk(encoderErrorMutex);
-                    if (!encoderError) {
-                        encoderError = compressed.error();
+                const auto encodeStart = Clock::now();
+                auto encoded = format::encodeFrame(in->records, writer.options());
+                encodeNs += nanosSince(encodeStart);
+                if (!encoded) {
+                    {
+                        const std::lock_guard lk(encoderErrorMutex);
+                        if (!encoderError) {
+                            encoderError = encoded.error();
+                        }
                     }
+                    stopSource.request_stop();
+                    break;
                 }
-                stopSource.request_stop();
-                break;
+                const auto compressStart = Clock::now();
+                auto compressed =
+                    format::compressFrame(std::move(*encoded), writer.options().qualityZstdLevel);
+                compressNs += nanosSince(compressStart);
+                if (!compressed) {
+                    {
+                        const std::lock_guard lk(encoderErrorMutex);
+                        if (!encoderError) {
+                            encoderError = compressed.error();
+                        }
+                    }
+                    stopSource.request_stop();
+                    break;
+                }
+                OrderedFrame out{in->frameId, std::move(*compressed)};
+                const auto pushStart = Clock::now();
+                const bool pushed = queue2.push(std::move(out), stopToken);
+                pushNs += nanosSince(pushStart);
+                if (!pushed) {
+                    break;
+                }
             }
-            OrderedFrame out{in->frameId, std::move(*compressed)};
-            const auto pushStart = Clock::now();
-            const bool pushed = queue2.push(std::move(out), stopToken);
-            pushNs += nanosSince(pushStart);
-            if (!pushed) {
-                break;
+        } catch (const std::exception& error) {
+            const std::lock_guard lk(encoderErrorMutex);
+            if (!encoderError) {
+                encoderError = workerCrashError("compress encoder", error.what());
             }
+            stopSource.request_stop();
+        } catch (...) {
+            const std::lock_guard lk(encoderErrorMutex);
+            if (!encoderError) {
+                encoderError = workerCrashError("compress encoder", "unknown exception");
+            }
+            stopSource.request_stop();
         }
         encoderPopNs.fetch_add(popNs, std::memory_order_relaxed);
         encoderEncodeNs.fetch_add(encodeNs, std::memory_order_relaxed);
@@ -247,31 +277,39 @@ auto CompressPipeline::run(std::istream& primary,
     std::jthread writerThread([&] {
         std::uint64_t popNs = 0;
         std::uint64_t writeNs = 0;
-        ReorderBuffer<std::unique_ptr<format::CompressedFrame>> reorder;
-        while (!stopToken.stop_requested()) {
-            const auto popStart = Clock::now();
-            auto out = queue2.pop(stopToken);
-            popNs += nanosSince(popStart);
-            if (!out.has_value()) {
-                break;
-            }
-            auto ready = reorder.submit(out->frameId, std::move(out->frame));
-            for (auto& frame : ready) {
-                stats.recordCount += frame->recordCount;
-                stats.frameCount += 1;
-                const auto writeStart = Clock::now();
-                auto result = writer.writeCompressedFrame(std::move(frame));
-                writeNs += nanosSince(writeStart);
-                frameLimiter.release();
-                if (!result) {
-                    writerError = result.error();
-                    stopSource.request_stop();
+        try {
+            ReorderBuffer<std::unique_ptr<format::CompressedFrame>> reorder;
+            while (!stopToken.stop_requested()) {
+                const auto popStart = Clock::now();
+                auto out = queue2.pop(stopToken);
+                popNs += nanosSince(popStart);
+                if (!out.has_value()) {
+                    break;
+                }
+                auto ready = reorder.submit(out->frameId, std::move(out->frame));
+                for (auto& frame : ready) {
+                    stats.recordCount += frame->recordCount;
+                    stats.frameCount += 1;
+                    const auto writeStart = Clock::now();
+                    auto result = writer.writeCompressedFrame(std::move(frame));
+                    writeNs += nanosSince(writeStart);
+                    frameLimiter.release();
+                    if (!result) {
+                        writerError = result.error();
+                        stopSource.request_stop();
+                        break;
+                    }
+                }
+                if (writerError.has_value()) {
                     break;
                 }
             }
-            if (writerError.has_value()) {
-                break;
-            }
+        } catch (const std::exception& error) {
+            writerError = workerCrashError("compress writer", error.what());
+            stopSource.request_stop();
+        } catch (...) {
+            writerError = workerCrashError("compress writer", "unknown exception");
+            stopSource.request_stop();
         }
         writerPopNs.store(popNs, std::memory_order_relaxed);
         writerWriteNs.store(writeNs, std::memory_order_relaxed);
