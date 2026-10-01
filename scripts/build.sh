@@ -14,11 +14,13 @@ print_usage() {
     echo "Usage: $0 [preset] [jobs]"
     echo ""
     echo "Available presets:"
-    echo "  clang-debug      - Clang Debug build (recommended for development)"
-    echo "  clang-release    - Clang Release build"
-    echo "  clang-asan       - Clang with AddressSanitizer"
-    echo "  clang-tsan       - Clang with ThreadSanitizer"
-    echo "  clang-coverage   - Clang build with code coverage instrumentation (llvm-cov)"
+    echo "  clang-debug            - Clang Debug build (recommended for development)"
+    echo "  clang-release          - Clang Release build"
+    echo "  clang-release-portable - Clang Release build without -march=native (distributable)"
+    echo "  clang-fuzz             - Clang Debug + libFuzzer harnesses (parser/archive reader)"
+    echo "  clang-asan             - Clang with AddressSanitizer"
+    echo "  clang-tsan             - Clang with ThreadSanitizer"
+    echo "  clang-coverage         - Clang build with code coverage instrumentation (llvm-cov)"
     echo ""
     echo "Examples:"
     echo "  $0                    # Build with clang-debug preset"
@@ -33,7 +35,7 @@ if [[ "$PRESET" == "-h" || "$PRESET" == "--help" ]]; then
 fi
 
 # 验证 preset 是否存在
-VALID_PRESETS="clang-debug clang-release clang-asan clang-tsan clang-coverage"
+VALID_PRESETS="clang-debug clang-release clang-release-portable clang-fuzz clang-asan clang-tsan clang-coverage"
 if ! echo "$VALID_PRESETS" | grep -qw "$PRESET"; then
     echo "Error: Unknown preset '$PRESET'"
     print_usage
@@ -52,7 +54,7 @@ echo ""
 BUILD_DIR="build/$PRESET"
 if ! find "$BUILD_DIR" -name "conan_toolchain.cmake" -print -quit 2>/dev/null | grep -q .; then
     echo "Error: Conan toolchain not found in $BUILD_DIR." >&2
-    echo "Run 'conan install . --profile=conan/profiles/clang --build=missing' first." >&2
+    echo "Run 'conan install . --build=missing --lockfile=conan.lock --output-folder=$BUILD_DIR' first." >&2
     exit 1
 fi
 

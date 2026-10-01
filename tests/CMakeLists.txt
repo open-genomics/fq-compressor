@@ -3,8 +3,8 @@
 # =============================================================================
 # Test directory CMake configuration for fq-compressor
 #
-# This file configures the test targets using Google Test and optionally
-# RapidCheck for property-based testing.
+# This file configures the test targets using Google Test, plus opt-in
+# libFuzzer harnesses (FQC_BUILD_FUZZERS) for the parser and archive reader.
 # =============================================================================
 
 # =============================================================================
@@ -155,6 +155,29 @@ set_tests_properties(v2_cli_smoke_test PROPERTIES
     TIMEOUT 60
     LABELS "e2e"
 )
+
+# =============================================================================
+# libFuzzer harnesses（仅 Clang，FQC_BUILD_FUZZERS 显式开启）
+# =============================================================================
+# fuzz 目标不注册 ctest：由 CI 的 fuzz job 直接以 -max_total_time 短跑、
+# 夜间 workflow 长跑。sanitizer 标志来自预设的全局 flags，-fsanitize=fuzzer
+# 只加在 fuzz 目标上——全局加会把 libFuzzer main 链进 gtest 测试造成符号冲突。
+
+option(FQC_BUILD_FUZZERS "Build libFuzzer harnesses for the parser and archive reader" OFF)
+
+if(FQC_BUILD_FUZZERS)
+    if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        message(FATAL_ERROR "FQC_BUILD_FUZZERS=ON requires Clang (libFuzzer ships with clang)")
+    endif()
+
+    foreach(fuzz_target IN ITEMS fastq_parser_fuzz archive_reader_fuzz)
+        add_executable(${fuzz_target} fuzz/${fuzz_target}.cpp)
+        target_include_directories(${fuzz_target} PRIVATE ${FQC_TEST_INCLUDE_DIRS})
+        target_link_libraries(${fuzz_target} PRIVATE fqc_core)
+        target_compile_options(${fuzz_target} PRIVATE -fsanitize=fuzzer)
+        target_link_options(${fuzz_target} PRIVATE -fsanitize=fuzzer)
+    endforeach()
+endif()
 
 # =============================================================================
 # Test Summary

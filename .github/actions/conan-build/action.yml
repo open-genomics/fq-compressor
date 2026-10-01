@@ -11,7 +11,7 @@ description: |
 
 inputs:
   preset:
-    description: 'CMake preset to build (clang-debug / clang-asan / clang-coverage / clang-release)'
+    description: 'CMake preset to build (clang-debug / clang-asan / clang-tsan / clang-fuzz / clang-coverage / clang-release-portable)'
     required: true
   conan-build-type:
     description: "Conan `build_type` setting (Debug / Release)"
@@ -21,6 +21,13 @@ inputs:
     description: 'Extra arguments appended to `conan install` (e.g. `--build=gtest*`)'
     required: false
     default: ''
+  conan-libcxx:
+    description: >-
+      Conan compiler.libcxx setting. Default libc++ matches all normal presets;
+      clang-fuzz passes libstdc++11 because the prebuilt libFuzzer runtime is
+      built against libstdc++ and cannot link against libc++.
+    required: false
+    default: 'libc++'
 
 runs:
   using: 'composite'
@@ -34,7 +41,9 @@ runs:
         sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-18 100
         sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-18 100
         sudo update-alternatives --install /usr/bin/clang-format clang-format /usr/bin/clang-format-18 100
-        pip install conan --quiet
+        # 钉版本：conan 2.x 的小版本间对图解析/lockfile 语义有差异，浮动安装
+        # 会让"本地能装、CI 装不上"这类问题随机出现。
+        pip install conan==2.31.2 --quiet
 
     - name: Conan install
       shell: bash
@@ -45,12 +54,15 @@ runs:
         CXX: clang++
       run: |
         conan profile detect --force
+        # --lockfile：依赖版本以仓库根的 conan.lock 为准（transitive 依赖不随
+        # 上游浮动；lockfile 只锁版本路径，与编译器 settings 正交）
         conan install . --output-folder=build/${{ inputs.preset }} --build=missing \
+          --lockfile=conan.lock \
           ${{ inputs.extra-conan-args }} \
           -s build_type=${{ inputs.conan-build-type }} \
           -s compiler=clang \
           -s compiler.version=18 \
-          -s compiler.libcxx=libc++ \
+          -s compiler.libcxx=${{ inputs.conan-libcxx }} \
           -s compiler.cppstd=23
 
     - name: Build

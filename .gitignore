@@ -56,10 +56,9 @@ coverage/
 *.gcno
 *.gcov
 
-# 忽略所有的 Conan 生成文件
+# 忽略 Conan 生成文件（conan.lock 例外：lockfile 是依赖可复现性契约，随仓库提交）
 conaninfo.txt
 conanbuildinfo.*
-conan.lock
 conan_toolchain.cmake
 
 # 忽略 vcpkg 安装目录

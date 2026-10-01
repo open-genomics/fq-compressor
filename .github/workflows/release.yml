@@ -28,7 +28,10 @@ jobs:
       - name: Build release binary
         uses: ./.github/actions/conan-build
         with:
-          preset: clang-release
+          # FQC_PORTABLE=ON：发布产物禁用 -march=native，保证在旧 CPU 上可用
+          # （clang-release-portable 预设；每 PR 的 release-build job 已在同一
+          # 配置下跑过编译+测试门禁）
+          preset: clang-release-portable
           conan-build-type: Release
 
       # 发布回归 sanity：不做性能断言（CI 吞吐波动 ±20-85%，见

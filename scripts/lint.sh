@@ -43,10 +43,13 @@ detect_clang_format() {
     fi
 }
 
-# 检测 clang-tidy 版本（优先项目标准版本）
+# 检测 clang-tidy 版本
+# 固定使用 clang-tidy-18 以与 CI（ci.yml 的 clang-tidy job 装 clang-tidy-18）
+# 保持一致：不同版本的检查集与告警存在差异，"本地干净 ≠ CI 干净"会让门禁
+# 失去可预期性（clang-format 已同理由 18 锚定）。
 detect_clang_tidy() {
-    if command -v clang-tidy-21 &> /dev/null; then
-        echo "clang-tidy-21"
+    if command -v clang-tidy-18 &> /dev/null; then
+        echo "clang-tidy-18"
     elif command -v clang-tidy &> /dev/null; then
         echo "clang-tidy"
     else

@@ -1,0 +1,67 @@
+name: Fuzz Nightly
+
+# 每夜长跑 libFuzzer：CI 里的 fuzz job 每目标只跑 90 秒，受限于 PR 时长；
+# 夜间跑 10 分钟/目标（带前一天累计的 corpus 需要缓存时再扩展），让深层
+# 路径有机会被变异命中。crash/leak/oom 工件统一上传。
+
+on:
+  schedule:
+    - cron: '0 2 * * *'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fuzz-nightly-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup ccache
+        uses: hendrikmuhs/ccache-action@v1
+        with:
+          key: fuzz-nightly-${{ runner.os }}
+
+      - name: Conan install + build (clang-fuzz)
+        uses: ./.github/actions/conan-build
+        with:
+          preset: clang-fuzz
+          conan-build-type: Debug
+          # libFuzzer 运行时按 libstdc++ 构建，与 libc++ 不兼容
+          conan-libcxx: libstdc++11
+          extra-conan-args: --build=gtest*
+
+      - name: Fuzz parser and archive reader (long session)
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/corpus/fastq /tmp/corpus/archive /tmp/seeds/fastq /tmp/seeds/archive
+          cp tests/fixtures/sequential-v2/input_*.fastq /tmp/seeds/fastq/
+          cp tests/fixtures/sequential-v2/*.fqc /tmp/seeds/archive/
+          ./build/clang-fuzz/tests/fastq_parser_fuzz /tmp/corpus/fastq \
+            /tmp/seeds/fastq -max_total_time=600 -print_final_stats=1
+          ./build/clang-fuzz/tests/archive_reader_fuzz /tmp/corpus/archive \
+            /tmp/seeds/archive -max_total_time=600 -print_final_stats=1
+
+      - name: Upload crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crashes-nightly
+          path: |
+            crash-*
+            leak-*
+            oom-*
+          if-no-files-found: ignore
+
+      - name: Upload accumulated corpus
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-corpus
+          path: /tmp/corpus
+          retention-days: 7

@@ -66,6 +66,102 @@ jobs:
           ASAN_OPTIONS: detect_leaks=0:alloc_dealloc_mismatch=0
         run: ./scripts/test.sh clang-asan
 
+  thread-sanitizer:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup ccache
+        uses: hendrikmuhs/ccache-action@v1
+        with:
+          key: tsan-${{ runner.os }}
+
+      - name: Conan install + build (clang-tsan)
+        uses: ./.github/actions/conan-build
+        with:
+          preset: clang-tsan
+          conan-build-type: Debug
+          # 与 ASan job 同理：GTest 与项目同工具链从源码构建，避免混链误报
+          extra-conan-args: --build=gtest*
+
+      - name: Test (clang-tsan)
+        env:
+          # halt_on_error：发现竞争即失败（门禁语义）；second_deadlock_stack
+          # 记录死锁对另一侧的调用栈，便于定位。
+          TSAN_OPTIONS: halt_on_error=1:second_deadlock_stack=1
+        run: |
+          # Ubuntu 24.04 runner 内核默认 ASLR 熵 vm.mmap_rnd_bits=32 会让 TSan
+          # 的影子内存映射失败（"unexpected memory mapping"），降回 28 恢复可用。
+          sudo sysctl -w vm.mmap_rnd_bits=28
+          ./scripts/test.sh clang-tsan
+
+  release-build:
+    # 每次提交都编译 Release 配置（IPO/LTO + 可移植开关），否则 Release-only
+    # 的编译失败要等到打 tag 才被发现；FQC_PORTABLE=ON 同时保证预发布的
+    # 二进制不依赖 runner CPU（-march=native）。
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup ccache
+        uses: hendrikmuhs/ccache-action@v1
+        with:
+          key: release-portable-${{ runner.os }}
+
+      - name: Conan install + build (clang-release-portable)
+        uses: ./.github/actions/conan-build
+        with:
+          preset: clang-release-portable
+          conan-build-type: Release
+
+      - name: Test (clang-release-portable)
+        run: ./scripts/test.sh clang-release-portable
+
+  fuzz:
+    # libFuzzer 短跑：解析器与归档读取器是纯输入驱动组件，最适配 fuzzing；
+    # 长跑由独立的 fuzz-nightly.yml 承担。种子取冻结 fixture，从格式深处开变。
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup ccache
+        uses: hendrikmuhs/ccache-action@v1
+        with:
+          key: fuzz-${{ runner.os }}
+
+      - name: Conan install + build (clang-fuzz)
+        uses: ./.github/actions/conan-build
+        with:
+          preset: clang-fuzz
+          conan-build-type: Debug
+          # libFuzzer 运行时按 libstdc++ 构建，与 libc++ 不兼容：fuzz 构建整体
+          # 走 libstdc++ 工具链（预设继承 base 而非 clang-base）
+          conan-libcxx: libstdc++11
+          # 与 ASan job 同理：GTest 同工具链源码构建
+          extra-conan-args: --build=gtest*
+
+      - name: Fuzz parser and archive reader
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/corpus/fastq /tmp/corpus/archive /tmp/seeds/fastq /tmp/seeds/archive
+          cp tests/fixtures/sequential-v2/input_*.fastq /tmp/seeds/fastq/
+          cp tests/fixtures/sequential-v2/*.fqc /tmp/seeds/archive/
+          ./build/clang-fuzz/tests/fastq_parser_fuzz /tmp/corpus/fastq \
+            /tmp/seeds/fastq -max_total_time=90 -print_final_stats=1
+          ./build/clang-fuzz/tests/archive_reader_fuzz /tmp/corpus/archive \
+            /tmp/seeds/archive -max_total_time=90 -print_final_stats=1
+
+      - name: Upload crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crashes
+          path: |
+            crash-*
+            leak-*
+            oom-*
+          if-no-files-found: ignore
+
   coverage:
     runs-on: ubuntu-24.04
     steps:
