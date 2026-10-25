@@ -4,6 +4,8 @@
 合成数据约 2.8–2.9×，真实语料 1.96–4.15×（详见 [性能](#性能) 与
 [docs/real-corpus.md](docs/real-corpus.md)）。
 
+*A columnar streaming FASTQ compressor in C++23 — small and verifiable archives, bounded memory, pipe-friendly I/O.*
+
 > **格式族 `fqc-sequential/v2`**（magic `46 51 43 56 32 0D 0A 1A`，`FQCV2\r\n\x1A`）：
 > 与 [fq-compressor-rust](https://github.com/open-genomics/fq-compressor-rust)
 > （Rust，`fqc-indexed/v2`，magic `89 46 51 43 0D 0A 1A 0A`）同名但**格式不兼容**——
@@ -137,4 +139,16 @@ FASTQ 记录的信息字段——ID、序列、质量值——按**列式分离*
 
 ## 许可证
 
-[MIT](LICENSE)。
+[MIT](LICENSE)（vendored 的 `vendor/spring-core/` 第三方代码遵循其原始许可，不在本 MIT 授权范围内）。
+
+## 相关项目
+
+- [fq-compressor-rust](https://github.com/open-genomics/fq-compressor-rust) — 同题 Rust 实现（块索引 `.fqc`，同名不同格式族、互不兼容）
+- [fastq-tools](https://github.com/open-genomics/fastq-tools) — C++23 FASTQ 质控工具，同属组织 C++ 系统线
+- [minibwa-rust](https://github.com/open-genomics/minibwa-rust) — 短读比对器（Rust 线）
+
+<div align="center">
+
+本仓库属于 [**Open Genomics**](https://github.com/open-genomics) · 高性能生物信息学系统软件与中文知识库
+
+</div>
