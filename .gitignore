@@ -60,6 +60,8 @@ coverage/
 conaninfo.txt
 conanbuildinfo.*
 conan_toolchain.cmake
+# 本地 Conan 2 缓存（CONAN_HOME 可能被指向仓库内，如 arm64 适配时）
+.conan2/
 
 # 忽略 vcpkg 安装目录
 vcpkg_installed/
