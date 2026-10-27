@@ -44,11 +44,13 @@ struct CompressOptions {
 struct DecompressOptions {
     std::string input;
     std::string output;
+    std::uint64_t decodeWorkers = 0;
     bool force = false;
 };
 
 struct VerifyOptions {
     std::string input;
+    std::uint64_t decodeWorkers = 0;
 };
 
 [[nodiscard]] auto checkedMiB(std::uint64_t value,
@@ -159,11 +161,22 @@ auto run(int argc, char* argv[]) -> int {
     decompressCommand
         ->add_option("-o,--output", decompress.output, "FASTQ output, or '-' for stdout")
         ->required();
+    decompressCommand
+        ->add_option("--decode-workers",
+                     decompress.decodeWorkers,
+                     "decoder workers (0 = pipeline default of 4)")
+        ->default_val(0)
+        ->check(CLI::Range(0, 64));
     decompressCommand->add_flag("-f,--force", decompress.force, "Overwrite an existing output");
 
     auto* verifyCommand = app.add_subcommand("verify", "Fully decode and verify an FQC v2 archive");
     verifyCommand->alias("v");
     verifyCommand->add_option("input,-i,--input", verify.input, "FQC v2 input")->required();
+    verifyCommand
+        ->add_option(
+            "--decode-workers", verify.decodeWorkers, "decoder workers (0 = pipeline default of 4)")
+        ->default_val(0)
+        ->check(CLI::Range(0, 64));
 
     try {
         app.parse(argc, argv);
@@ -203,17 +216,19 @@ auto run(int argc, char* argv[]) -> int {
             }
             logStats("compression", *result, global.quiet);
         } else if (*decompressCommand) {
-            auto result =
-                fqc::commands::ArchiveEngine::decompress({.inputPath = decompress.input,
-                                                          .outputPath = decompress.output,
-                                                          .memoryLimitBytes = *memoryLimit,
-                                                          .forceOverwrite = decompress.force});
+            auto result = fqc::commands::ArchiveEngine::decompress(
+                {.inputPath = decompress.input,
+                 .outputPath = decompress.output,
+                 .memoryLimitBytes = *memoryLimit,
+                 .decoderWorkers = decompress.decodeWorkers,
+                 .forceOverwrite = decompress.force});
             if (!result) {
                 return reportError(result);
             }
             logStats("decompression", *result, global.quiet);
         } else if (*verifyCommand) {
-            auto result = fqc::commands::ArchiveEngine::verify(verify.input, *memoryLimit);
+            auto result = fqc::commands::ArchiveEngine::verify(
+                verify.input, *memoryLimit, verify.decodeWorkers);
             if (!result) {
                 return reportError(result);
             }

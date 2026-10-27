@@ -4,6 +4,16 @@
 
 ### 改进
 
+- **ARM64（AArch64）构建适配**：Release 的 native 调优在 aarch64 改用
+  `-mcpu=native`（clang 的 `-march=native` 在 ARM 上只映射到 `generic`）；新增
+  `conan/profiles/clang-armv8` 与构建文档；decompress/verify 新增
+  `--decode-workers`（0 = 默认 4），便于多核 ARM 独立调节解码并行度 → 详见
+  `.agents/notes/implemented/architecture/2026-10-27-arm64-adaptation.md`
+
+- **2-bit 打包热循环优化**：改为 256 字节查表 + 每 4 碱基无分支展开，避免 clang
+  在 ARM 上因 switch 无法向量化。1 GiB illumina、`--parse-workers 12` 从约
+  331 提升到约 419 MiB/s（同机 A/B，+27%）；归档格式与压缩比不变。
+
 - 并行解析的 parser 扇出与 encoder 池解耦：encoder 数量采用 `min(K, 4)`，避免提高
   `--parse-workers` 时机械地成倍创建 CPU 编码线程 → 详见
   `docs/postmortems/2026-09-21-worker-topology.md`

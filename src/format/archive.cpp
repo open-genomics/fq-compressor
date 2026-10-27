@@ -217,22 +217,27 @@ private:
     return std::string(reinterpret_cast<const char*>(bytes->data()), bytes->size());
 }
 
-[[nodiscard]] auto baseCode(char base, bool& exceptional) noexcept -> std::uint8_t {
-    exceptional = false;
-    switch (base) {
-        case 'A':
-            return 0;
-        case 'C':
-            return 1;
-        case 'G':
-            return 2;
-        case 'T':
-            return 3;
-        default:
-            exceptional = true;
-            return 0;
+// 碱基分类表：0–3 = A/C/G/T，4 = 合法但非 ACGT（异常槽，2-bit 值写 0），
+// 0xFF = 非法字节。用 256 字节查表替代逐字符 switch 与 contains，热循环可以
+// 4 碱基一组展开；ARM 上 clang 不会向量化 switch 版本（已用 -Rpass 验证）。
+inline constexpr std::uint8_t kExceptionalBaseCode = 4U;
+inline constexpr std::uint8_t kInvalidBaseCode = 0xFFU;
+
+[[nodiscard]] constexpr auto makeBaseCodes() noexcept {
+    std::array<std::uint8_t, 256> codes{};
+    codes.fill(kInvalidBaseCode);
+    codes[static_cast<std::uint8_t>('A')] = 0;
+    codes[static_cast<std::uint8_t>('C')] = 1;
+    codes[static_cast<std::uint8_t>('G')] = 2;
+    codes[static_cast<std::uint8_t>('T')] = 3;
+    constexpr std::string_view kExceptionalBases = "RYSWKMBDHVNacgtryswkmbdhvn";
+    for (const char base : kExceptionalBases) {
+        codes[static_cast<std::uint8_t>(base)] = kExceptionalBaseCode;
     }
+    return codes;
 }
+
+inline constexpr auto kBaseCodes = makeBaseCodes();
 
 [[nodiscard]] auto codeBase(std::uint8_t code) noexcept -> char {
     constexpr std::array<char, 4> kBases = {'A', 'C', 'G', 'T'};
@@ -265,14 +270,23 @@ void appendPackedSequence(Bytes& output, std::string_view sequence) {
     output.resize(output.size() + packedSize, 0);
 
     std::size_t exceptionCount = 0;
-    for (std::size_t index = 0; index < sequence.size(); ++index) {
-        bool exceptional = false;
-        const auto code = baseCode(sequence[index], exceptional);
-        const auto shift = static_cast<unsigned>((index % 4) * 2);
-        output[packedStart + index / 4] |= static_cast<std::uint8_t>(code << shift);
-        if (exceptional) {
-            ++exceptionCount;
-        }
+    std::size_t index = 0;
+    // 4 碱基一组写满一个字节。异常碱基的 2-bit 槽写 0（4 & 3 == 0），与旧实现一致。
+    for (; index + 4 <= sequence.size(); index += 4) {
+        const auto c0 = kBaseCodes[static_cast<std::uint8_t>(sequence[index])];
+        const auto c1 = kBaseCodes[static_cast<std::uint8_t>(sequence[index + 1])];
+        const auto c2 = kBaseCodes[static_cast<std::uint8_t>(sequence[index + 2])];
+        const auto c3 = kBaseCodes[static_cast<std::uint8_t>(sequence[index + 3])];
+        output[packedStart + index / 4] = static_cast<std::uint8_t>(
+            (c0 & 0x03U) | ((c1 & 0x03U) << 2U) | ((c2 & 0x03U) << 4U) | ((c3 & 0x03U) << 6U));
+        exceptionCount += static_cast<std::size_t>(c0 > 3U) + static_cast<std::size_t>(c1 > 3U) +
+            static_cast<std::size_t>(c2 > 3U) + static_cast<std::size_t>(c3 > 3U);
+    }
+    for (; index < sequence.size(); ++index) {
+        const auto code = kBaseCodes[static_cast<std::uint8_t>(sequence[index])];
+        output[packedStart + index / 4] |=
+            static_cast<std::uint8_t>((code & 0x03U) << ((index % 4) * 2));
+        exceptionCount += static_cast<std::size_t>(code > 3U);
     }
 
     appendVarint(output, exceptionCount);
@@ -282,9 +296,7 @@ void appendPackedSequence(Bytes& output, std::string_view sequence) {
     std::size_t previous = 0;
     std::size_t emitted = 0;
     for (std::size_t position = 0; position < sequence.size(); ++position) {
-        bool exceptional = false;
-        (void)baseCode(sequence[position], exceptional);
-        if (exceptional) {
+        if (kBaseCodes[static_cast<std::uint8_t>(sequence[position])] > 3U) {
             appendVarint(output, emitted == 0 ? position : position - previous);
             output.push_back(static_cast<std::uint8_t>(sequence[position]));
             previous = position;
@@ -426,13 +438,12 @@ struct RawStreamSizes {
         std::size_t exceptionCount = 0;
         std::size_t previous = 0;
         for (std::size_t position = 0; position < record.sequence.size(); ++position) {
-            if (!validIupacBase(record.sequence[position])) {
+            const auto code = kBaseCodes[static_cast<std::uint8_t>(record.sequence[position])];
+            if (code == kInvalidBaseCode) {
                 return makeError<RawStreamSizes>(ErrorCode::kUsageError,
                                                  "invalid logical FASTQ record");
             }
-            bool exceptional = false;
-            (void)baseCode(record.sequence[position], exceptional);
-            if (exceptional) {
+            if (code == kExceptionalBaseCode) {
                 const auto delta = exceptionCount == 0 ? position : position - previous;
                 if (!checkedAdd(sizes.sequences, varintSize(delta) + 1)) {
                     return makeError<RawStreamSizes>(ErrorCode::kUsageError,

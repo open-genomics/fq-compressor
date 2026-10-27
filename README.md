@@ -37,7 +37,8 @@ chmod +x fqc && ./fqc --version
 > round-trip + verify 回归 sanity。
 
 **其他平台 / 从源码构建**：需 clang-18 + libc++、CMake 3.28+、Conan 2.x、Ninja，
-工具链要求与质量门禁见 [docs/building.md](docs/building.md)：
+工具链要求与质量门禁见 [docs/building.md](docs/building.md)（ARM64 / AArch64 的额外步骤
+与多核参数也在该文档）：
 
 ```bash
 git clone https://github.com/open-genomics/fq-compressor.git

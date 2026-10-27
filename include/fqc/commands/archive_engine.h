@@ -41,6 +41,9 @@ struct DecompressionRequest {
     std::filesystem::path inputPath;
     std::filesystem::path outputPath;
     std::size_t memoryLimitBytes = kDefaultMemoryLimitBytes;
+    /// Decoder workers; 0 keeps the pipeline default (4). Decoding is
+    /// CPU-bound, so many-core hosts can raise this independently of I/O.
+    std::size_t decoderWorkers = 0;
     bool forceOverwrite = false;
 };
 
@@ -62,8 +65,8 @@ public:
     [[nodiscard]] static auto decompress(const DecompressionRequest& request)
         -> Result<OperationStats>;
     [[nodiscard]] static auto verify(const std::filesystem::path& inputPath,
-                                     std::size_t memoryLimitBytes = kDefaultMemoryLimitBytes)
-        -> Result<OperationStats>;
+                                     std::size_t memoryLimitBytes = kDefaultMemoryLimitBytes,
+                                     std::size_t decoderWorkers = 0) -> Result<OperationStats>;
 };
 
 }  // namespace fqc::commands

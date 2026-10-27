@@ -1,0 +1,6 @@
+# Benchmark results 2026-10-27T00:48:39+00:00
+# git: b42333c
+# config: sizes=[256 1024] data=structured repeats=5 warmup=1 memory_mib=16384 bin_a=/data/genomics/fq-compressor/build/clang-release/src/fqc bin_b=none
+{"name":"illumina_256mib","profile":"illumina","data":"structured","binary":"A","input_mib":262.29,"ratio":1118.7559,"compress_speed_mib_s":206.52,"compress_speed_min":204.91,"compress_speed_max":208.16,"decompress_speed_mib_s":270.40,"decompress_speed_min":267.64,"decompress_speed_max":273.21,"compress_max_rss_kib":631120,"decompress_max_rss_kib":383208}
+{"name":"illumina_1024mib","profile":"illumina","data":"structured","binary":"A","input_mib":1051.74,"ratio":1204.5239,"compress_speed_mib_s":210.34,"compress_speed_min":185.16,"compress_speed_max":213.33,"decompress_speed_mib_s":294.60,"decompress_speed_min":248.63,"decompress_speed_max":318.70,"compress_max_rss_kib":1019812,"decompress_max_rss_kib":868832}
+{"name":"ont_1024mib","profile":"ont","data":"structured","binary":"A","input_mib":1024.21,"ratio":11418.9850,"compress_speed_mib_s":95.81,"compress_speed_min":95.18,"compress_speed_max":96.89,"decompress_speed_mib_s":592.02,"decompress_speed_min":569.00,"decompress_speed_max":665.07,"compress_max_rss_kib":2074248,"decompress_max_rss_kib":870140}

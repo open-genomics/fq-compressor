@@ -1,0 +1,35 @@
+# Conan 2.x Clang AArch64 Profile for fq-compressor
+# =============================================================================
+# Linux armv8（aarch64）+ Clang + libc++ + C++23。
+#
+# 不要使用 conan/profiles/clang：它写死 arch=x86_64，在 ARM 上会解析成
+# 错误的二进制依赖。compiler.version 按本机 clang 调整：apt.llvm.org 的
+# Ubuntu 22.04 包通常是 18，本地 clang-21 则改成 21。
+#
+# 用法：
+#   conan install . --profile=conan/profiles/clang-armv8 \
+#       --output-folder=build/clang-debug --build=missing --lockfile=conan.lock \
+#       -s build_type=Debug -c tools.build:jobs=<可用核数>
+#
+# 容器 cpuset 通常小于宿主核数（例如 21/192），务必用 tools.build:jobs
+# 覆盖，避免源码构建按宿主核数超订。
+# =============================================================================
+
+[settings]
+os=Linux
+arch=armv8
+compiler=clang
+compiler.version=18
+compiler.libcxx=libc++
+compiler.cppstd=23
+build_type=Release
+
+[buildenv]
+CC=clang
+CXX=clang++
+
+[conf]
+tools.cmake.cmaketoolchain:generator=Ninja
+tools.build:compiler_executables={"c": "clang", "cpp": "clang++"}
+tools.build:jobs={{os.cpu_count()}}
+tools.build:skip_test=True

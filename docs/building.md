@@ -30,6 +30,58 @@ cd fq-compressor
 > 都安装名为 `fqc` 的二进制。若两者同时进入 `PATH`，后安装者（或 `PATH` 中更靠前的目录）会覆盖
 > 另一个，请用 `which fqc` 确认实际调用的实现。
 
+## ARM64 / AArch64（Linux）
+
+源码与架构无关，但 aarch64 上需要按下面的方式准备工具链（以 Ubuntu 22.04 + 鲲鹏为例）：
+
+1. 安装 Clang 18、libc++ 与 LLVM 18 归档工具：
+
+```bash
+curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key \
+    | gpg --dearmor -o /etc/apt/keyrings/apt.llvm.org.gpg
+echo "deb [signed-by=/etc/apt/keyrings/apt.llvm.org.gpg] \
+https://apt.llvm.org/jammy/ llvm-toolchain-jammy-18 main" \
+    > /etc/apt/sources.list.d/llvm-18.list
+apt-get update
+apt-get install -y --no-install-recommends \
+    clang-18 clang-format-18 clang-tidy-18 llvm-18 \
+    libc++-18-dev libc++abi-18-dev libunwind-18-dev libclang-rt-18-dev
+```
+
+2. 生成 armv8 Conan profile（不要复用写死 `x86_64` 的 `conan/profiles/clang`）：
+
+```bash
+export CONAN_HOME=/path/to/conan-cache   # 可选，建议放在大容量卷
+CC=clang CXX=clang++ conan profile detect --force
+conan install . --profile=conan/profiles/clang-armv8 \
+    --output-folder=build/clang-debug --build=missing --lockfile=conan.lock \
+    -s build_type=Debug -c tools.build:jobs=20
+./scripts/build.sh clang-debug 21
+./scripts/test.sh clang-debug
+```
+
+`tools.build:jobs` 要按容器可用核数（如 `nproc`）设置，不能依赖宿主的
+`os.cpu_count()`。Release 构建把 `Debug` 换成 `Release`，输出目录换成
+`build/clang-release`。若本机默认 `clang` 是 21 而 profile 写的是 18，请把
+profile 的 `compiler.version` 改成 21，或用 `CC=/usr/bin/clang-18
+CXX=/usr/bin/clang++-18` 固定编译器，避免 Conan 标错 ABI 版本。
+
+3. **LTO 归档工具**：若 `PATH` 中存在其他 LLVM（例如 CANN 自带的 LLVM 15），CMake
+   可能选中旧版 `llvm-ar`，归档 clang-18 的 LTO bitcode 时报
+   `Not an int attribute (Producer: 'LLVM18' Reader: 'LLVM 15')`。用
+   `clang++ -print-prog-name=llvm-ar` 确认它指向 LLVM 18；必要时显式传
+   `-DCMAKE_CXX_COMPILER_AR=/usr/lib/llvm-18/bin/llvm-ar` 与
+   `-DCMAKE_CXX_COMPILER_RANLIB=/usr/lib/llvm-18/bin/llvm-ranlib`。
+
+4. **native 调优**：Release 在 aarch64 使用 `-mcpu=native`（clang 的
+   `-march=native` 在 ARM 上只选架构特性、不选宿主 CPU）；需要可分发二进制时用
+   `clang-release-portable`。
+
+5. **多核参数**：21 核鲲鹏上 1 GiB 合成 illumina 语料实测 `--parse-workers 12`
+   约 419 MiB/s，默认 4 约 212 MiB/s；`--frame-mib 64` 最优。解压/校验可用
+   `--decode-workers` 调整 decoder 池（0 = 默认 4），实际收益受写盘与 I/O 限制，
+   建议用真实语料复测。
+
 ## 质量与 CI
 
 CI（`.github/workflows/ci.yml`，ubuntu-24.04 + clang-18）覆盖：clang-debug 构建与全部测试

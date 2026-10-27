@@ -62,6 +62,33 @@ TEST_F(ArchiveEngineTest, CompressesAndDecompressesCanonicalFastq) {
     EXPECT_EQ(verified->recordCount, 2U);
 }
 
+TEST_F(ArchiveEngineTest, DecoderWorkerOverridePreservesRoundTrip) {
+    temp_.writeFile("reads.fastq", kShortFastq);
+    ArchiveEngine engine;
+
+    auto compressed = engine.compress({.inputPath = temp_.path() / "reads.fastq",
+                                       .matePath = {},
+                                       .outputPath = temp_.path() / "reads.fqc",
+                                       .profile = format::DatasetProfile::kIllumina,
+                                       .memoryLimitBytes = 64 * 1024 * 1024,
+                                       .targetFrameBytes = 1,
+                                       .forceOverwrite = true});
+    ASSERT_TRUE(compressed) << compressed.error().message;
+    EXPECT_GE(compressed->frameCount, 2U);
+
+    auto decompressed = engine.decompress({.inputPath = temp_.path() / "reads.fqc",
+                                           .outputPath = temp_.path() / "restored-2.fastq",
+                                           .memoryLimitBytes = 64 * 1024 * 1024,
+                                           .decoderWorkers = 2,
+                                           .forceOverwrite = true});
+    ASSERT_TRUE(decompressed) << decompressed.error().message;
+    EXPECT_EQ(temp_.readFile("restored-2.fastq"), kShortFastq);
+
+    auto verified = engine.verify(temp_.path() / "reads.fqc", 64 * 1024 * 1024, 2);
+    ASSERT_TRUE(verified) << verified.error().message;
+    EXPECT_EQ(verified->recordCount, compressed->recordCount);
+}
+
 TEST_F(ArchiveEngineTest, InterleavesPairedFilesAndKeepsPairsAtomic) {
     temp_.writeFile("r1.fastq", "@pair/1\nACGT\n+\nIIII\n");
     temp_.writeFile("r2.fastq", "@pair/2\nTGCA\n+\nJJJJ\n");

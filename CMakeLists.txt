@@ -109,11 +109,18 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
         )
     endif()
     
-    # Portable build option: disable -march=native for distributable binaries
-    option(FQC_PORTABLE "Build portable binaries without -march=native" OFF)
+    # Portable build option: disable native CPU tuning for distributable binaries
+    option(FQC_PORTABLE "Build portable binaries without native CPU tuning" OFF)
 
     if(NOT FQC_PORTABLE AND CMAKE_BUILD_TYPE STREQUAL "Release")
-        add_compile_options(-march=native)
+        if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64|ARM64)$")
+            # AArch64 上 clang 的 -march=native 只映射到 generic，不会选中
+            # 宿主 CPU（LLVM issue #98443）；必须用 -mcpu=native 才能得到
+            # 鲲鹏 920 的 tsv110 调度与特性。
+            add_compile_options(-mcpu=native)
+        else()
+            add_compile_options(-march=native)
+        endif()
     endif()
 endif()
 

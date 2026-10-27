@@ -135,6 +135,9 @@ expect_exit 1 "${FQC_BIN}" -q compress -i "${TEST_DIR}/sample.fastq" \
     -o "${TEST_DIR}/x.fqc" --quality-level 20
 expect_exit 1 "${FQC_BIN}" -q compress -i "${TEST_DIR}/sample.fastq" \
     -o "${TEST_DIR}/x.fqc" --parse-workers 65
+expect_exit 1 "${FQC_BIN}" -q decompress -i "${TEST_DIR}/sample.fqc" \
+    -o "${TEST_DIR}/x.fastq" --decode-workers 65
+expect_exit 1 "${FQC_BIN}" -q verify "${TEST_DIR}/sample.fqc" --decode-workers 65
 expect_exit 1 "${FQC_BIN}" -q compress -i "${TEST_DIR}/sample.fastq" \
     -o "${TEST_DIR}/x.fqc" --memory-limit 0
 expect_exit 1 "${FQC_BIN}" -q compress -i "${TEST_DIR}/sample.fastq" \
@@ -145,12 +148,13 @@ expect_exit 1 "${FQC_BIN}" -q compress -i - -2 - -o "${TEST_DIR}/x.fqc"
 test ! -e "${TEST_DIR}/x.fqc"
 
 # In-range boundary values still work: frame-mib 1 forces multi-frame output,
-# parse-workers 0 selects the sequential reader, memory-limit 64 is the floor.
+# parse-workers 0 selects the sequential reader, decode-workers 2 overrides the
+# decoder pool, memory-limit 64 is the floor.
 "${FQC_BIN}" -q compress -i "${TEST_DIR}/sample.fastq" \
     -o "${TEST_DIR}/boundary.fqc" --frame-mib 1 --parse-workers 0 --memory-limit 64
-"${FQC_BIN}" -q verify "${TEST_DIR}/boundary.fqc"
+"${FQC_BIN}" -q verify "${TEST_DIR}/boundary.fqc" --decode-workers 2
 "${FQC_BIN}" -q decompress -i "${TEST_DIR}/boundary.fqc" \
-    -o "${TEST_DIR}/boundary-restored.fastq"
+    -o "${TEST_DIR}/boundary-restored.fastq" --decode-workers 2
 cmp -s "${TEST_DIR}/sample.fastq" "${TEST_DIR}/boundary-restored.fastq"
 
 # verify accepts stdin and rejects a non-archive on stdin with exit 3.

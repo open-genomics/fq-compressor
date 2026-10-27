@@ -125,6 +125,11 @@ private:
     return static_cast<double>(ns) / kNsPerMillisecond;
 }
 
+// 0 保留流水线默认值（4），避免在命令层再复制一份默认并行度常量。
+[[nodiscard]] constexpr auto resolveDecoderWorkers(std::size_t requested) noexcept -> std::size_t {
+    return requested == 0 ? pipeline::DecompressPipeline::kDefaultDecoderParallelism : requested;
+}
+
 /// Per-stage wall-clock plus queue snapshots. Info level, so `-q` suppresses it.
 void logPipelineObservability(const pipeline::PipelineStats& stats) {
     FQC_LOG_INFO(
@@ -352,8 +357,10 @@ auto ArchiveEngine::decompress(const DecompressionRequest& request) -> Result<Op
     OutputTransaction outputTransaction(request.outputPath, request.outputPath != "-");
     FQC_TRY_ASSIGN(output, openOutput(outputTransaction.path()));
     std::uint64_t logicalBytes = 0;
-    const pipeline::DecompressPipeline pipelineEngine(maxFrameBytesFor(request.memoryLimitBytes),
-                                                      request.memoryLimitBytes);
+    const pipeline::DecompressPipeline pipelineEngine(
+        maxFrameBytesFor(request.memoryLimitBytes),
+        request.memoryLimitBytes,
+        resolveDecoderWorkers(request.decoderWorkers));
     FQC_TRY_ASSIGN(
         stats,
         pipelineEngine.run(*input, [&](const std::vector<ReadRecord>& records) -> VoidResult {
@@ -373,14 +380,16 @@ auto ArchiveEngine::decompress(const DecompressionRequest& request) -> Result<Op
 }
 
 auto ArchiveEngine::verify(const std::filesystem::path& inputPath,
-                           std::size_t memoryLimitBytes) -> Result<OperationStats> {
+                           std::size_t memoryLimitBytes,
+                           std::size_t decoderWorkers) -> Result<OperationStats> {
     FQC_TRY(validateMemoryLimit(memoryLimitBytes));
     FQC_TRY_ASSIGN(input, io::openInputFile(inputPath));
     // Same pipeline as decompress with a counting-only sink: full decode and
     // validation, nothing written.
     std::uint64_t logicalBytes = 0;
     const pipeline::DecompressPipeline pipelineEngine(maxFrameBytesFor(memoryLimitBytes),
-                                                      memoryLimitBytes);
+                                                      memoryLimitBytes,
+                                                      resolveDecoderWorkers(decoderWorkers));
     FQC_TRY_ASSIGN(
         stats,
         pipelineEngine.run(*input, [&](const std::vector<ReadRecord>& records) -> VoidResult {
