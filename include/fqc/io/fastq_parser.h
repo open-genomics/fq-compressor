@@ -61,6 +61,9 @@ public:
 
 private:
     [[nodiscard]] auto readLine(std::string& line) -> bool;
+    /// Read one physical line, distinguishing clean EOF (`false`) from a
+    /// malformed line or an underlying stream failure (an error).
+    [[nodiscard]] auto readLineChecked(std::string& line) -> Result<bool>;
     /// Fail with `kIOError` on stream failure, `kFormatError` on unexpected EOF
     /// or on a line exceeding `maxLineBytes_`.
     [[nodiscard]] auto readRequiredLine(std::string& line) -> VoidResult;

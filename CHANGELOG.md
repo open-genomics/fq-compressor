@@ -4,6 +4,11 @@
 
 ### 改进
 
+- **FASTQ 行读取错误收敛**：`FastqParser` 新增 `readLineChecked`，把
+  "超长行 / 底层流错误 / 干净 EOF" 的重复分支收敛为一个 `Result<bool>` 契约；
+  `readRecord` 与 `readRequiredLine` 只保留各自的 EOF 语义。错误文本统一带行号，
+  解析行为不变。
+
 - **帧提交与遥测快照收口**：`pushWithCredit` 统一"取 credit -> push -> push
   失败归还"的 source 逻辑（含并行解析的 owner 变体）；`makeTelemetry` 统一三条
   流水线的 timings / queue stats / in-flight 高水位快照。新增 4 个 limiter 单测
