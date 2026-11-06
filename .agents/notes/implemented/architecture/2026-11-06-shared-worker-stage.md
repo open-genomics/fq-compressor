@@ -92,4 +92,9 @@ helper 不知道 marker 的存在，也不参与顺序语义。
   （`cmp`），解压 round-trip 一致；
 - 8 帧 4 MiB 输入确认 worker pop / compute / secondary / push 计时均非零；
 - `clang-format-18` 与 `scripts/notes.sh verify` 通过；
-- 1 MiB realistic 端到端 benchmark 通过，未改写既有 baseline。
+- 1 MiB realistic 端到端 benchmark 通过，未改写既有 baseline；
+- 64 MiB realistic A/B（A = 本提交，B = 改动前 `4fa17f7`，3 次交错）：
+  - Illumina：压缩 A 169.78 / B 179.48 MiB/s，解压 A 251.28 / B 241.61 MiB/s；
+  - ONT：压缩与解压中位数完全相同（125.43 / 266.54 MiB/s）；
+  - 两条方向不一致，差异落在 WSL2 噪声内；RSS 基本一致（202.5 vs 202.8 MiB、
+    136.0 vs 135.9 MiB）。没有可归因于 worker stage 的稳定性能变化。
