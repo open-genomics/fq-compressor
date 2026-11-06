@@ -72,8 +72,8 @@ auto DecompressPipeline::run(std::istream& input,
     // thread only after the matching join(), whose happens-before edge makes
     // the access safe. The workers share no mutable state but the two queues
     // (MPMC, thread-safe) and the stop_source.
-    DecompressStats stats;                            // writer
-    std::uint64_t finalGlobalChecksum = 0;            // writer
+    DecompressStats stats;                  // writer
+    std::uint64_t finalGlobalChecksum = 0;  // writer
 
     std::atomic<std::uint64_t> readerWorkNs{0};
     std::atomic<std::uint64_t> readerPushNs{0};
