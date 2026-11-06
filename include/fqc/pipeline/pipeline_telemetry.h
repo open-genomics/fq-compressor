@@ -37,6 +37,8 @@ struct PipelineTelemetry {
     StageTimings timings;
     QueueStats inputQueueStats;   // reader -> worker
     QueueStats outputQueueStats;  // worker -> writer
+    /// Peak number of limiter credits held by submitted frames. Source-local
+    /// frames waiting for a credit are not included.
     std::size_t inFlightHighWater = 0;
 };
 

@@ -56,7 +56,12 @@ enum class DatasetProfile : std::uint8_t {
 struct ArchiveOptions {
     DatasetProfile profile = DatasetProfile::kIllumina;
     bool paired = false;
+    /// Conservative frame-local peak budget. The writer's encode check and
+    /// the reader's decode check compare their frame-local estimate against
+    /// it; the process-wide codec reserve is separate.
     std::size_t maxFrameBytes = kDefaultMaxFrameBytes;
+    /// Whole-process budget, including the codec/runtime reserve. The frame
+    /// check subtracts `kCodecMemoryReserveBytes` once.
     std::size_t memoryLimitBytes = kDefaultMemoryLimitBytes;
     /// zstd level for the quality stream only; ID/sequence streams stay at
     /// level 1 (quality is the ratio bottleneck; the other streams gain

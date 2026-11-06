@@ -182,7 +182,7 @@ void logPipelineTelemetry(const pipeline::PipelineTelemetry& telemetry) {
         outputQueue.pushWaits,
         outputQueue.popWaits,
         outputQueue.highWater);
-    FQC_LOG_INFO("pipeline in-flight frames: highWater={}", telemetry.inFlightHighWater);
+    FQC_LOG_INFO("pipeline in-flight credits: highWater={}", telemetry.inFlightHighWater);
 }
 
 void logCompressionObservability(const pipeline::PipelineStats& stats) {
