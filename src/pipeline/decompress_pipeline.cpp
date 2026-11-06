@@ -10,6 +10,7 @@
 #include "fqc/pipeline/reorder_buffer.h"
 #include "fqc/pipeline/timing.h"
 #include "fqc/pipeline/worker_error.h"
+#include "fqc/pipeline/worker_stage.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -77,9 +78,7 @@ auto DecompressPipeline::run(std::istream& input,
 
     std::atomic<std::uint64_t> readerWorkNs{0};
     std::atomic<std::uint64_t> readerPushNs{0};
-    std::atomic<std::uint64_t> workerPopNs{0};
-    std::atomic<std::uint64_t> workerWorkNs{0};
-    std::atomic<std::uint64_t> workerPushNs{0};
+    WorkerStageTimingSink decoderTimings;
     std::atomic<std::uint64_t> writerPopNs{0};
     std::atomic<std::uint64_t> writerWorkNs{0};
     const auto wallStart = Clock::now();
@@ -157,63 +156,27 @@ auto DecompressPipeline::run(std::istream& input,
 
     // N decoder workers: decodeRawFrame is pure computation. Workers do not
     // close queue2; the main thread closes it after join.
-    auto decoderLoop = [&] {
-        std::uint64_t popNs = 0;
-        std::uint64_t decodeNs = 0;
-        std::uint64_t pushNs = 0;
-        try {
-            while (!stopToken.stop_requested()) {
-                const auto popStart = Clock::now();
-                auto in = queue1.pop(stopToken);
-                popNs += nanosSince(popStart);
-                if (!in.has_value()) {
-                    break;
-                }
-                const auto decodeStart = Clock::now();
-                auto decoded = format::decodeRawFrame(*in->frame);
-                decodeNs += nanosSince(decodeStart);
-                if (!decoded) {
-                    {
-                        const std::lock_guard lk(decoderErrorMutex);
-                        if (!decoderError) {
-                            decoderError = decoded.error();
-                        }
-                    }
-                    stopSource.request_stop();
-                    break;
-                }
-                OrderedFrame out{in->frameId,
-                                 std::make_unique<format::DecodedFrame>(std::move(*decoded))};
-                const auto pushStart = Clock::now();
-                const bool pushed = queue2.push(std::move(out), stopToken);
-                pushNs += nanosSince(pushStart);
-                if (!pushed) {
-                    break;
-                }
-            }
-        } catch (const std::exception& error) {
-            const std::lock_guard lk(decoderErrorMutex);
-            if (!decoderError) {
-                decoderError = workerCrashError("decompress decoder", error.what());
-            }
-            stopSource.request_stop();
-        } catch (...) {
-            const std::lock_guard lk(decoderErrorMutex);
-            if (!decoderError) {
-                decoderError = workerCrashError("decompress decoder", "unknown exception");
-            }
-            stopSource.request_stop();
+    auto decodeWorker = [&](const InputFrame& in,
+                            WorkerStageTimings& timings) -> Result<OrderedFrame> {
+        const auto decodeStart = Clock::now();
+        auto decoded = format::decodeRawFrame(*in.frame);
+        timings.computeNs += nanosSince(decodeStart);
+        if (!decoded) {
+            return std::unexpected(std::move(decoded.error()));
         }
-        workerPopNs.fetch_add(popNs, std::memory_order_relaxed);
-        workerWorkNs.fetch_add(decodeNs, std::memory_order_relaxed);
-        workerPushNs.fetch_add(pushNs, std::memory_order_relaxed);
+        return OrderedFrame{in.frameId,
+                            std::make_unique<format::DecodedFrame>(std::move(*decoded))};
     };
-
-    std::vector<std::jthread> decoders;
-    decoders.reserve(parallelism_);
-    for (std::size_t i = 0; i < parallelism_; ++i) {
-        decoders.emplace_back(decoderLoop);
-    }
+    auto decoders = startWorkerStage(parallelism_,
+                                     queue1,
+                                     queue2,
+                                     stopToken,
+                                     stopSource,
+                                     decoderErrorMutex,
+                                     decoderError,
+                                     "decompress decoder",
+                                     std::move(decodeWorker),
+                                     decoderTimings);
 
     // Writer: reorder by frameId, then accumulate stats + rolling global
     // checksum (order-dependent -- must stay on this thread) and invoke the
@@ -277,10 +240,10 @@ auto DecompressPipeline::run(std::istream& input,
     stats.telemetry.timings = {
         .readerWorkNs = readerWorkNs.load(std::memory_order_relaxed),
         .readerPushNs = readerPushNs.load(std::memory_order_relaxed),
-        .workerPopNs = workerPopNs.load(std::memory_order_relaxed),
-        .workerWorkNs = workerWorkNs.load(std::memory_order_relaxed),
+        .workerPopNs = decoderTimings.popNs.load(std::memory_order_relaxed),
+        .workerWorkNs = decoderTimings.computeNs.load(std::memory_order_relaxed),
         .workerSecondaryNs = 0,
-        .workerPushNs = workerPushNs.load(std::memory_order_relaxed),
+        .workerPushNs = decoderTimings.pushNs.load(std::memory_order_relaxed),
         .writerPopNs = writerPopNs.load(std::memory_order_relaxed),
         .writerWorkNs = writerWorkNs.load(std::memory_order_relaxed),
         .wallNs = nanosSince(wallStart),

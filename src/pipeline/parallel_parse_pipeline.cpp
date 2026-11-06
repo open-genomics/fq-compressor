@@ -13,6 +13,7 @@
 #include "fqc/pipeline/mpmc_queue.h"
 #include "fqc/pipeline/timing.h"
 #include "fqc/pipeline/worker_error.h"
+#include "fqc/pipeline/worker_stage.h"
 
 #include <algorithm>
 #include <array>
@@ -282,10 +283,7 @@ auto ParallelParsePipeline::run(std::span<const ReadRecord> initialRecords,
     const auto wallStart = Clock::now();
     std::atomic<std::uint64_t> readerParseNs{0};
     std::atomic<std::uint64_t> readerPushNs{0};
-    std::atomic<std::uint64_t> encoderPopNs{0};
-    std::atomic<std::uint64_t> encoderEncodeNs{0};
-    std::atomic<std::uint64_t> encoderCompressNs{0};
-    std::atomic<std::uint64_t> encoderPushNs{0};
+    WorkerStageTimingSink encoderTimings;
     std::atomic<std::uint64_t> writerPopNs{0};
     std::atomic<std::uint64_t> writerWriteNs{0};
 
@@ -463,88 +461,36 @@ auto ParallelParsePipeline::run(std::span<const ReadRecord> initialRecords,
     }
 
     // N encoder workers (same as CompressPipeline, plus marker pass-through).
-    auto encoderLoop = [&] {
-        std::uint64_t popNs = 0;
-        std::uint64_t encodeNs = 0;
-        std::uint64_t compressNs = 0;
-        std::uint64_t pushNs = 0;
-        try {
-            while (!stopToken.stop_requested()) {
-                const auto popStart = Clock::now();
-                auto in = queue1.pop(stopToken);
-                popNs += nanosSince(popStart);
-                if (!in.has_value()) {
-                    break;
-                }
-                if (in->chunkEnd) {
-                    OrderedItem marker{in->chunk, in->local, true, nullptr};
-                    const auto pushStart = Clock::now();
-                    const bool pushed = queue2.push(std::move(marker), stopToken);
-                    pushNs += nanosSince(pushStart);
-                    if (!pushed) {
-                        break;
-                    }
-                    continue;
-                }
-                const auto encodeStart = Clock::now();
-                auto encoded = format::encodeFrame(in->records, writer.options());
-                encodeNs += nanosSince(encodeStart);
-                if (!encoded) {
-                    {
-                        const std::lock_guard lk(errorMutex);
-                        if (!encoderError) {
-                            encoderError = encoded.error();
-                        }
-                    }
-                    stopSource.request_stop();
-                    break;
-                }
-                const auto compressStart = Clock::now();
-                auto compressed =
-                    format::compressFrame(std::move(*encoded), writer.options().qualityZstdLevel);
-                compressNs += nanosSince(compressStart);
-                if (!compressed) {
-                    {
-                        const std::lock_guard lk(errorMutex);
-                        if (!encoderError) {
-                            encoderError = compressed.error();
-                        }
-                    }
-                    stopSource.request_stop();
-                    break;
-                }
-                OrderedItem out{in->chunk, in->local, false, std::move(*compressed)};
-                const auto pushStart = Clock::now();
-                const bool pushed = queue2.push(std::move(out), stopToken);
-                pushNs += nanosSince(pushStart);
-                if (!pushed) {
-                    break;
-                }
-            }
-        } catch (const std::exception& error) {
-            const std::lock_guard lk(errorMutex);
-            if (!encoderError) {
-                encoderError = workerCrashError("parallel encoder", error.what());
-            }
-            stopSource.request_stop();
-        } catch (...) {
-            const std::lock_guard lk(errorMutex);
-            if (!encoderError) {
-                encoderError = workerCrashError("parallel encoder", "unknown exception");
-            }
-            stopSource.request_stop();
+    auto encodeWorker = [&](const ParseItem& in,
+                            WorkerStageTimings& timings) -> Result<OrderedItem> {
+        if (in.chunkEnd) {
+            return OrderedItem{in.chunk, in.local, true, nullptr};
         }
-        encoderPopNs.fetch_add(popNs, std::memory_order_relaxed);
-        encoderEncodeNs.fetch_add(encodeNs, std::memory_order_relaxed);
-        encoderCompressNs.fetch_add(compressNs, std::memory_order_relaxed);
-        encoderPushNs.fetch_add(pushNs, std::memory_order_relaxed);
+        const auto encodeStart = Clock::now();
+        auto encoded = format::encodeFrame(in.records, writer.options());
+        timings.computeNs += nanosSince(encodeStart);
+        if (!encoded) {
+            return std::unexpected(std::move(encoded.error()));
+        }
+        const auto compressStart = Clock::now();
+        auto compressed =
+            format::compressFrame(std::move(*encoded), writer.options().qualityZstdLevel);
+        timings.secondaryNs += nanosSince(compressStart);
+        if (!compressed) {
+            return std::unexpected(std::move(compressed.error()));
+        }
+        return OrderedItem{in.chunk, in.local, false, std::move(*compressed)};
     };
-
-    std::vector<std::jthread> encoders;
-    encoders.reserve(encoderParallelism_);
-    for (std::size_t i = 0; i < encoderParallelism_; ++i) {
-        encoders.emplace_back(encoderLoop);
-    }
+    auto encoders = startWorkerStage(encoderParallelism_,
+                                     queue1,
+                                     queue2,
+                                     stopToken,
+                                     stopSource,
+                                     errorMutex,
+                                     encoderError,
+                                     "parallel encoder",
+                                     std::move(encodeWorker),
+                                     encoderTimings);
 
     // Writer: drain in (chunk, local) lexicographic order via ChunkOrderer.
     std::jthread writerThread([&] {
@@ -620,10 +566,10 @@ auto ParallelParsePipeline::run(std::span<const ReadRecord> initialRecords,
     stats.telemetry.timings = {
         .readerWorkNs = readerParseNs.load(std::memory_order_relaxed),
         .readerPushNs = readerPushNs.load(std::memory_order_relaxed),
-        .workerPopNs = encoderPopNs.load(std::memory_order_relaxed),
-        .workerWorkNs = encoderEncodeNs.load(std::memory_order_relaxed),
-        .workerSecondaryNs = encoderCompressNs.load(std::memory_order_relaxed),
-        .workerPushNs = encoderPushNs.load(std::memory_order_relaxed),
+        .workerPopNs = encoderTimings.popNs.load(std::memory_order_relaxed),
+        .workerWorkNs = encoderTimings.computeNs.load(std::memory_order_relaxed),
+        .workerSecondaryNs = encoderTimings.secondaryNs.load(std::memory_order_relaxed),
+        .workerPushNs = encoderTimings.pushNs.load(std::memory_order_relaxed),
         .writerPopNs = writerPopNs.load(std::memory_order_relaxed),
         .writerWorkNs = writerWriteNs.load(std::memory_order_relaxed),
         .wallNs = nanosSince(wallStart),

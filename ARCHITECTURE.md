@@ -112,6 +112,13 @@ in-flight 高水位）和 `logicalBytes`（规范 FASTQ 字节数）。压缩 `r
 不再各自维护一套近似计数字段。`PipelineRunStats` 只描述“一条帧流水线跑完后的结果”，
 不引入通用 DAG 或调度框架。
 
+三条流水线的 worker 执行循环由 `pipeline::startWorkerStage` 共享：它只负责
+`pop -> handler -> push`、首个错误记录、取消请求、异常屏障和 worker 本地计时合并。
+队列关闭、线程创建/join 顺序与线程拓扑仍由各流水线自己掌握，helper 不接管 reader /
+writer 生命周期，也不引入 DAG 或调度器。handler 返回 `Result<T>`，chunk-end marker
+等顺序语义留在各流水线的 handler 内。取舍见
+`.agents/notes/implemented/architecture/2026-11-06-shared-worker-stage.md`。
+
 在 8 核 x86_64 WSL2 主机上，64 MiB 随机短读压缩约 149 MiB/s（相对顺序解析 +47.7%）；
 长读解析占比小，并行收益落在噪声内。WSL2 吞吐波动 ±20-85%，数字仅供粗略参考——
 性能台账见 `docs/benchmarks.md`，真实语料见 `docs/real-corpus.md`，并行化逐阶段史

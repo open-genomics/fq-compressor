@@ -11,6 +11,12 @@
   并 flush，使 `archive.encodedBytes` 是完整归档快照。归档字节布局不变 → 详见
   `.agents/notes/implemented/architecture/2026-11-06-unified-pipeline-results-and-telemetry.md`
 
+- **共享 worker stage**：三条流水线的 `pop -> handler -> push` 循环、首个错误记录、取消请求、
+  异常屏障和 worker 本地计时合并收敛到 `pipeline::startWorkerStage`，删除约 130 行重复控制流。
+  helper 不接管队列关闭、线程 join 顺序或 reader/writer 生命周期，也不引入通用 DAG；
+  归档格式与帧顺序不变，单帧与 8 帧归档均通过改动前后逐字节 `cmp` → 详见
+  `.agents/notes/implemented/architecture/2026-11-06-shared-worker-stage.md`
+
 - **ARM64（AArch64）构建适配**：Release 的 native 调优在 aarch64 改用
   `-mcpu=native`（clang 的 `-march=native` 在 ARM 上只映射到 `generic`）；新增
   `conan/profiles/clang-armv8` 与构建文档；decompress/verify 新增
