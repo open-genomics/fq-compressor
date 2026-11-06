@@ -129,15 +129,14 @@ auto DecompressPipeline::run(std::istream& input,
                         readerSawFooter = true;
                         break;
                     }
-                    InputFrame in{frameId++, std::make_unique<format::RawFrame>(std::move(**raw))};
-                    if (!frameLimiter.acquire(stopToken)) {
-                        break;
-                    }
                     const auto pushStart = Clock::now();
-                    const bool pushed = queue1.push(std::move(in), stopToken);
+                    const bool pushed = pushWithCredit(
+                        frameLimiter,
+                        queue1,
+                        InputFrame{frameId++, std::make_unique<format::RawFrame>(std::move(**raw))},
+                        stopToken);
                     pushNs += nanosSince(pushStart);
                     if (!pushed) {
-                        frameLimiter.release();
                         break;
                     }
                 }
@@ -224,20 +223,21 @@ auto DecompressPipeline::run(std::istream& input,
     queue2.close();
     writer.join();
 
-    stats.telemetry.timings = {
-        .readerWorkNs = readerWorkNs.load(std::memory_order_relaxed),
-        .readerPushNs = readerPushNs.load(std::memory_order_relaxed),
-        .workerPopNs = decoderTimings.popNs.load(std::memory_order_relaxed),
-        .workerPrimaryNs = decoderTimings.computeNs.load(std::memory_order_relaxed),
-        .workerSecondaryNs = 0,
-        .workerPushNs = decoderTimings.pushNs.load(std::memory_order_relaxed),
-        .writerPopNs = writerPopNs.load(std::memory_order_relaxed),
-        .writerWorkNs = writerWorkNs.load(std::memory_order_relaxed),
-        .wallNs = nanosSince(wallStart),
-    };
-    stats.telemetry.inputQueueStats = queue1.stats();
-    stats.telemetry.outputQueueStats = queue2.stats();
-    stats.telemetry.inFlightHighWater = frameLimiter.highWater();
+    stats.telemetry = makeTelemetry(
+        {
+            .readerWorkNs = readerWorkNs.load(std::memory_order_relaxed),
+            .readerPushNs = readerPushNs.load(std::memory_order_relaxed),
+            .workerPopNs = decoderTimings.popNs.load(std::memory_order_relaxed),
+            .workerPrimaryNs = decoderTimings.computeNs.load(std::memory_order_relaxed),
+            .workerSecondaryNs = 0,
+            .workerPushNs = decoderTimings.pushNs.load(std::memory_order_relaxed),
+            .writerPopNs = writerPopNs.load(std::memory_order_relaxed),
+            .writerWorkNs = writerWorkNs.load(std::memory_order_relaxed),
+            .wallNs = nanosSince(wallStart),
+        },
+        queue1,
+        queue2,
+        frameLimiter);
 
     if (firstError.has_value()) {
         return makeError<DecompressStats>(std::move(*firstError));

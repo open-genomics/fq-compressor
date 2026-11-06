@@ -4,6 +4,12 @@
 
 ### 改进
 
+- **帧提交与遥测快照收口**：`pushWithCredit` 统一"取 credit -> push -> push
+  失败归还"的 source 逻辑（含并行解析的 owner 变体）；`makeTelemetry` 统一三条
+  流水线的 timings / queue stats / in-flight 高水位快照。新增 4 个 limiter 单测
+  覆盖取消、普通/owner 失败归还与成功路径。行为、帧顺序与归档字节不变 → 详见
+  `.agents/notes/implemented/architecture/2026-11-06-frame-submit-and-telemetry.md`
+
 - **realistic 基准刷新**：用聚合内存预算修复后的 `513b9f9` 重跑 512/1024 MiB
   realistic 基准，归档到 `perf-baselines/2026-11-06-realistic-64mib/`；README 性能表
   与 `docs/benchmarks.md` 改为当前绝对 baseline。旧 2026-11-05 归档保留为历史，

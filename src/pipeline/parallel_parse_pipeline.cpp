@@ -325,15 +325,10 @@ auto ParallelParsePipeline::run(std::span<const ReadRecord> initialRecords,
             FrameAccumulator accumulator(targetFrameBytes_, false);
 
             auto pushFrame = [&](ParseItem item) -> bool {
-                if (!frameLimiter.acquire(workerIndex, stopToken)) {
-                    return false;
-                }
                 const auto pushStart = Clock::now();
-                const bool ok = queue1.push(std::move(item), stopToken);
+                const bool ok =
+                    pushWithCredit(frameLimiter, workerIndex, queue1, std::move(item), stopToken);
                 pushNs += nanosSince(pushStart);
-                if (!ok) {
-                    frameLimiter.release(workerIndex);
-                }
                 return ok;
             };
 
@@ -543,20 +538,21 @@ auto ParallelParsePipeline::run(std::span<const ReadRecord> initialRecords,
     // Same contract as CompressPipeline: run() owns archive completion.
     FQC_TRY(writer.finish());
 
-    stats.telemetry.timings = {
-        .readerWorkNs = readerParseNs.load(std::memory_order_relaxed),
-        .readerPushNs = readerPushNs.load(std::memory_order_relaxed),
-        .workerPopNs = encoderTimings.popNs.load(std::memory_order_relaxed),
-        .workerPrimaryNs = encoderTimings.computeNs.load(std::memory_order_relaxed),
-        .workerSecondaryNs = encoderTimings.secondaryNs.load(std::memory_order_relaxed),
-        .workerPushNs = encoderTimings.pushNs.load(std::memory_order_relaxed),
-        .writerPopNs = writerPopNs.load(std::memory_order_relaxed),
-        .writerWorkNs = writerWriteNs.load(std::memory_order_relaxed),
-        .wallNs = nanosSince(wallStart),
-    };
-    stats.telemetry.inputQueueStats = queue1.stats();
-    stats.telemetry.outputQueueStats = queue2.stats();
-    stats.telemetry.inFlightHighWater = frameLimiter.highWater();
+    stats.telemetry = makeTelemetry(
+        {
+            .readerWorkNs = readerParseNs.load(std::memory_order_relaxed),
+            .readerPushNs = readerPushNs.load(std::memory_order_relaxed),
+            .workerPopNs = encoderTimings.popNs.load(std::memory_order_relaxed),
+            .workerPrimaryNs = encoderTimings.computeNs.load(std::memory_order_relaxed),
+            .workerSecondaryNs = encoderTimings.secondaryNs.load(std::memory_order_relaxed),
+            .workerPushNs = encoderTimings.pushNs.load(std::memory_order_relaxed),
+            .writerPopNs = writerPopNs.load(std::memory_order_relaxed),
+            .writerWorkNs = writerWriteNs.load(std::memory_order_relaxed),
+            .wallNs = nanosSince(wallStart),
+        },
+        queue1,
+        queue2,
+        frameLimiter);
     stats.metadata = writer.metadata();
     // The writer is the only stage that knows what actually reached disk.
     stats.archive = writer.stats();

@@ -132,4 +132,41 @@ private:
     std::vector<bool> reservedInUse_;
 };
 
+/// Acquire one credit, push `item`, and return the credit if the push is
+/// refused (cancellation or a closed queue). The caller releases the credit
+/// only after the ordered sink commits the item. Keeping these three steps
+/// together makes the failure path impossible to forget at each source.
+template <typename Queue, typename Item>
+[[nodiscard]] auto pushWithCredit(InFlightLimiter& limiter,
+                                  Queue& queue,
+                                  Item item,
+                                  std::stop_token st = {}) -> bool {
+    if (!limiter.acquire(st)) {
+        return false;
+    }
+    if (!queue.push(std::move(item), st)) {
+        limiter.release();
+        return false;
+    }
+    return true;
+}
+
+/// Owner-reserved variant used by parallel parsers: the credit belongs to
+/// `owner` and must be released with the same owner after ordered commit.
+template <typename Queue, typename Item>
+[[nodiscard]] auto pushWithCredit(InFlightLimiter& limiter,
+                                  std::size_t owner,
+                                  Queue& queue,
+                                  Item item,
+                                  std::stop_token st = {}) -> bool {
+    if (!limiter.acquire(owner, st)) {
+        return false;
+    }
+    if (!queue.push(std::move(item), st)) {
+        limiter.release(owner);
+        return false;
+    }
+    return true;
+}
+
 }  // namespace fqc::pipeline

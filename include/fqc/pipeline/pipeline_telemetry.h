@@ -5,6 +5,7 @@
 #pragma once
 
 #include "fqc/format/archive.h"
+#include "fqc/pipeline/in_flight_limiter.h"
 #include "fqc/pipeline/mpmc_queue.h"
 
 #include <cstddef>
@@ -55,5 +56,21 @@ struct PipelineRunStats {
     PipelineTelemetry telemetry;
     std::uint64_t logicalBytes = 0;
 };
+
+/// Snapshot a pipeline's telemetry after all stages have joined. The caller
+/// assembles the stage timings; queue counters and the limiter high-water mark
+/// are read here so every pipeline reports the same shape.
+template <typename InputQueue, typename OutputQueue>
+[[nodiscard]] auto makeTelemetry(const StageTimings& timings,
+                                 const InputQueue& inputQueue,
+                                 const OutputQueue& outputQueue,
+                                 const InFlightLimiter& limiter) -> PipelineTelemetry {
+    return {
+        .timings = timings,
+        .inputQueueStats = inputQueue.stats(),
+        .outputQueueStats = outputQueue.stats(),
+        .inFlightHighWater = limiter.highWater(),
+    };
+}
 
 }  // namespace fqc::pipeline

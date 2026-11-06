@@ -4,6 +4,8 @@
 
 #include "fqc/pipeline/in_flight_limiter.h"
 
+#include "fqc/pipeline/mpmc_queue.h"
+
 #include <atomic>
 #include <future>
 #include <thread>
@@ -11,6 +13,8 @@
 #include <gtest/gtest.h>
 
 using fqc::pipeline::InFlightLimiter;
+using fqc::pipeline::MpmcQueue;
+using fqc::pipeline::pushWithCredit;
 
 TEST(InFlightLimiterTest, BlocksAboveCapacityUntilCreditIsReleased) {
     InFlightLimiter limiter(1);
@@ -76,4 +80,45 @@ TEST(InFlightLimiterTest, OwnerReservationPreventsCrossOwnerStarvation) {
     EXPECT_TRUE(acquired.load());
     limiter.release(0);
     limiter.release(1);
+}
+
+TEST(InFlightLimiterTest, PushWithCreditReturnsCreditWhenQueueRejects) {
+    InFlightLimiter limiter(1);
+    MpmcQueue<int, 2> queue;
+    queue.close();
+
+    EXPECT_FALSE(pushWithCredit(limiter, queue, 7));
+    // The rejected push must return the credit rather than leaking it.
+    ASSERT_TRUE(limiter.acquire());
+    limiter.release();
+}
+
+TEST(InFlightLimiterTest, PushWithCreditReturnsOwnerCreditWhenQueueRejects) {
+    InFlightLimiter limiter(1, 1);
+    MpmcQueue<int, 2> queue;
+    queue.close();
+
+    EXPECT_FALSE(pushWithCredit(limiter, 0, queue, 7));
+    ASSERT_TRUE(limiter.acquire(0));
+    limiter.release(0);
+}
+
+TEST(InFlightLimiterTest, PushWithCreditStopsWithoutAcquiring) {
+    InFlightLimiter limiter(1);
+    MpmcQueue<int, 2> queue;
+    std::stop_source stop;
+    stop.request_stop();
+
+    EXPECT_FALSE(pushWithCredit(limiter, queue, 7, stop.get_token()));
+    ASSERT_TRUE(limiter.acquire());
+    limiter.release();
+}
+
+TEST(InFlightLimiterTest, PushWithCreditHoldsCreditUntilRelease) {
+    InFlightLimiter limiter(1);
+    MpmcQueue<int, 2> queue;
+
+    ASSERT_TRUE(pushWithCredit(limiter, queue, 7));
+    EXPECT_EQ(queue.pop(), 7);
+    limiter.release();
 }
