@@ -69,11 +69,13 @@
   根因有三处：16 MiB 编解码器/运行时预留被逐帧重复计入；单帧峰值检查用的是整机预算，
   没有按最大同存帧数分摊；采样只按碱基限流且在整个流水线期间常驻。修复：峰值估算改为
   帧本地（全局预留只计一次）；逐帧预算按
-  `2×(队列深度-1) + in-flight worker 数 + 源端本地帧数` 分摊（并行解析的 in-flight
-  窗口按 parser 数 K 计，因此是 `6 + 2K` 帧，而不是按 `min(K,4)` 的 encoder 数）；
-  采样按实际持有字节限流，并采用“先加入、后停止”避免消费后丢弃。默认 16 GiB、
-  默认并行度下目标帧与归档逐字节不变；64 MiB 下实测顺序约 18.5 MiB、K=4 约 25.8 MiB、
-  K=8 约 27 MiB、解压（顺序归档）约 21 MiB，round-trip 与 verify 通过。→ 详见
+  `2×(队列深度-1) + in-flight worker 数 + 源端本地帧数` 分摊。并行解析的预算窗口
+  取 `max(K,4)`：K>=4 为 `6+2K`，与 `InFlightLimiter` 实际容量一致；K=1 与顺序路径
+  同预算，保证 `--parse-workers 0/1` 在低内存下归档逐字节一致；K=2/3 略保守。采样
+  按实际持有字节限流，并采用“先加入、后停止”避免消费后丢弃。默认 16 GiB、默认
+  并行度下目标帧与归档逐字节不变；64 MiB 下实测顺序约 18.5 MiB、K=4 约 25.8 MiB、
+  K=8 约 27–28 MiB、解压（顺序归档）约 21 MiB，round-trip 与 verify 通过。新增
+  `SequentialAndSingleParserFrameIdenticallyAt64MiB` 回归测试。→ 详见
   `.agents/notes/implemented/bug-fix/2026-11-06-aggregate-memory-budget.md`
 
 - **输出路径探测不再抛异常**：`validateOutput` 改用

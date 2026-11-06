@@ -89,13 +89,14 @@ maxBufferedFrames = 2 × (queueDepth - 1) + inFlightWorkers + sourceLocalFrames
 ```
 
 `sourceLocalFrames` 在顺序压缩/解压为 1，在并行解析为 parser 数 K；它尚未进入
-InFlightLimiter，必须显式计入。`inFlightWorkers` 取 InFlightLimiter 的容量口径：顺序压缩为
-encoder 数，并行解析为 parser 数 K，解压为 decoder 数；并行解析因此是 `6 + 2K` 帧
-（窗口 `6 + K` 加每个 parser 等待 credit 的一帧）。16 MiB 的编解码器/运行时预留只计一次，
-不再乘到每一帧上。
+InFlightLimiter，必须显式计入。`inFlightWorkers` 顺序压缩为 encoder 数，并行解析为
+`max(K, 4)`，解压为 decoder 数。并行解析的实际窗口是 `6 + K`，加上每个 parser 等待
+credit 的一帧，结构上最多 `6 + 2K`；预算取 `6 + max(K,4) + K`，K>=4 与实际一致，
+K=1 与顺序路径同预算（保证 `--parse-workers 0/1` 归档一致），K=2/3 略保守。
+16 MiB 的编解码器/运行时预留只计一次，不再乘到每一帧上。
 默认 16 GiB、默认并行度下逐帧上限仍为 512 MiB、目标帧仍为 64 MiB；64 MiB 下目标帧会缩到约 0.5–1 MiB。
 实测 64 MiB 预算、316 MB / 1M reads 输入：顺序压缩约 18.5 MiB、K=4 约 25.8 MiB、
-K=8 约 27 MiB、解压约 21 MiB（顺序归档），均低于预算。
+K=8 约 27–28 MiB、解压约 21 MiB（顺序归档），均低于预算。
 
 ## 执行架构
 

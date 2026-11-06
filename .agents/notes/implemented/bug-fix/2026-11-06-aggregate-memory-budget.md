@@ -51,11 +51,16 @@ targetFrameBytes = min(userTarget, maxFrameBytes / 4)
 
 - `sourceLocalFrames` 在顺序压缩/解压为 1，在并行解析为 parser 数 K；它尚未进入
   `InFlightLimiter`，必须显式计入。
-- `inFlightWorkers` 取 `InFlightLimiter` 的实际容量口径：顺序压缩为 encoder 数（4），
-  并行解析为 parser 数 K（limiter 的 capacity 和 reserved owners 都按 K 计，不是
-  `min(K,4)` 的 encoder 数），解压为配置的 decoder 数。
-- 并行解析的最大同存帧数是 `6 + 2K`：in-flight 窗口 `6 + K`，加上每个 parser 正在
-  等待 credit 的那一帧。按 `6 + min(K,4) + K` 估算会在 K=8 时漏掉 4 帧。
+- `inFlightWorkers` 取预算窗口，而不是 encoder 数：顺序压缩为 encoder 数（4），
+  并行解析为 `max(K, 4)`，解压为配置的 decoder 数。
+- 并行解析的实际 limiter 容量是 `6 + K`，每个 parser 还可能持有 1 个等待 credit 的
+  帧，所以结构上最多 `6 + 2K` 帧。预算取 `6 + max(K,4) + K`：
+  - K>=4 时等于 `6+2K`，与实际容量一致；
+  - K=1 时等于 11，与顺序路径相同，保证 `--parse-workers 0/1` 在低内存下仍然
+    逐字节一致；
+  - K=2/3 略保守（多算 2/1 帧），换来 K=1 的帧边界不依赖内存预算。
+- 早期按 `6 + min(K,4) + K` 估算会在 K=8 时漏掉 4 帧；只按 `6+2K` 又会让 K=1
+  与顺序路径的帧预算分叉。`max(K,4)` 是同时满足“安全”和“K=0/1 一致”的最小改动。
 - 目标帧大小取峰值预算的 1/4：`estimate*Peak` 约是 retained FASTQ 字节的 4 倍
   （记录字符串 + 原始流 + Zstd 输出上界 + vector 元数据）。
 
@@ -71,7 +76,18 @@ targetFrameBytes = min(userTarget, maxFrameBytes / 4)
 
 默认 16 GiB、默认并行度（K=4）下 `maxFrameBytes` 仍为 512 MiB、目标帧仍为 64 MiB，
 因此归档字节不变。
-64 MiB 下目标帧缩到约 0.5–1 MiB（顺序约 0.95 MiB，K=8 约 0.48 MiB）。
+64 MiB 下目标帧缩到约 0.5–1 MiB（顺序/K=1 约 0.95 MiB，K=8 约 0.48 MiB）。
+
+### 追加发现：K=0 与 K=1 在 64 MiB 下归档不一致
+
+第五轮修复后，`--parse-workers 0` 与 `--parse-workers 1` 在 64 MiB 下生成的归档
+不再逐字节一致（127,988,317 B vs 127,964,044 B）。原因是并行 K=1 的预算窗口
+`6+1+1=8` 小于顺序路径的 `6+4+1=11`，目标帧更大，帧边界随内存预算漂移。
+这破坏了 `2026-07-28-getline-capacity-framing` 建立的门禁：K=1 必须与顺序路径同帧。
+
+修复：并行解析的预算窗口取 `max(K,4)`；K=1 回到 11，K>=4 与实际 `6+2K` 一致，
+K=2/3 略保守。新增回归测试
+`ArchiveEngineTest.SequentialAndSingleParserFrameIdenticallyAt64MiB`。
 
 ## Alternatives considered
 
@@ -101,6 +117,8 @@ targetFrameBytes = min(userTarget, maxFrameBytes / 4)
   “单帧串行”兼容路径。
 - 新增回归测试 `ArchiveEngineTest.SampleBoundaryPreservesAllRecordsAt64MiB`：
   20k reads / 64 MiB，跨越采样预算，验证 compress → decompress 逐字节一致。
+- 新增回归测试 `ArchiveEngineTest.SequentialAndSingleParserFrameIdenticallyAt64MiB`：
+  同一输入在 64 MiB 下分别用 `parseWorkers=0/1` 压缩，归档逐字节一致。
 - `kProfileSampleMaxBases` 更名为 `kProfileSampleMaxBytes`；这是 `fqc::commands` 的
   源码级常量，项目不承诺对外 API/ABI 兼容。
 
@@ -112,10 +130,12 @@ targetFrameBytes = min(userTarget, maxFrameBytes / 4)
 - 64 MiB / 316 MB / 1M reads 实测峰值 RSS（同一 release 二进制的多次运行范围）：
   - 顺序压缩 18,760–19,256 KiB ≈ 18.3–18.8 MiB
   - 并行压缩 K=4 26,448 KiB ≈ 25.8 MiB
-  - 并行压缩 K=8 26,884–27,600 KiB ≈ 26.3–27.0 MiB
+  - 并行压缩 K=8 26,884–28,324 KiB ≈ 26.3–27.7 MiB
   - 解压（顺序归档）21,328 KiB ≈ 20.8 MiB；K=4 归档 18,388 KiB ≈ 18.0 MiB；
     K=8 归档 13,596 KiB ≈ 13.3 MiB
 - 64 MiB 归档 decompress 回原 FASTQ 逐字节一致，`verify` 通过；
+- 64 MiB 下 `--parse-workers 0` 与 `--parse-workers 1` 的归档逐字节一致
+  （127,988,317 B）；新增回归测试覆盖该门禁，并确认它在旧预算公式下失败、修复后通过；
 - 默认 16 GiB、K=4 下，改动前后 release 二进制对同一 316 MB 输入生成的归档逐字节一致
   （127,599,977 B），decompress round-trip 一致；
 - 未跑默认 16 GiB 的性能 A/B：成功路径的帧大小、编码路径和归档字节都没有变化，新增的

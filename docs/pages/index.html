@@ -428,9 +428,10 @@ $fqc compress   -i R1.fastq.gz -2 R2.fastq.gz -o paired.fqc <span class="c"># �
           <div class="figcaption">图 5 · 压缩侧内存三道防线与解压侧聚合校验</div>
         </div>
         <p>逐帧峰值预算 = <code>(内存限制 − 16 MiB 全局预留 − 采样持有字节) / 最大同存帧数</code>；
-        最大同存帧数 = 两条队列可用容量 + in-flight worker 数（并行解析为 parser 数）+ 源端本地帧数。累积目标取峰值的 1/4。
+        最大同存帧数 = 两条队列可用容量 + in-flight worker 数（并行解析为 <code>max(parser 数, 4)</code>）+ 源端本地帧数。累积目标取峰值的 1/4。
+        并行解析取 <code>max(K, 4)</code>：K=1 与顺序路径同预算，K≥4 与 limiter 实际容量一致。
         默认 16 GiB、默认并行度下目标帧仍为 64 MiB；64 MiB 下目标帧会缩到约 0.5–1 MiB。实测 64 MiB
-        （316 MB / 1M reads）：顺序约 18.5 MiB、K=4 约 25.8 MiB、K=8 约 27 MiB、解压约 21 MiB
+        （316 MB / 1M reads）：顺序约 18.5 MiB、K=4 约 25.8 MiB、K=8 约 27–28 MiB、解压约 21 MiB
         （顺序归档）。</p>
       </section>
 

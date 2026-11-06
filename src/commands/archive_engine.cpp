@@ -389,10 +389,14 @@ auto ArchiveEngine::compress(const CompressionRequest& request) -> Result<Operat
     const auto sourceLocalFrames = parallel ? request.parseWorkers : std::size_t{1};
     // InFlightLimiter is sized from the source fan-out: the sequential reader
     // uses encoder workers, while parallel parsing reserves one credit per
-    // parser (K), not per encoder (min(K, 4)). Each parser can additionally
-    // hold one frame while waiting for a credit, so its bound is
-    // 2*(queueDepth-1) + 2K.
-    const auto inFlightWorkers = parallel ? request.parseWorkers : encoderWorkers;
+    // parser (K), not per encoder (min(K, 4)). Budget at least the default
+    // encoder pool so --parse-workers 1 frames identically to the sequential
+    // reader; K=2/3 are slightly conservative, K>=4 matches the limiter.
+    // Each parser can additionally hold one frame while waiting for a credit.
+    const auto inFlightWorkers = parallel
+        ? std::max(request.parseWorkers,
+                   pipeline::ParallelParsePipeline::kDefaultEncoderParallelism)
+        : encoderWorkers;
     const auto bufferedFrames = maxBufferedFrames(inFlightWorkers, sourceLocalFrames);
     const auto maxFrameBytes =
         maxFrameBytesFor(request.memoryLimitBytes, bufferedFrames, sampleBytes);
