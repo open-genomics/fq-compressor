@@ -76,6 +76,10 @@
   K=8 约 27 MiB、解压（顺序归档）约 21 MiB，round-trip 与 verify 通过。→ 详见
   `.agents/notes/implemented/bug-fix/2026-11-06-aggregate-memory-budget.md`
 
+- **输出路径探测不再抛异常**：`validateOutput` 改用
+  `std::filesystem::exists(path, error_code)`；权限不足等文件系统错误现在返回
+  `kIOError`（退出码 2），不再落入 unexpected error（退出码 3）。
+
 - **头部尾随空格静默丢失（无损硬约束违背）**：`@id `（恰一个尾随空格）往返时丢字节。
   根因：`FastqParser` 按首个空格把头部切成 id/comment 时丢弃了分隔空格本身，comment 为空时
   重建无法区分"有分隔、空 comment"与"无 comment"。修复：comment 语义改为**从首个分隔空格起

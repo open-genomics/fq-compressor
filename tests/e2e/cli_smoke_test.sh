@@ -161,6 +161,11 @@ cmp -s "${TEST_DIR}/sample.fastq" "${TEST_DIR}/boundary-restored.fastq"
 "${FQC_BIN}" -q verify - < "${TEST_DIR}/sample.fqc"
 expect_exit 3 "${FQC_BIN}" -q verify - < "${TEST_DIR}/not-an-archive.fqc"
 
+# A path whose parent is a regular file is an I/O error, not an unexpected error.
+printf 'not a directory\n' > "${TEST_DIR}/not-a-dir"
+expect_exit 2 "${FQC_BIN}" -q compress -i "${TEST_DIR}/sample.fastq" \
+    -o "${TEST_DIR}/not-a-dir/out.fqc"
+
 # Existing outputs are protected unless --force is explicit.
 printf 'preserve this output\n' > "${TEST_DIR}/protected.fqc"
 cp "${TEST_DIR}/protected.fqc" "${TEST_DIR}/protected.before"

@@ -248,8 +248,17 @@ void logDecompressionObservability(const pipeline::DecompressStats& stats) {
     if (inputPath != "-" && outputPath != "-" && inputPath == outputPath) {
         return makeVoidError(ErrorCode::kUsageError, "input and output paths must differ");
     }
-    if (!forceOverwrite && outputPath != "-" && std::filesystem::exists(outputPath)) {
-        return makeVoidError(ErrorCode::kIOError, "output already exists: " + outputPath.string());
+    if (outputPath != "-") {
+        std::error_code error;
+        const bool exists = std::filesystem::exists(outputPath, error);
+        if (error) {
+            return makeVoidError(ErrorCode::kIOError,
+                                 "cannot inspect output path: " + error.message());
+        }
+        if (!forceOverwrite && exists) {
+            return makeVoidError(ErrorCode::kIOError,
+                                 "output already exists: " + outputPath.string());
+        }
     }
     return {};
 }
