@@ -81,12 +81,12 @@ TEST(DecompressPipelineTest, BasicRunPreservesOrderAndCounts) {
     EXPECT_EQ(result->decoderWorkers, 4U);
     EXPECT_GT(result->logicalBytes, 0U);
     EXPECT_GT(result->telemetry.inFlightHighWater, 0U);
-    EXPECT_EQ(result->telemetry.queue1Stats.pushes, result->archive.frameCount);
-    EXPECT_EQ(result->telemetry.queue1Stats.pops, result->archive.frameCount);
-    EXPECT_EQ(result->telemetry.queue2Stats.pushes, result->archive.frameCount);
-    EXPECT_EQ(result->telemetry.queue2Stats.pops, result->archive.frameCount);
+    EXPECT_EQ(result->telemetry.inputQueueStats.pushes, result->archive.frameCount);
+    EXPECT_EQ(result->telemetry.inputQueueStats.pops, result->archive.frameCount);
+    EXPECT_EQ(result->telemetry.outputQueueStats.pushes, result->archive.frameCount);
+    EXPECT_EQ(result->telemetry.outputQueueStats.pops, result->archive.frameCount);
     EXPECT_GT(result->telemetry.timings.wallNs, 0U);
-    EXPECT_GT(result->telemetry.timings.workerWorkNs, 0U);
+    EXPECT_GT(result->telemetry.timings.workerPrimaryNs, 0U);
     EXPECT_GT(result->telemetry.timings.writerWorkNs, 0U);
 }
 

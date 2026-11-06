@@ -229,15 +229,15 @@ auto DecompressPipeline::run(std::istream& input,
         .readerWorkNs = readerWorkNs.load(std::memory_order_relaxed),
         .readerPushNs = readerPushNs.load(std::memory_order_relaxed),
         .workerPopNs = decoderTimings.popNs.load(std::memory_order_relaxed),
-        .workerWorkNs = decoderTimings.computeNs.load(std::memory_order_relaxed),
+        .workerPrimaryNs = decoderTimings.computeNs.load(std::memory_order_relaxed),
         .workerSecondaryNs = 0,
         .workerPushNs = decoderTimings.pushNs.load(std::memory_order_relaxed),
         .writerPopNs = writerPopNs.load(std::memory_order_relaxed),
         .writerWorkNs = writerWorkNs.load(std::memory_order_relaxed),
         .wallNs = nanosSince(wallStart),
     };
-    stats.telemetry.queue1Stats = queue1.stats();
-    stats.telemetry.queue2Stats = queue2.stats();
+    stats.telemetry.inputQueueStats = queue1.stats();
+    stats.telemetry.outputQueueStats = queue2.stats();
     stats.telemetry.inFlightHighWater = frameLimiter.highWater();
 
     if (writerError.has_value()) {

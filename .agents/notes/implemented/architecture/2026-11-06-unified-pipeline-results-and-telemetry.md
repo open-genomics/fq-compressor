@@ -23,15 +23,19 @@ Status: implemented
 - `format::ArchiveStats archive`（与 writer/reader 使用同一类型）；
 - `PipelineTelemetry telemetry`：
   - `StageTimings`：`readerWorkNs`、`readerPushNs`、`workerPopNs`、
-    `workerWorkNs`、`workerSecondaryNs`、`workerPushNs`、`writerPopNs`、
+    `workerPrimaryNs`、`workerSecondaryNs`、`workerPushNs`、`writerPopNs`、
     `writerWorkNs`、`wallNs`；
-  - `queue1Stats` / `queue2Stats`；
+  - `inputQueueStats` / `outputQueueStats`；
   - `inFlightHighWater`；
 - `logicalBytes`：规范 FASTQ 字节数。
 
 `PipelineStats` 与 `DecompressStats` 继承 `PipelineRunStats`，只追加各自的 worker 数量。
-阶段名保持中性：压缩把 encode 放入 `workerWorkNs`、zstd 放入 `workerSecondaryNs`；
-解压把 decode 放入 `workerWorkNs`，`workerSecondaryNs` 为 0。
+阶段名保持中性：压缩把 encode 放入 `workerPrimaryNs`、zstd 放入 `workerSecondaryNs`；
+解压把 decode 放入 `workerPrimaryNs`，`workerSecondaryNs` 为 0。
+
+字段名表达方向角色而不是位置序号：`inputQueueStats` / `outputQueueStats` 直接对应
+reader -> worker / worker -> writer，`workerPrimaryNs` 与 `workerSecondaryNs` 对称。
+日志也使用 input/output，不再要求读者记住 q1/q2 的方向。
 
 `logicalBytes` 由流水线自己累计：压缩在 reader 侧，解压/verify 在 writer 侧对每条
 记录调用 `canonicalFastqBytes`。命令层不再各自数一遍。
@@ -61,7 +65,9 @@ footer”的中间值。`ArchiveEngine` 不再重复 finish。
 - `StageTimings` 字段名变成阶段中性，原有 `encoderEncodeNs` 等名字不再存在；
   测试和日志已同步；
 - 归档字节布局不变：`finish()` 只是从命令层提前到 pipeline 的 join 之后，
-  footer 内容与顺序完全相同。
+  footer 内容与顺序完全相同；
+- 遥测字段从位置命名改为角色命名，调用方和日志的阅读成本更低；这是源码级契约变更，
+  项目不承诺对外 API/ABI 兼容。
 
 ## Verification
 

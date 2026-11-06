@@ -273,15 +273,15 @@ auto CompressPipeline::run(std::istream& primary,
         .readerWorkNs = readerParseNs.load(std::memory_order_relaxed),
         .readerPushNs = readerPushNs.load(std::memory_order_relaxed),
         .workerPopNs = encoderTimings.popNs.load(std::memory_order_relaxed),
-        .workerWorkNs = encoderTimings.computeNs.load(std::memory_order_relaxed),
+        .workerPrimaryNs = encoderTimings.computeNs.load(std::memory_order_relaxed),
         .workerSecondaryNs = encoderTimings.secondaryNs.load(std::memory_order_relaxed),
         .workerPushNs = encoderTimings.pushNs.load(std::memory_order_relaxed),
         .writerPopNs = writerPopNs.load(std::memory_order_relaxed),
         .writerWorkNs = writerWriteNs.load(std::memory_order_relaxed),
         .wallNs = nanosSince(wallStart),
     };
-    stats.telemetry.queue1Stats = queue1.stats();
-    stats.telemetry.queue2Stats = queue2.stats();
+    stats.telemetry.inputQueueStats = queue1.stats();
+    stats.telemetry.outputQueueStats = queue2.stats();
     stats.telemetry.inFlightHighWater = frameLimiter.highWater();
     stats.metadata = writer.metadata();
     // ArchiveWriter owns the authoritative byte/record counters; copying them

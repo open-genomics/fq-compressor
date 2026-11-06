@@ -14,8 +14,8 @@ namespace fqc::pipeline {
 
 /// Wall-clock breakdown shared by all frame pipelines.
 ///
-/// `workerWorkNs` is the primary CPU stage (encode for compression, decode for
-/// decompression). `workerSecondaryNs` is the optional second CPU stage; the
+/// `workerPrimaryNs` is the primary CPU stage (encode for compression, decode
+/// for decompression). `workerSecondaryNs` is the optional second CPU stage; the
 /// compression pipelines put zstd there, decompression leaves it at zero.
 /// Keeping the names stage-neutral lets both directions expose the same
 /// observability shape without pretending a decoder is an encoder.
@@ -23,7 +23,7 @@ struct StageTimings {
     std::uint64_t readerWorkNs = 0;
     std::uint64_t readerPushNs = 0;
     std::uint64_t workerPopNs = 0;
-    std::uint64_t workerWorkNs = 0;
+    std::uint64_t workerPrimaryNs = 0;
     std::uint64_t workerSecondaryNs = 0;
     std::uint64_t workerPushNs = 0;
     std::uint64_t writerPopNs = 0;
@@ -35,8 +35,8 @@ struct StageTimings {
 /// never used for synchronization; read them after the run has joined.
 struct PipelineTelemetry {
     StageTimings timings;
-    QueueStats queue1Stats;
-    QueueStats queue2Stats;
+    QueueStats inputQueueStats;   // reader -> worker
+    QueueStats outputQueueStats;  // worker -> writer
     std::size_t inFlightHighWater = 0;
 };
 

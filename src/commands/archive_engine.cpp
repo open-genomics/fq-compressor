@@ -139,27 +139,27 @@ void logPipelineTelemetry(const pipeline::PipelineTelemetry& telemetry) {
         nsToMs(t.readerWorkNs),
         nsToMs(t.readerPushNs),
         nsToMs(t.workerPopNs),
-        nsToMs(t.workerWorkNs),
+        nsToMs(t.workerPrimaryNs),
         nsToMs(t.workerSecondaryNs),
         nsToMs(t.workerPushNs),
         nsToMs(t.writerPopNs),
         nsToMs(t.writerWorkNs),
         nsToMs(t.wallNs));
-    const auto& q1 = telemetry.queue1Stats;
-    const auto& q2 = telemetry.queue2Stats;
+    const auto& inputQueue = telemetry.inputQueueStats;
+    const auto& outputQueue = telemetry.outputQueueStats;
     FQC_LOG_INFO(
-        "pipeline queues: q1 pushes={} pops={} pushWaits={} popWaits={} highWater={} | "
-        "q2 pushes={} pops={} pushWaits={} popWaits={} highWater={}",
-        q1.pushes,
-        q1.pops,
-        q1.pushWaits,
-        q1.popWaits,
-        q1.highWater,
-        q2.pushes,
-        q2.pops,
-        q2.pushWaits,
-        q2.popWaits,
-        q2.highWater);
+        "pipeline queues: input pushes={} pops={} pushWaits={} popWaits={} highWater={} | "
+        "output pushes={} pops={} pushWaits={} popWaits={} highWater={}",
+        inputQueue.pushes,
+        inputQueue.pops,
+        inputQueue.pushWaits,
+        inputQueue.popWaits,
+        inputQueue.highWater,
+        outputQueue.pushes,
+        outputQueue.pops,
+        outputQueue.pushWaits,
+        outputQueue.popWaits,
+        outputQueue.highWater);
     FQC_LOG_INFO("pipeline in-flight frames: highWater={}", telemetry.inFlightHighWater);
 }
 
