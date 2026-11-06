@@ -139,6 +139,7 @@ encoder 状态帧内局部，worker 间无需共享可变状态。profile 采样
 | 命名空间 | 职责 |
 |---|---|
 | `fqc::format` | 线上格式、流编码、校验和、内存预检 |
+| `fqc::pipeline` | MPMC 队列、reorder/保序提交、in-flight 限额、压缩/解压/并行解析流水线 |
 | `fqc::commands` | profile 判定与单引擎有界执行 |
 | `fqc::io` | FASTQ 解析、gzip 输入、文件/stdin/stdout 流工厂 |
 | `fqc::common` | 记录、结构化错误、日志 |

@@ -79,6 +79,11 @@ private:
     /// Set when a read line exceeded `maxLineBytes_`; the next readRecord
     /// surfaces it as `kFormatError` instead of treating the line as EOF.
     bool lineTooLong_ = false;
+    /// Per-parser scratch buffers. Reusing them keeps the header and '+' line
+    /// capacity across records instead of allocating two fresh strings per
+    /// record; a parser is owned by one reader/worker thread, so this is safe.
+    std::string idLine_;
+    std::string plusLine_;
 };
 
 /// One pair of reads; `second` is empty in single-end mode.

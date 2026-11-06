@@ -29,7 +29,7 @@ FQC_BIN_B="${FQC_PERF_BIN_B:-}"
 RESULTS_DIR="${RESULTS_DIR:-$TEST_DIR/benchmark_results}"
 FQC_PERF_SIZES="${FQC_PERF_SIZES:-1 2}"
 FQC_PERF_MEMORY_MIB="${FQC_PERF_MEMORY_MIB:-16384}"
-FQC_PERF_DATA="${FQC_PERF_DATA:-structured}"
+FQC_PERF_DATA="${FQC_PERF_DATA:-realistic}"
 FQC_PERF_KEEP_TEMP="${FQC_PERF_KEEP_TEMP:-0}"
 FQC_PERF_ENFORCE_SLA="${FQC_PERF_ENFORCE_SLA:-0}"
 FQC_PERF_REPEATS="${FQC_PERF_REPEATS:-5}"
@@ -82,6 +82,12 @@ max_value() {
     printf '%s\n' "$@" | awk 'NR == 1 || $1 > max { max = $1 } END { print max }'
 }
 
+# bc prints ".98" for values below 1; JSON and printf both prefer "0.98".
+bc_num() {
+    local scale="$1" expr="$2"
+    printf '%.*f' "$scale" "$(echo "scale=$scale; $expr" | bc)"
+}
+
 # Generate test FASTQ with specific size
 generate_fastq() {
     local file="$1"
@@ -89,10 +95,19 @@ generate_fastq() {
     local read_len="${3:-150}"
 
     local target_bytes=$((target_mb * 1024 * 1024))
-    local bytes_per_read=$((read_len * 2 + 20))  # seq + qual + headers
+    # realistic 模式与 Python 生成器的 header 模板保持一致：短读约 60 字节，长读约 70 字节。
+    local header_bytes=20
+    case "$FQC_PERF_DATA" in
+        realistic)
+            if [[ "$read_len" -gt 1000 ]]; then header_bytes=70; else header_bytes=60; fi
+            ;;
+        illumina-realistic|novaseq-realistic) header_bytes=60 ;;
+        ont-realistic) header_bytes=70 ;;
+    esac
+    local bytes_per_read=$((read_len * 2 + header_bytes))  # seq + qual + headers
     local num_reads=$((target_bytes / bytes_per_read))
 
-    log_info "Generating ${target_mb}MB FASTQ with $num_reads reads..."
+    log_info "Generating ${target_mb}MB FASTQ with $num_reads reads (data=$FQC_PERF_DATA)..."
     python3 - "$file" "$num_reads" "$read_len" <<'PY'
 from pathlib import Path
 import os
@@ -103,20 +118,78 @@ path = Path(sys.argv[1])
 num_reads = int(sys.argv[2])
 read_len = int(sys.argv[3])
 patterns = ("ACGT", "TGCA", "GATC", "CTAG", "AGTC", "TCAG")
-mode = os.environ.get("FQC_PERF_DATA", "structured")
+mode = os.environ.get("FQC_PERF_DATA", "realistic")
+if mode == "realistic":
+    mode = "ont-realistic" if read_len > 1000 else "illumina-realistic"
+known_modes = {
+    "structured",
+    "random",
+    "ont-realistic",
+    "novaseq-realistic",
+    "illumina-realistic",
+}
+if mode not in known_modes:
+    raise SystemExit(f"unknown FQC_PERF_DATA: {mode}")
 rng = random.Random(0xF0C2026)
 structured_quality = "I" * read_len
 
+def illumina_header(i):
+    tile = 1101 + (i // 10000) % 12
+    x = 1000 + rng.randrange(30000)
+    y = 1000 + rng.randrange(30000)
+    return f"A00123:45:HXXXXDRX:1:{tile}:{x}:{y}", " 1:N:0:ACGT"
+
+def ont_header(i):
+    channel = 1 + (i % 512)
+    return f"DRR171398.{i} runid=abc123 ch={channel} start_time=2026-01-01T00:00:00Z", ""
+
+def quality_illumina(length):
+    out = bytearray(length)
+    for p in range(length):
+        base = 38 - (6 * p) // max(1, length - 1)
+        if rng.random() < 0.03:
+            q = rng.randint(18, 30)
+        else:
+            q = max(30, min(41, int(rng.gauss(base, 0.8))))
+        out[p] = q + 33
+    return out.decode("ascii")
+
+def quality_ont(length):
+    out = bytearray(length)
+    for p in range(length):
+        q = max(2, min(41, int(rng.gauss(30, 4))))
+        out[p] = q + 33
+    return out.decode("ascii")
+
+def quality_novaseq(length):
+    return "".join(chr(rng.choice((37, 38, 39, 40)) + 33) for _ in range(length))
+
 with path.open("w", encoding="ascii") as fh:
     for i in range(1, num_reads + 1):
-        if mode == "random":
-            seq = "".join(rng.choices("ACGT", k=read_len))
-            qual = "".join(rng.choices("?@ABCDEFGHI", k=read_len))
-        else:
+        if mode == "structured":
             pattern = patterns[i % len(patterns)]
             seq = (pattern * ((read_len + len(pattern) - 1) // len(pattern)))[:read_len]
             qual = structured_quality
-        fh.write(f"@read_{i} length={read_len}\n{seq}\n+\n{qual}\n")
+            ident, comment = f"read_{i} length={read_len}", ""
+        elif mode == "random":
+            seq = "".join(rng.choices("ACGT", k=read_len))
+            qual = "".join(rng.choices("?@ABCDEFGHI", k=read_len))
+            ident, comment = f"read_{i} length={read_len}", ""
+        elif mode == "ont-realistic":
+            seq = "".join(rng.choices("ACGT", k=read_len))
+            qual = quality_ont(read_len)
+            ident, comment = ont_header(i)
+        elif mode == "novaseq-realistic":
+            seq = "".join(rng.choices("ACGT", k=read_len))
+            qual = quality_novaseq(read_len)
+            ident, comment = illumina_header(i)
+        elif mode == "illumina-realistic":
+            seq = "".join(rng.choices("ACGT", k=read_len))
+            qual = quality_illumina(read_len)
+            ident, comment = illumina_header(i)
+        else:
+            raise SystemExit(f"unknown FQC_PERF_DATA: {mode}")
+        fh.write(f"@{ident}{comment}\n{seq}\n+\n{qual}\n")
 PY
 }
 
@@ -131,6 +204,15 @@ now_seconds() {
     echo "$up"
 }
 
+# /proc/uptime has centisecond resolution; a sub-10ms operation can measure 0.
+# Clamp to 0.01s so tiny/quick benchmarks do not divide by zero. Formal
+# 512/1024 MiB runs are far above this floor.
+elapsed_seconds() {
+    local start="$1" end="$2" value
+    value=$(echo "$end - $start" | bc)
+    awk -v v="$value" 'BEGIN { print (v > 0 ? v : 0.01) }'
+}
+
 # Echo wall seconds of one compress run; /usr/bin/time writes max RSS (KiB)
 # to the rss file. Untimed callers may discard stdout.
 time_compress() {
@@ -141,7 +223,7 @@ time_compress() {
         "$bin" -q --memory-limit "$FQC_PERF_MEMORY_MIB" compress \
         -i "$input" -o "$output" --profile "$profile" -f 2>/dev/null
     end_time=$(now_seconds)
-    echo "$end_time - $start_time" | bc
+    elapsed_seconds "$start_time" "$end_time"
 }
 
 time_decompress() {
@@ -152,7 +234,7 @@ time_decompress() {
         "$bin" -q --memory-limit "$FQC_PERF_MEMORY_MIB" decompress \
         -i "$input" -o "$output" -f 2>/dev/null
     end_time=$(now_seconds)
-    echo "$end_time - $start_time" | bc
+    elapsed_seconds "$start_time" "$end_time"
 }
 
 # Warmup: one untimed compress + decompress with binary A, so page cache and
@@ -198,14 +280,14 @@ report_binary() {
     local decompress_time_max=$(max_value "${decompress_times[@]}")
 
     local compressed_size=$(stat -c%s "$compressed" 2>/dev/null || stat -f%z "$compressed")
-    local ratio=$(echo "scale=4; $input_size / $compressed_size" | bc)
+    local ratio=$(bc_num 4 "$input_size / $compressed_size")
     # Fastest run = shortest time, and vice versa.
-    local compress_speed=$(echo "scale=2; $input_mb / $compress_time" | bc)
-    local compress_speed_max=$(echo "scale=2; $input_mb / $compress_time_min" | bc)
-    local compress_speed_min=$(echo "scale=2; $input_mb / $compress_time_max" | bc)
-    local decompress_speed=$(echo "scale=2; $input_mb / $decompress_time" | bc)
-    local decompress_speed_max=$(echo "scale=2; $input_mb / $decompress_time_min" | bc)
-    local decompress_speed_min=$(echo "scale=2; $input_mb / $decompress_time_max" | bc)
+    local compress_speed=$(bc_num 2 "$input_mb / $compress_time")
+    local compress_speed_max=$(bc_num 2 "$input_mb / $compress_time_min")
+    local compress_speed_min=$(bc_num 2 "$input_mb / $compress_time_max")
+    local decompress_speed=$(bc_num 2 "$input_mb / $decompress_time")
+    local decompress_speed_max=$(bc_num 2 "$input_mb / $decompress_time_min")
+    local decompress_speed_min=$(bc_num 2 "$input_mb / $decompress_time_max")
 
     if ! cmp -s "$original" "$decompressed"; then
         echo "Error: round-trip mismatch for benchmark '$name' (binary $label)" >&2
@@ -252,7 +334,7 @@ run_benchmark() {
     local profile="$3"
 
     local input_size=$(stat -c%s "$input" 2>/dev/null || stat -f%z "$input")
-    local input_mb=$(echo "scale=2; $input_size / 1048576" | bc)
+    local input_mb=$(bc_num 2 "$input_size / 1048576")
 
     log_bench "Benchmark: $name (${input_mb} MiB, profile=${profile}, repeats=${FQC_PERF_REPEATS})"
 

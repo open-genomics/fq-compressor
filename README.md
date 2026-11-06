@@ -1,7 +1,7 @@
 # fq-compressor
 
 把 FASTQ 压成**小而可校验**的归档：内存可控、管道友好。压缩比视数据而定——
-合成数据约 2.8–2.9×，真实语料 1.96–4.15×（详见 [性能](#性能) 与
+合成 realistic 数据约 2.6–3.4×，真实语料 1.96–4.15×（详见 [性能](#性能) 与
 [docs/real-corpus.md](docs/real-corpus.md)）。
 
 *A columnar streaming FASTQ compressor in C++23 — small and verifiable archives, bounded memory, pipe-friendly I/O.*
@@ -97,12 +97,24 @@ FASTQ 记录的信息字段——ID、序列、质量值——按**列式分离*
 
 ## 性能
 
+> 口径：`tests/e2e/test_performance.sh` 默认数据已改为 `FQC_PERF_DATA=realistic`
+> （短读位置相关质量、长读宽质量分布）；`structured`/`random` 仅作压力 fixture。
+> 下表的 148.84 MiB/s 是阶段 H 的 random 数据 A/B，保留作历史对照，不能与
+> realistic 或真实语料横比。
+
 合成数据（阶段 H A/B 同窗口，64 MiB 内存预算，随机 FASTQ ×5 次中位数）：
 
 | 数据 | 压缩（并行解析） | 相对顺序解析 | 压缩比 |
 |---|---:|---:|---:|
 | Illumina-like 150 bp | **148.84 MiB/s** | +47.7% | 2.96× |
 | ONT-like 20 kbp | 与顺序路径持平 | — | 2.84× |
+
+2026-11-05 的 realistic 正式 baseline（WSL2，Ryzen 7 8845HS，Clang 18.1.3，
+64 MiB frame，4 parser，5 次中位数）：目标 512 MiB（实际 470.51 MiB）Illumina
+压缩 247.63 MiB/s、目标 1024 MiB（实际 941.02 MiB）Illumina 265.82 MiB/s、
+目标 1024 MiB（实际 1023.53 MiB）ONT 135.20 MiB/s；压缩比 3.38× / 3.38× /
+2.63×。原始 JSONL 与极差、RSS 见 [docs/benchmarks.md](docs/benchmarks.md)。
+这是绝对 baseline，不是与旧 structured 数据的对比（数据、CPU、编译器均不同）。
 
 真实生物语料实测（Illumina WXS 4.15×、ONT 1.96× 等）见
 [docs/real-corpus.md](docs/real-corpus.md)；合成数据不代表真实压缩比——短读质量
@@ -140,7 +152,7 @@ FASTQ 记录的信息字段——ID、序列、质量值——按**列式分离*
 
 ## 许可证
 
-[MIT](LICENSE)（vendored 的 `vendor/spring-core/` 第三方代码遵循其原始许可，不在本 MIT 授权范围内）。
+[MIT](LICENSE)。
 
 ## 相关项目
 

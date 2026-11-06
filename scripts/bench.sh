@@ -79,6 +79,12 @@ run_bench() {
         fi
     fi
 
+    # 只检查会影响二进制的源码目录；perf-baselines/ 与文档改动不算 dirty。
+    local dirty_suffix=""
+    if [[ -n "$(git -C "$PROJECT_ROOT" status --porcelain -- src include tests scripts CMakeLists.txt CMakePresets.json 2>/dev/null)" ]]; then
+        dirty_suffix=" + 工作区"
+    fi
+
     log_info "基准参数: sizes=[$sizes] repeats=$repeats sla=$enforce_sla memory=${memory}MiB"
     FQC_PERF_SIZES="$sizes" \
     FQC_PERF_REPEATS="$repeats" \
@@ -87,24 +93,29 @@ run_bench() {
     FQC_PERF_ARCHIVE="$slug" \
         "$PERF_SCRIPT"
 
-    # 归档 README：记录环境与参数，便于跨归档对比时溯源。
-    local archive_dir
-    archive_dir="$(ls -dt "$BASELINE_ROOT"/"$(date +%F)"-* 2>/dev/null | head -1)"
-    if [[ -n "$archive_dir" && -f "$archive_dir/benchmark_results/benchmarks.jsonl" ]]; then
-        local commit
+    # 归档 README：只在首次生成时写入，避免覆盖手工补充的溯源信息。
+    local archive_dir="$BASELINE_ROOT/$(date +%F)-${slug}"
+    if [[ -f "$archive_dir/benchmark_results/benchmarks.jsonl" && ! -f "$archive_dir/README.md" ]]; then
+        local commit cpu_model compiler
         commit="$(grep '^# git:' "$archive_dir/benchmark_results/benchmarks.jsonl" | head -1 | awk '{print $3}')"
+        cpu_model="$(lscpu 2>/dev/null | awk -F: '/Model name/ {sub(/^ +/, "", $2); print $2; exit}')"
+        compiler="$(clang++ --version 2>/dev/null | head -1)"
         cat > "$archive_dir/README.md" <<EOF
 # 基准归档 $(basename "$archive_dir")
 
-- git commit: ${commit:-unknown}
+- git commit: ${commit:-unknown}${dirty_suffix}
 - 参数: sizes=[$sizes] repeats=$repeats sla=$enforce_sla memory=${memory}MiB
-- 环境: $(uname -srm) $(nproc 2>/dev/null || echo "?") 核
+- 数据: ${FQC_PERF_DATA:-realistic}（脚本默认）
+- 环境: ${cpu_model:-unknown} / $(uname -srm) / $(nproc 2>/dev/null || echo "?") 线程
+- 编译器: ${compiler:-unknown}
 - 二进制: ${RELEASE_BIN:-unknown}
 
 原始数据: benchmark_results/benchmarks.jsonl
 摘要与对比: docs/benchmarks.md
 EOF
         log_info "归档说明已写入: $archive_dir/README.md"
+    elif [[ -f "$archive_dir/README.md" ]]; then
+        log_warn "JSONL 已更新，保留已有归档说明；请人工核对: $archive_dir/README.md"
     fi
 }
 

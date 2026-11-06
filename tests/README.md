@@ -15,7 +15,9 @@
 - `commands/` — 归档引擎与 profile 检测测试
 - `common/` — 结构化错误测试
 - `e2e/` — 端到端 CLI 测试（shell 脚本）
+- `fixtures/` — 冻结归档 fixture（`sequential-v2/` 本族、`foreign-indexed-v2/` 异族 magic 识别）
 - `format/` — FQC v2 线格式、完整性、内存有界测试
+- `fuzz/` — libFuzzer harness（FASTQ 解析器与归档 reader，对应 `clang-fuzz` preset 与 fuzz-nightly CI）
 - `io/` — FASTQ 解析器与流测试
 - `pipeline/` — MPMC / reorder / 压缩与解压流水线 / 并行解析
 

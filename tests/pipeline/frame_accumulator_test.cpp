@@ -41,8 +41,8 @@ TEST(FrameAccumulatorTest, ClosesExactlyAtRetainedBudget) {
 
 TEST(FrameAccumulatorTest, FinishFlushesRemainderOnce) {
     FrameAccumulator accumulator(1ULL << 30);
-    accumulator.append(makeRecord("r1"));
-    accumulator.append(makeRecord("r2"));
+    EXPECT_FALSE(accumulator.append(makeRecord("r1")).has_value());
+    EXPECT_FALSE(accumulator.append(makeRecord("r2")).has_value());
 
     auto tail = accumulator.finish();
     ASSERT_TRUE(tail.has_value());

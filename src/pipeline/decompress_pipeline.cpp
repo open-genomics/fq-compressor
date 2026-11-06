@@ -8,6 +8,7 @@
 #include "fqc/pipeline/in_flight_limiter.h"
 #include "fqc/pipeline/mpmc_queue.h"
 #include "fqc/pipeline/reorder_buffer.h"
+#include "fqc/pipeline/worker_error.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -16,8 +17,6 @@
 #include <mutex>
 #include <optional>
 #include <stop_token>
-#include <string>
-#include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -42,13 +41,6 @@ struct OrderedFrame {
     std::uint64_t frameId{};
     std::unique_ptr<format::DecodedFrame> frame;
 };
-
-// 流水线 worker 的异常屏障消息。jthread 函数体逃逸的异常会直接 std::terminate
-// （main 的 catch-all 看不到线程内异常），这里统一转成 kInternalError 记录，
-// 由调用方配合 request_stop() 完成协作取消。
-[[nodiscard]] auto workerCrashError(std::string_view stage, const char* detail) -> Error {
-    return Error{ErrorCode::kInternalError, std::string(stage) + " worker terminated: " + detail};
-}
 
 }  // namespace
 

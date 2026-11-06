@@ -17,7 +17,7 @@ auto FastqParser::readRecord() -> Result<std::optional<ReadRecord>> {
         return std::optional<ReadRecord>{};
     }
 
-    std::string idLine;
+    auto& idLine = idLine_;
     if (!readLine(idLine)) {
         if (lineTooLong_) {
             return std::unexpected(formatError("FASTQ line exceeds maximum length of " +
@@ -70,7 +70,7 @@ auto FastqParser::readRecord() -> Result<std::optional<ReadRecord>> {
         return std::unexpected(formatError("empty sequence"));
     }
 
-    std::string plusLine;
+    auto& plusLine = plusLine_;
     FQC_TRY(readRequiredLine(plusLine));
     if (plusLine.empty() || plusLine[0] != '+') {
         return std::unexpected(formatError("expected '+'"));

@@ -14,6 +14,20 @@
   在 ARM 上因 switch 无法向量化。1 GiB illumina、`--parse-workers 12` 从约
   331 提升到约 419 MiB/s（同机 A/B，+27%）；归档格式与压缩比不变。
 
+- **parser 行缓冲复用**：`FastqParser` 复用 header/`+` 行的临时 `std::string` 容量，
+  减少每条记录两次短命分配；parser 由单线程独占，无需加锁。
+- **realistic benchmark 默认**：`FQC_PERF_DATA` 默认从 `structured` 改为 `realistic`
+  （Illumina-like 位置相关质量、ONT-like 宽质量分布）；`structured`/`random` 保留为
+  压力 fixture。旧 `2026-08-30` baseline 已标注为 structured 压力数据，
+  1051×/1204×/11419× 压缩比不能与真实语料横比。新增 512/1024 MiB realistic
+  正式 baseline（`perf-baselines/2026-11-05-realistic/`），含原始 JSONL、极差与 RSS。
+- **benchmark 工具修正**：realistic Illumina header 改为标准 7 段，header 字节估算按
+  短/长读区分；未知 `FQC_PERF_DATA` 显式报错；小尺寸 JSON 数字补前导零、计时下限
+  0.01s 避免除零；`bench.sh` 归档说明不再覆盖手工内容，并记录 CPU 型号、编译器版本
+  与源码 dirty 标记。
+- **标准流关闭 C stdio 同步**：CLI 启动时 `std::ios::sync_with_stdio(false)`，
+  减少 stdin/stdout 路径上的逐字符锁；`std::ofstream` 不受影响，日志仍走 stderr。
+
 - 并行解析的 parser 扇出与 encoder 池解耦：encoder 数量采用 `min(K, 4)`，避免提高
   `--parse-workers` 时机械地成倍创建 CPU 编码线程 → 详见
   `docs/postmortems/2026-09-21-worker-topology.md`
@@ -31,17 +45,10 @@
 - **并行解析块边界对齐误匹配 `'@'` → 幻影记录注入（静默数据损坏）**：块边界落在头部行中段且
   该处恰为 `'@'` 时，`findFirstRecordStart` 会把行尾残段误判为记录起点，注入一条截断头部的幻影
   记录；归档校验和自洽，`verify`/解压全部通过。修复：候选命中必须处于**真正的行首**（前一字节
-  为 `
-` 或文件起始），残段直接跳过。质量行以 `'@'` 起始（Q31）仍安全，不受影响。
+  为 `\n` 或文件起始），残段直接跳过。质量行以 `'@'` 起始（Q31）仍安全，不受影响。
 
-- **`trimTrailingCr` 剥离所有尾随 `
-`**：改为只剥离与 `
-` 成对的单个 CRLF 行尾 `
-`；数据中
-  真实存在的尾随 `
-`（如 `SEQ
-
-`）保留一个，encode 阶段以"无效逻辑记录"响亮拒绝而非静默
+- **`trimTrailingCr` 剥离所有尾随 `\r`**：改为只剥离与 `\r\n` 成对的单个 CRLF 行尾 `\r`；数据中
+  真实存在的尾随 `\r`（如 `SEQ\r\n\r\n`）保留一个，encode 阶段以"无效逻辑记录"响亮拒绝而非静默
   篡改（fail-closed）。
 
 - **归档读取把底层 I/O 错误伪装成格式错误**：`readExact` 在 `badbit`（如损坏的 gzip 成员）时

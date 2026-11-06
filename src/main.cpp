@@ -10,6 +10,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <exception>
+#include <iostream>
 #include <limits>
 #include <optional>
 #include <string>
@@ -104,6 +105,11 @@ template <typename T>
 // argv 是标准入口参数签名，不能替换为 std::array。
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays, modernize-avoid-c-arrays)
 auto run(int argc, char* argv[]) -> int {
+    // 关闭标准 iostream 与 C stdio 的同步，减少 stdin/stdout 路径上的逐字符锁；
+    // 文件流（std::ofstream）不受该设置影响。日志走 stderr，不经过 iostream。
+    std::ios::sync_with_stdio(false);
+    std::cin.tie(nullptr);
+
     GlobalOptions global;
     CompressOptions compress;
     DecompressOptions decompress;

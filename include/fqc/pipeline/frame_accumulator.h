@@ -64,7 +64,7 @@ private:
             return std::nullopt;
         }
         std::vector<ReadRecord> out;
-        out.swap(frame_);  // keeps this accumulator's capacity for reuse
+        out.swap(frame_);  // ownership moves to the consumer; capacity does not return
         retainedBytes_ = 0;
         return out;
     }

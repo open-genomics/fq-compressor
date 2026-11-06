@@ -16,14 +16,16 @@ perf-baselines/
 
 - 每次运行由 `scripts/bench.sh run --slug <slug>` 生成（或直接调
   `tests/e2e/test_performance.sh` + `FQC_PERF_ARCHIVE`）。
-- JSONL 头部注释记录 git commit 与运行配置（尺寸、重复次数、内存预算、二进制路径），
-  归档与代码版本一一对应。
+- JSONL 头部注释记录 HEAD commit 与运行配置（尺寸、重复次数、内存预算、二进制路径）；
+  若二进制含工作区改动，必须在归档 README 记录改动范围，精确复现前应先提交。
 - 摘要与跨版本对比结论记入 `docs/benchmarks.md`（人类可读台账）；本目录存原始数据。
 - 机器环境（CPU、OS、WSL2/原生）会显著影响吞吐，跨归档对比优先看同一环境的 A/B 模式
   （`FQC_PERF_BIN_B`），或参考各归档 README 的环境说明。
 
 ## 归档列表
 
-| 日期 | slug | git commit | 环境 | 摘要见 |
+| 日期 | slug | git commit / 工作区 | 环境 | 摘要见 |
 |---|---|---|---|---|
-| 2026-08-30 | baseline | 26b2214 | 见本目录 README | docs/benchmarks.md |
+| 2026-08-30 | baseline | 26b2214 | WSL2 / Ryzen 7 5800H / Clang 21 | docs/benchmarks.md |
+| 2026-10-27 | kunpeng920-21c | b42333c + ARM 适配 | Linux aarch64 / Kunpeng-920 / Clang 18.1.8 | docs/benchmarks.md |
+| 2026-11-05 | realistic | 627fa7d + 工作区 | WSL2 / Ryzen 7 8845HS / Clang 18.1.3 | docs/benchmarks.md |
