@@ -432,9 +432,9 @@ $fqc compress   -i R1.fastq.gz -2 R2.fastq.gz -o paired.fqc <span class="c"># �
         并行解析取 <code>max(K, 4)</code>：K=1 与顺序路径同预算，K≥4 与 limiter 实际容量一致。
         默认 16 GiB、默认并行度下目标帧仍为 64 MiB；64 MiB 下目标帧会缩到约 0.5–1 MiB。实测 64 MiB
         （316 MB / 1M reads）：顺序约 18.5 MiB、K=4 约 25.8 MiB、K=8 约 27–28 MiB、解压约 21 MiB
-        （顺序归档）。兼容性边界：旧版低内存归档的帧可能大于新 reader 的逐帧预算，需提高
-        <code>--memory-limit</code> 读取（本仓库 316 MB 样本的旧 64 MiB 归档约需 101 MiB）；
-        归档格式不变。</p>
+        （顺序归档）。兼容性边界：归档帧大小与压缩预算相关，解码预算需覆盖帧峰值；新版
+        16 GiB 归档在 64 MiB 下会被拒，旧版 64 MiB 归档在新版下约需 101 MiB。归档格式不变，
+        提高 <code>--memory-limit</code> 即可读取。</p>
       </section>
 
       <section class="section cat-architecture" id="arch-profile" data-cat="architecture">
