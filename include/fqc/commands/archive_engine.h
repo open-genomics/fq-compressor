@@ -15,6 +15,8 @@
 namespace fqc::commands {
 
 inline constexpr std::size_t kDefaultMemoryLimitBytes = format::kDefaultMemoryLimitBytes;
+/// Historical upper bounds for profile sampling. The effective budget is also
+/// capped at one eighth of the process memory limit after the codec reserve.
 inline constexpr std::size_t kProfileSampleMaxRecords = 50'000;
 inline constexpr std::size_t kProfileSampleMaxBytes = 512ULL * 1024ULL * 1024ULL;
 
@@ -23,7 +25,10 @@ struct CompressionRequest {
     std::filesystem::path matePath;
     std::filesystem::path outputPath;
     std::optional<format::DatasetProfile> profile;
+    /// Whole-process memory budget. Frame and sample limits are derived from it.
     std::size_t memoryLimitBytes = kDefaultMemoryLimitBytes;
+    /// Requested retained-byte target for one frame. The engine may lower it
+    /// when the budget derived from `memoryLimitBytes` is smaller.
     std::size_t targetFrameBytes = format::kDefaultTargetFrameBytes;
     int qualityZstdLevel = 1;
     /// Parser workers for parallel parsing; 0 forces the sequential reader.
@@ -40,6 +45,7 @@ struct CompressionRequest {
 struct DecompressionRequest {
     std::filesystem::path inputPath;
     std::filesystem::path outputPath;
+    /// Whole-process memory budget; the per-frame decode limit is derived from it.
     std::size_t memoryLimitBytes = kDefaultMemoryLimitBytes;
     /// Decoder workers; 0 keeps the pipeline default (4). Decoding is
     /// CPU-bound, so many-core hosts can raise this independently of I/O.
@@ -67,6 +73,8 @@ public:
     [[nodiscard]] static auto compress(const CompressionRequest& request) -> Result<OperationStats>;
     [[nodiscard]] static auto decompress(const DecompressionRequest& request)
         -> Result<OperationStats>;
+    /// `memoryLimitBytes` is the whole-process budget; the per-frame decode
+    /// limit is derived from it. `decoderWorkers == 0` keeps the pipeline default.
     [[nodiscard]] static auto verify(const std::filesystem::path& inputPath,
                                      std::size_t memoryLimitBytes = kDefaultMemoryLimitBytes,
                                      std::size_t decoderWorkers = 0) -> Result<OperationStats>;
