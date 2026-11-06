@@ -318,6 +318,9 @@ auto ParallelParsePipeline::run(std::span<const ReadRecord> initialRecords,
             pushNs += nanosSince(pushStart);
             return ok;
         };
+        // runGuarded 只包异常屏障，不改变 chunk / marker / credit 状态机；
+        // 复杂度仍来自外层 parseWorker 的交错，拆开反而隐藏不变量。
+        // NOLINTNEXTLINE(readability-function-cognitive-complexity)
         runGuarded("parallel parser", stopSource, parseError, errorMutex, [&] {
             FrameAccumulator accumulator(targetFrameBytes_, false);
 
