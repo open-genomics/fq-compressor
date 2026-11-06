@@ -114,9 +114,9 @@ private:
     return {};
 }
 
-// Two bounded queues + worker pool + the source-side frame being accumulated.
-// The source-local frame is not covered by InFlightLimiter: it has not been
-// enqueued yet, so the aggregate budget must count it explicitly.
+// Two bounded queues + the InFlightLimiter worker window + source-local frames.
+// Source-local frames are not covered by InFlightLimiter: they have not been
+// enqueued yet, so the aggregate budget must count them explicitly.
 constexpr std::size_t kPipelineQueueFrames =
     2 * (pipeline::CompressPipeline::kDefaultQueueDepth - 1);
 // The budget formula assumes one shared queue depth across all three pipelines.
@@ -127,8 +127,8 @@ static_assert(pipeline::CompressPipeline::kDefaultQueueDepth ==
 constexpr std::size_t kFramePeakToTargetFactor = 4;
 
 [[nodiscard]] constexpr auto maxBufferedFrames(
-    std::size_t workerCount, std::size_t sourceLocalFrames) noexcept -> std::size_t {
-    return kPipelineQueueFrames + workerCount + sourceLocalFrames;
+    std::size_t inFlightWorkers, std::size_t sourceLocalFrames) noexcept -> std::size_t {
+    return kPipelineQueueFrames + inFlightWorkers + sourceLocalFrames;
 }
 
 /// Split the non-reserved budget across every frame that can hold data at

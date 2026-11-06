@@ -94,7 +94,8 @@ InFlightLimiter，必须显式计入。`inFlightWorkers` 顺序压缩为 encoder
 credit 的一帧，结构上最多 `6 + 2K`；预算取 `6 + max(K,4) + K`，K>=4 与实际一致，
 K=1 与顺序路径同预算（保证 `--parse-workers 0/1` 归档一致），K=2/3 略保守。
 16 MiB 的编解码器/运行时预留只计一次，不再乘到每一帧上。
-默认 16 GiB、默认并行度下逐帧上限仍为 512 MiB、目标帧仍为 64 MiB；64 MiB 下目标帧会缩到约 0.5–1 MiB。
+默认 16 GiB、默认并行度下逐帧上限仍为 512 MiB、目标帧仍为 64 MiB；64 MiB 下目标帧
+会缩到约 0.5–1 MiB。
 实测 64 MiB 预算、316 MB / 1M reads 输入：顺序压缩约 18.5 MiB、K=4 约 25.8 MiB、
 K=8 约 27–28 MiB、解压约 21 MiB（顺序归档），均低于预算。兼容性边界：旧版低内存
 归档的帧可能大于新 reader 的逐帧预算，需提高 `--memory-limit` 读取（本仓库 316 MB
