@@ -89,7 +89,10 @@ targetFrameBytes = min(userTarget, maxFrameBytes / 4)
 - 默认 16 GiB 行为与归档逐字节不变；性能路径没有新增原子或锁。
 - 低内存下 profile 采样更早停止；150 bp 短读仍有约 1.7 万条，足够 profile 判定。
 - `maxFrameBytes` 的语义从“单路 raw stream 上限”变为“帧本地峰值预算”；raw stream
-  检查保留为廉价早退，但不再是唯一约束。
+  检查保留为廉价早退，但不再是唯一约束。默认 64 MiB 目标帧不受影响；旧的自定义超大帧
+  （峰值 >512 MiB，例如 `--frame-mib 512` 在 16 GiB 预算下生成的归档）可能被新 reader
+  的逐帧预算拒绝。需要时可用旧版解压为 FASTQ，再按默认帧重压；本轮没有为大帧引入
+  “单帧串行”兼容路径。
 - 新增回归测试 `ArchiveEngineTest.SampleBoundaryPreservesAllRecordsAt64MiB`：
   20k reads / 64 MiB，跨越采样预算，验证 compress → decompress 逐字节一致。
 - `kProfileSampleMaxBases` 更名为 `kProfileSampleMaxBytes`；这是 `fqc::commands` 的

@@ -101,7 +101,8 @@ FASTQ 记录的信息字段——ID、序列、质量值——按**列式分离*
 > 口径：`tests/e2e/test_performance.sh` 默认数据已改为 `FQC_PERF_DATA=realistic`
 > （短读位置相关质量、长读宽质量分布）；`structured`/`random` 仅作压力 fixture。
 > 下表的 148.84 MiB/s 是阶段 H 的 random 数据 A/B，保留作历史对照，不能与
-> realistic 或真实语料横比。
+> realistic 或真实语料横比。该数字使用旧的 64 MiB 帧预算公式；2026-11-06 后
+> 64 MiB 预算会主动缩小帧以守住硬上限，不能与当前二进制直接横比。
 
 合成数据（阶段 H A/B 同窗口，64 MiB 内存预算，随机 FASTQ ×5 次中位数）：
 

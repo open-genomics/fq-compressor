@@ -133,7 +133,8 @@ writer 生命周期，也不引入 DAG 或调度器。handler 返回 `Result<T>`
 `.agents/notes/implemented/architecture/2026-11-06-shared-worker-stage.md` 与
 `.agents/notes/implemented/simplification/2026-11-06-single-pipeline-error-slot.md`。
 
-在 8 核 x86_64 WSL2 主机上，64 MiB 随机短读压缩约 149 MiB/s（相对顺序解析 +47.7%）；
+在 8 核 x86_64 WSL2 主机上，64 MiB 随机短读压缩约 149 MiB/s（相对顺序解析 +47.7%；
+当时的帧预算公式，当前 64 MiB 会主动缩小帧）；
 长读解析占比小，并行收益落在噪声内。WSL2 吞吐波动 ±20-85%，数字仅供粗略参考——
 性能台账见 `docs/benchmarks.md`，真实语料见 `docs/real-corpus.md`，并行化逐阶段史
 见 `docs/roadmap.md`。不引重并行框架（TBB/线程池/异步 I/O）的取舍见

@@ -427,7 +427,10 @@ $fqc compress   -i R1.fastq.gz -2 R2.fastq.gz -o paired.fqc <span class="c"># �
           <img src="assets/memory-model.svg" alt="压缩侧内存三道防线图" width="1180" height="360" loading="lazy">
           <div class="figcaption">图 5 · 压缩侧内存三道防线与解压侧聚合校验</div>
         </div>
-        <p>最大帧大小 = <code>(内存限制 − 运行时预留) / 4</code>；累积目标用 <code>/ 8</code>。在 64 MiB 限制下，发布流程实测 RSS 为 25–32 MiB。</p>
+        <p>逐帧峰值预算 = <code>(内存限制 − 16 MiB 全局预留 − 采样持有字节) / 最大同存帧数</code>；
+        最大同存帧数 = 两条队列可用容量 + worker 数 + 源端本地帧数。累积目标取峰值的 1/4。
+        默认 16 GiB 下目标帧仍为 64 MiB；64 MiB 下目标帧会缩到约 0.5–1 MiB。实测 64 MiB
+        （316 MB / 1M reads）：顺序 18.2 MiB、K=4 25.9 MiB、K=8 29.4 MiB、解压 17.1 MiB。</p>
       </section>
 
       <section class="section cat-architecture" id="arch-profile" data-cat="architecture">
@@ -483,7 +486,7 @@ $fqc compress   -i R1.fastq.gz -2 R2.fastq.gz -o paired.fqc <span class="c"># �
 
       <section class="section cat-architecture" id="arch-performance" data-cat="architecture">
         <h3><span class="kicker">Benchmarks</span>性能基准</h3>
-        <p>合成数据（阶段 H A/B 同窗口，64 MiB 内存预算，随机 FASTQ ×5 次中位数）：</p>
+        <p>合成数据（阶段 H A/B 同窗口，<b>旧帧预算公式</b>的 64 MiB 内存预算，随机 FASTQ ×5 次中位数；2026-11-06 后 64 MiB 会主动缩小帧以守住硬上限，不能与当前二进制直接横比）：</p>
         <div class="table-wrap">
           <table>
             <thead>

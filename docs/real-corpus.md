@@ -38,7 +38,8 @@
 | Illumina WXS | **4.15×** | 87.0 MiB/s | 28.1 MiB/s | **+210%** | 150 MiB/s | 225 MiB/s |
 | 人类 MinION | **1.96×** | 33.5 MiB/s | 27.1 MiB/s | +24% | 65 MiB/s | 121 MiB/s |
 
-对照合成随机数据（阶段 H，64 MiB 预算）：Illumina-like 2.96× / 149 MiB/s，ONT-like 2.84×。
+对照合成随机数据（阶段 H，旧帧预算公式的 64 MiB 预算）：Illumina-like 2.96× / 149 MiB/s，
+ONT-like 2.84×。当前 64 MiB 会主动缩小帧，数字不可直接与当前二进制横比。
 
 解读：
 
