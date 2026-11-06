@@ -98,8 +98,8 @@ $fqc verify     reads.fqc                          <span class="c"># 完整解�
 $fqc compress   -i R1.fastq.gz -2 R2.fastq.gz -o paired.fqc <span class="c"># 双端</span></code></pre>
 
           <div class="stat-row">
-            <div class="stat"><div class="num">2.96×</div><div class="lbl">Illumina 150 bp 压缩比</div></div>
-            <div class="stat"><div class="num">148.84</div><div class="lbl">MiB/s 压缩吞吐（并行解析）</div></div>
+            <div class="stat"><div class="num">3.33×</div><div class="lbl">Illumina 150 bp 压缩比</div></div>
+            <div class="stat"><div class="num">341.91</div><div class="lbl">MiB/s 压缩吞吐（并行解析）</div></div>
             <div class="stat"><div class="num">16 GiB</div><div class="lbl">默认内存预算（最低 64 MiB）</div></div>
             <div class="stat"><div class="num">4:1</div><div class="lbl">序列 2-bit 打包</div></div>
           </div>
@@ -490,15 +490,16 @@ $fqc compress   -i R1.fastq.gz -2 R2.fastq.gz -o paired.fqc <span class="c"># �
 
       <section class="section cat-architecture" id="arch-performance" data-cat="architecture">
         <h3><span class="kicker">Benchmarks</span>性能基准</h3>
-        <p>合成数据（阶段 H A/B 同窗口，<b>旧帧预算公式</b>的 64 MiB 内存预算，随机 FASTQ ×5 次中位数；2026-11-06 后 64 MiB 会主动缩小帧以守住硬上限，不能与当前二进制直接横比）：</p>
+        <p>当前 realistic 绝对 baseline（2026-11-06，commit <code>513b9f9</code>，16 GiB 预算、64 MiB 目标帧、4 parser、5 次中位数）；不是优化 A/B，不同日期或运行窗口的数字不可横比。极差与原始 JSONL 见<a href="https://github.com/open-genomics/fq-compressor/blob/master/docs/benchmarks.md">docs/benchmarks.md</a>。</p>
         <div class="table-wrap">
           <table>
             <thead>
-              <tr><th>数据</th><th class="num">压缩（并行解析）</th><th class="num">相对顺序解析</th><th class="num">压缩比</th></tr>
+              <tr><th>数据</th><th class="num">实际输入</th><th class="num">压缩</th><th class="num">解压</th><th class="num">压缩比</th><th class="num">压缩 RSS</th></tr>
             </thead>
             <tbody>
-              <tr><td>Illumina-like 150 bp</td><td class="num"><b>148.84 MiB/s</b></td><td class="num">+47.7%</td><td class="num">2.96×</td></tr>
-              <tr><td>ONT-like 20 kbp</td><td class="num">与顺序路径持平</td><td class="num">—</td><td class="num">2.84×</td></tr>
+              <tr><td>Illumina 150 bp</td><td class="num">502.61 MiB</td><td class="num"><b>341.91 MiB/s</b></td><td class="num">353.95 MiB/s</td><td class="num">3.33×</td><td class="num">924 MiB</td></tr>
+              <tr><td>Illumina 150 bp</td><td class="num">1005.22 MiB</td><td class="num">331.75 MiB/s</td><td class="num">410.29 MiB/s</td><td class="num">3.33×</td><td class="num">1 230 MiB</td></tr>
+              <tr><td>ONT 20 kbp</td><td class="num">1024.03 MiB</td><td class="num">317.03 MiB/s</td><td class="num">616.88 MiB/s</td><td class="num">2.63×</td><td class="num">1 647 MiB</td></tr>
             </tbody>
           </table>
         </div>
