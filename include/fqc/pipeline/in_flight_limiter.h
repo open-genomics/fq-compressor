@@ -39,7 +39,10 @@ public:
     explicit InFlightLimiter(std::size_t capacity, std::size_t reservedOwners = 0)
         : kCapacity(capacity),
           kSharedCapacity(capacity - reservedOwners),
-          reservedInUse_(reservedOwners, false) {}
+          reservedInUse_(reservedOwners, false) {
+        assert(capacity > 0 && "in-flight limiter: capacity must be positive");
+        assert(reservedOwners <= capacity && "in-flight limiter: reserved owners exceed capacity");
+    }
 
     InFlightLimiter(const InFlightLimiter&) = delete;
     InFlightLimiter& operator=(const InFlightLimiter&) = delete;
