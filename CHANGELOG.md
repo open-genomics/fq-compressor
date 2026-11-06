@@ -75,7 +75,10 @@
   按实际持有字节限流，并采用“先加入、后停止”避免消费后丢弃。默认 16 GiB、默认
   并行度下目标帧与归档逐字节不变；64 MiB 下实测顺序约 18.5 MiB、K=4 约 25.8 MiB、
   K=8 约 27–28 MiB、解压（顺序归档）约 21 MiB，round-trip 与 verify 通过。新增
-  `SequentialAndSingleParserFrameIdenticallyAt64MiB` 回归测试。→ 详见
+  `SequentialAndSingleParserFrameIdenticallyAt64MiB` 回归测试。**兼容性边界**：旧版
+  在低内存下生成的较大帧可能超过新 reader 的逐帧预算；本仓库 316 MB 样本的旧 64 MiB
+  归档需约 101 MiB 才能 `verify`（128 MiB 实测 round-trip 通过），格式本身不变，
+  提高 `--memory-limit` 即可读取。→ 详见
   `.agents/notes/implemented/bug-fix/2026-11-06-aggregate-memory-budget.md`
 
 - **输出路径探测不再抛异常**：`validateOutput` 改用

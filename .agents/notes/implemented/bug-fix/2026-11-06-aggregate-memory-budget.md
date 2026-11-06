@@ -115,6 +115,11 @@ K=2/3 略保守。新增回归测试
   （峰值 >512 MiB，例如 `--frame-mib 512` 在 16 GiB 预算下生成的归档）可能被新 reader
   的逐帧预算拒绝。需要时可用旧版解压为 FASTQ，再按默认帧重压；本轮没有为大帧引入
   “单帧串行”兼容路径。
+- **旧的低内存归档也需要更高预算**：旧版 64 MiB 预算生成的默认帧约 6 MiB retained，
+  其解码峰值可能超过新 reader 在 64 MiB 下的逐帧预算。本仓库 316 MB 样本的旧 64 MiB
+  归档需要约 101 MiB 才能 `verify`（128 MiB 实测 decompress round-trip 通过）。
+  这不是格式变化，而是硬上限收紧的代价；可用更高的 `--memory-limit` 读取，或旧版解压
+  为 FASTQ 后按新默认帧重压。本轮没有引入“大帧串行解码”回退路径。
 - 新增回归测试 `ArchiveEngineTest.SampleBoundaryPreservesAllRecordsAt64MiB`：
   20k reads / 64 MiB，跨越采样预算，验证 compress → decompress 逐字节一致。
 - 新增回归测试 `ArchiveEngineTest.SequentialAndSingleParserFrameIdenticallyAt64MiB`：
