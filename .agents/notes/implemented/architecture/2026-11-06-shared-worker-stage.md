@@ -1,4 +1,4 @@
-# Agent Note: 抽取共享 worker stage
+# Agent Note: 共享 worker stage 与异常屏障
 
 Status: implemented
 
@@ -20,6 +20,10 @@ while (!stop_requested)
 
 这仍然符合仓库“第三个重复模式再抽”的原则：不是为未来可能的流水线预先设计框架，而是
 在第三份重复已经存在、且差异已被遥测统一压缩到 handler 内之后抽取。
+
+同样的异常屏障还出现在 reader / writer / parser 线程中：6 处 `try/catch` 重复
+“把异常转成 `workerCrashError`、保留首个错误、`request_stop`”。worker stage 抽取后，
+错误写入的锁逻辑又多了一份，和单写者版本并行维护。
 
 ## Decision
 
@@ -46,6 +50,17 @@ handler 返回 `Result<Output>`：错误由 helper 记录到调用方提供的
 `parallel_parse_pipeline` 的 chunk-end marker 留在 handler 内直接返回 `OrderedItem`；
 helper 不知道 marker 的存在，也不参与顺序语义。
 
+新增 `include/fqc/pipeline/stage_guard.h`，把异常屏障收敛成两个契约：
+
+- `recordGuardedError(slot, error)`：单写者 reader / writer 用，不加锁；
+- `recordGuardedError(mutex, slot, error)`：多写者 parser pool / worker stage 用；
+- `runGuarded(...)` 两个重载：执行 `fn`，捕获 `std::exception` / `...`，转换成
+  worker crash 错误，只保留首个失败，并 `request_stop()`。
+
+`startWorkerStage` 的 worker 线程也用 `runGuarded(..., errorMutex, ...)` 包住循环，
+`timings.merge` 在 guard 返回后执行。worker stage 本身不再手写 `catch`；错误写入和
+异常转换都只有一份实现。三个 pipeline TU 不再直接包含 `worker_error.h`。
+
 ## 抽取后发现的隐藏假设
 
 第一版 `startWorkerStage` 只接受一个 `Capacity`，要求输入和输出队列容量相同。三条现有
@@ -71,6 +86,11 @@ helper 不知道 marker 的存在，也不参与顺序语义。
   检查 footer；把生命周期塞进 helper 会把简单的线性时序变成回调或状态机。
 - **用 `std::function` 抹平 handler 类型**：减少模板实例化，但会引入间接调用和类型擦除，
   而 handler 本来就是编译期已知的 lambda；模板参数更直接，也没有运行时成本。
+- **保留 6 份手写 `try/catch`**：每处只有 8 行，单独看很便宜；但“首个错误”的锁语义、
+  异常转换文案和取消时机已经在 reader / writer / parser 之间出现细微差异，继续保留会
+  让这些差异变成事实契约。
+- **让 `runGuarded` 接管线程创建、join 和队列关闭**：会越过异常屏障的边界，把简单的
+  线性生命周期变成回调；异常屏障只应关心 `fn` 的异常和错误槽，不应知道线程拓扑。
 
 ## Consequences
 
@@ -83,11 +103,18 @@ helper 不知道 marker 的存在，也不参与顺序语义。
 - handler 必须可复制、不得抛异常（异常仍会被屏障捕获，但视为 bug）；`stageName` 必须是
   生命周期覆盖线程的字符串（当前均为字面量）；
 - worker 计时仍按线程本地累计、退出时合并，保持原先的低开销口径；
+- 6 处 reader / writer / parser 的 `try/catch` 收敛为 `runGuarded` 调用；
+- 错误槽统一为“首个失败优先”：原 reader / writer 的 catch 会覆盖循环内已经记录的
+  具体错误，现在只保留第一条，诊断信息更稳定；
+- `worker_error.h` 从三个 pipeline TU 的直接依赖中移除，异常屏障的依赖方向变成
+  `stage_guard.h -> worker_error.h`；
 - 归档字节布局不变：这次只改控制流，不触碰编码器、zstd 参数或帧顺序。
 
 ## Verification
 
-- `clang-debug` / `clang-release` / `clang-asan` / `clang-tsan`：18/18 通过；
+- `clang-debug` / `clang-release` / `clang-asan` / `clang-tsan`：19/19 通过；
+- 新增 `tests/pipeline/stage_guard_test.cpp`：覆盖成功不写错误、异常写入首个错误并
+  `request_stop`、已有错误不被覆盖、多写者重载；
 - 同一输入分别用改动前、改动后的 release 二进制压缩，单帧与 8 帧归档均逐字节一致
   （`cmp`），解压 round-trip 一致；
 - 8 帧 4 MiB 输入确认 worker pop / compute / secondary / push 计时均非零；

@@ -11,8 +11,8 @@
 #include "fqc/pipeline/frame_accumulator.h"
 #include "fqc/pipeline/in_flight_limiter.h"
 #include "fqc/pipeline/mpmc_queue.h"
+#include "fqc/pipeline/stage_guard.h"
 #include "fqc/pipeline/timing.h"
-#include "fqc/pipeline/worker_error.h"
 #include "fqc/pipeline/worker_stage.h"
 
 #include <algorithm>
@@ -291,10 +291,7 @@ auto ParallelParsePipeline::run(std::span<const ReadRecord> initialRecords,
     std::stop_token stopToken = stopSource.get_token();
 
     auto recordError = [&](const Error& error) {
-        const std::lock_guard lk(errorMutex);
-        if (!parseError) {
-            parseError = error;
-        }
+        recordGuardedError(errorMutex, parseError, error);
     };
 
     // K parser workers, one per byte chunk of [sampleEnd, fileSize).
@@ -321,7 +318,7 @@ auto ParallelParsePipeline::run(std::span<const ReadRecord> initialRecords,
             pushNs += nanosSince(pushStart);
             return ok;
         };
-        try {
+        runGuarded("parallel parser", stopSource, parseError, errorMutex, [&] {
             FrameAccumulator accumulator(targetFrameBytes_, false);
 
             auto pushFrame = [&](ParseItem item) -> bool {
@@ -438,13 +435,7 @@ auto ParallelParsePipeline::run(std::span<const ReadRecord> initialRecords,
                     pushFrame(ParseItem{workerIndex, localId++, false, std::move(*tail)});
                 }
             }
-        } catch (const std::exception& error) {
-            recordError(workerCrashError("parallel parser", error.what()));
-            stopSource.request_stop();
-        } catch (...) {
-            recordError(workerCrashError("parallel parser", "unknown exception"));
-            stopSource.request_stop();
-        }
+        });
         // 完整性协议：每个 worker 无条件恰好发一个 chunk-end marker（异常路径
         // 也一样），否则 writer 的 ChunkOrderer 会永远等不到该 chunk 的完成标记。
         pushMarker(ParseItem{workerIndex, localId, true, {}});
@@ -496,7 +487,7 @@ auto ParallelParsePipeline::run(std::span<const ReadRecord> initialRecords,
     std::jthread writerThread([&] {
         std::uint64_t popNs = 0;
         std::uint64_t writeNs = 0;
-        try {
+        runGuarded("parallel writer", stopSource, writerError, [&] {
             ChunkOrderer<ReadyFrame> orderer;
             auto emitReady = [&](std::vector<ReadyFrame> ready) {
                 for (auto& readyFrame : ready) {
@@ -528,13 +519,7 @@ auto ParallelParsePipeline::run(std::span<const ReadRecord> initialRecords,
                     break;
                 }
             }
-        } catch (const std::exception& error) {
-            writerError = workerCrashError("parallel writer", error.what());
-            stopSource.request_stop();
-        } catch (...) {
-            writerError = workerCrashError("parallel writer", "unknown exception");
-            stopSource.request_stop();
-        }
+        });
         writerPopNs.store(popNs, std::memory_order_relaxed);
         writerWriteNs.store(writeNs, std::memory_order_relaxed);
     });

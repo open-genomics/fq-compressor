@@ -6,8 +6,8 @@
 
 #include "fqc/common/error.h"
 #include "fqc/pipeline/mpmc_queue.h"
+#include "fqc/pipeline/stage_guard.h"
 #include "fqc/pipeline/timing.h"
-#include "fqc/pipeline/worker_error.h"
 
 #include <atomic>
 #include <cassert>
@@ -84,7 +84,7 @@ template <typename Input,
     for (std::size_t i = 0; i < workerCount; ++i) {
         workers.emplace_back([&, handler, stopToken, stageName]() mutable {
             WorkerStageTimings local;
-            try {
+            runGuarded(stageName, stopSource, firstError, errorMutex, [&] {
                 while (!stopToken.stop_requested()) {
                     const auto popStart = Clock::now();
                     auto in = input.pop(stopToken);
@@ -94,10 +94,7 @@ template <typename Input,
                     }
                     auto out = handler(*in, local);
                     if (!out) {
-                        const std::lock_guard lk(errorMutex);
-                        if (!firstError) {
-                            firstError = out.error();
-                        }
+                        recordGuardedError(errorMutex, firstError, out.error());
                         stopSource.request_stop();
                         break;
                     }
@@ -108,19 +105,7 @@ template <typename Input,
                         break;
                     }
                 }
-            } catch (const std::exception& error) {
-                const std::lock_guard lk(errorMutex);
-                if (!firstError) {
-                    firstError = workerCrashError(stageName, error.what());
-                }
-                stopSource.request_stop();
-            } catch (...) {
-                const std::lock_guard lk(errorMutex);
-                if (!firstError) {
-                    firstError = workerCrashError(stageName, "unknown exception");
-                }
-                stopSource.request_stop();
-            }
+            });
             timings.merge(local);
         });
     }

@@ -8,8 +8,8 @@
 #include "fqc/pipeline/in_flight_limiter.h"
 #include "fqc/pipeline/mpmc_queue.h"
 #include "fqc/pipeline/reorder_buffer.h"
+#include "fqc/pipeline/stage_guard.h"
 #include "fqc/pipeline/timing.h"
-#include "fqc/pipeline/worker_error.h"
 #include "fqc/pipeline/worker_stage.h"
 
 #include <cstddef>
@@ -96,7 +96,7 @@ auto DecompressPipeline::run(std::istream& input,
     std::jthread reader([&] {
         std::uint64_t workNs = 0;
         std::uint64_t pushNs = 0;
-        try {
+        runGuarded("decompress reader", stopSource, readerError, [&] {
             const auto openStart = Clock::now();
             format::ArchiveReader archiveReader(input, maxFrameBytes_, memoryLimitBytes_);
             auto opened = archiveReader.open();
@@ -142,13 +142,7 @@ auto DecompressPipeline::run(std::istream& input,
                 }
                 encodedBytes = archiveReader.stats().encodedBytes;
             }
-        } catch (const std::exception& error) {
-            readerError = workerCrashError("decompress reader", error.what());
-            stopSource.request_stop();
-        } catch (...) {
-            readerError = workerCrashError("decompress reader", "unknown exception");
-            stopSource.request_stop();
-        }
+        });
         queue1.close();
         readerWorkNs.store(workNs, std::memory_order_relaxed);
         readerPushNs.store(pushNs, std::memory_order_relaxed);
@@ -184,7 +178,7 @@ auto DecompressPipeline::run(std::istream& input,
     std::jthread writer([&] {
         std::uint64_t popNs = 0;
         std::uint64_t workNs = 0;
-        try {
+        runGuarded("decompress writer", stopSource, writerError, [&] {
             ReorderBuffer<std::unique_ptr<format::DecodedFrame>> reorder;
             while (!stopToken.stop_requested()) {
                 const auto popStart = Clock::now();
@@ -217,13 +211,7 @@ auto DecompressPipeline::run(std::istream& input,
                     break;
                 }
             }
-        } catch (const std::exception& error) {
-            writerError = workerCrashError("decompress writer", error.what());
-            stopSource.request_stop();
-        } catch (...) {
-            writerError = workerCrashError("decompress writer", "unknown exception");
-            stopSource.request_stop();
-        }
+        });
         writerPopNs.store(popNs, std::memory_order_relaxed);
         writerWorkNs.store(workNs, std::memory_order_relaxed);
     });

@@ -18,6 +18,11 @@
   归档格式与帧顺序不变，单帧与 8 帧归档均通过改动前后逐字节 `cmp` → 详见
   `.agents/notes/implemented/architecture/2026-11-06-shared-worker-stage.md`
 
+- **共享异常屏障**：reader / writer / parser 线程的 6 处 `try/catch` 收敛到
+  `pipeline::runGuarded` / `recordGuardedError`，统一“首个错误 + request_stop”；
+  worker stage 的异常路径复用同一实现。原 reader/writer 的 catch 会覆盖循环内已记录的
+  具体错误，现在只保留首个失败；归档格式不变。
+
 - **ARM64（AArch64）构建适配**：Release 的 native 调优在 aarch64 改用
   `-mcpu=native`（clang 的 `-march=native` 在 ARM 上只映射到 `generic`）；新增
   `conan/profiles/clang-armv8` 与构建文档；decompress/verify 新增

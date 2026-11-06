@@ -116,7 +116,9 @@ in-flight 高水位）和 `logicalBytes`（规范 FASTQ 字节数）。压缩 `r
 `pop -> handler -> push`、首个错误记录、取消请求、异常屏障和 worker 本地计时合并。
 队列关闭、线程创建/join 顺序与线程拓扑仍由各流水线自己掌握，helper 不接管 reader /
 writer 生命周期，也不引入 DAG 或调度器。handler 返回 `Result<T>`，chunk-end marker
-等顺序语义留在各流水线的 handler 内。取舍见
+等顺序语义留在各流水线的 handler 内。reader / writer / parser 线程的异常屏障也由
+`pipeline::runGuarded` / `recordGuardedError` 统一：只保留首个失败并请求取消，单写者
+不加锁、parser pool 和 worker stage 用同一把错误锁。取舍见
 `.agents/notes/implemented/architecture/2026-11-06-shared-worker-stage.md`。
 
 在 8 核 x86_64 WSL2 主机上，64 MiB 随机短读压缩约 149 MiB/s（相对顺序解析 +47.7%）；

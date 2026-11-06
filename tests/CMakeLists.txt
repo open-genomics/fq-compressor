@@ -145,6 +145,11 @@ fqc_add_test(worker_stage_test
     SOURCES pipeline/worker_stage_test.cpp
 )
 
+# Stage error guard unit tests
+fqc_add_test(stage_guard_test
+    SOURCES pipeline/stage_guard_test.cpp
+)
+
 # Parallel parse pipeline integration tests
 fqc_add_test(parallel_parse_pipeline_test
     SOURCES pipeline/parallel_parse_pipeline_test.cpp

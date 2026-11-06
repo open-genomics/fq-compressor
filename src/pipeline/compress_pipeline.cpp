@@ -10,8 +10,8 @@
 #include "fqc/pipeline/in_flight_limiter.h"
 #include "fqc/pipeline/mpmc_queue.h"
 #include "fqc/pipeline/reorder_buffer.h"
+#include "fqc/pipeline/stage_guard.h"
 #include "fqc/pipeline/timing.h"
-#include "fqc/pipeline/worker_error.h"
 #include "fqc/pipeline/worker_stage.h"
 
 #include <atomic>
@@ -107,7 +107,7 @@ auto CompressPipeline::run(std::istream& primary,
     std::jthread reader([&] {
         std::uint64_t parseNs = 0;
         std::uint64_t pushNs = 0;
-        try {
+        runGuarded("compress reader", stopSource, readerError, [&] {
             io::FastqParser parser(primary);
             std::optional<io::FastqParser> mateParser;
             if (mate != nullptr) {
@@ -175,13 +175,7 @@ auto CompressPipeline::run(std::istream& primary,
                     pushFrame(std::move(*tail));
                 }
             }
-        } catch (const std::exception& error) {
-            readerError = workerCrashError("compress reader", error.what());
-            stopSource.request_stop();
-        } catch (...) {
-            readerError = workerCrashError("compress reader", "unknown exception");
-            stopSource.request_stop();
-        }
+        });
         queue1.close();
         readerParseNs.store(parseNs, std::memory_order_relaxed);
         readerPushNs.store(pushNs, std::memory_order_relaxed);
@@ -222,7 +216,7 @@ auto CompressPipeline::run(std::istream& primary,
     std::jthread writerThread([&] {
         std::uint64_t popNs = 0;
         std::uint64_t writeNs = 0;
-        try {
+        runGuarded("compress writer", stopSource, writerError, [&] {
             ReorderBuffer<std::unique_ptr<format::CompressedFrame>> reorder;
             while (!stopToken.stop_requested()) {
                 const auto popStart = Clock::now();
@@ -247,13 +241,7 @@ auto CompressPipeline::run(std::istream& primary,
                     break;
                 }
             }
-        } catch (const std::exception& error) {
-            writerError = workerCrashError("compress writer", error.what());
-            stopSource.request_stop();
-        } catch (...) {
-            writerError = workerCrashError("compress writer", "unknown exception");
-            stopSource.request_stop();
-        }
+        });
         writerPopNs.store(popNs, std::memory_order_relaxed);
         writerWriteNs.store(writeNs, std::memory_order_relaxed);
     });
