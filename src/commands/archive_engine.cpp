@@ -152,6 +152,17 @@ constexpr std::size_t kFramePeakToTargetFactor = 4;
     return requested == 0 ? pipeline::DecompressPipeline::kDefaultDecoderParallelism : requested;
 }
 
+/// Build the decode pipeline with the same budget derivation for `decompress`
+/// and `verify`: the per-frame limit depends on the decoder count because every
+/// in-flight decoder may hold one frame.
+[[nodiscard]] auto makeDecompressPipeline(
+    std::size_t memoryLimitBytes, std::size_t requestedWorkers) -> pipeline::DecompressPipeline {
+    const auto workers = resolveDecoderWorkers(requestedWorkers);
+    const auto bufferedFrames = maxBufferedFrames(workers, 1);
+    return pipeline::DecompressPipeline(
+        maxFrameBytesFor(memoryLimitBytes, bufferedFrames, 0), memoryLimitBytes, workers);
+}
+
 /// Shared telemetry log: one shape for compression and decompression.
 void logPipelineTelemetry(const pipeline::PipelineTelemetry& telemetry) {
     const auto& t = telemetry.timings;
@@ -437,12 +448,8 @@ auto ArchiveEngine::decompress(const DecompressionRequest& request) -> Result<Op
     FQC_TRY_ASSIGN(input, io::openInputFile(request.inputPath));
     OutputTransaction outputTransaction(request.outputPath, request.outputPath != "-");
     FQC_TRY_ASSIGN(output, openOutput(outputTransaction.path()));
-    const auto decoderWorkers = resolveDecoderWorkers(request.decoderWorkers);
-    const auto bufferedFrames = maxBufferedFrames(decoderWorkers, 1);
-    const pipeline::DecompressPipeline pipelineEngine(
-        maxFrameBytesFor(request.memoryLimitBytes, bufferedFrames, 0),
-        request.memoryLimitBytes,
-        decoderWorkers);
+    const pipeline::DecompressPipeline pipelineEngine =
+        makeDecompressPipeline(request.memoryLimitBytes, request.decoderWorkers);
     FQC_TRY_ASSIGN(
         stats,
         pipelineEngine.run(*input, [&](const std::vector<ReadRecord>& records) -> VoidResult {
@@ -468,10 +475,8 @@ auto ArchiveEngine::verify(const std::filesystem::path& inputPath,
     FQC_TRY_ASSIGN(input, io::openInputFile(inputPath));
     // Same pipeline as decompress with a counting-only sink: full decode and
     // validation, nothing written.
-    const auto workers = resolveDecoderWorkers(decoderWorkers);
-    const auto bufferedFrames = maxBufferedFrames(workers, 1);
-    const pipeline::DecompressPipeline pipelineEngine(
-        maxFrameBytesFor(memoryLimitBytes, bufferedFrames, 0), memoryLimitBytes, workers);
+    const pipeline::DecompressPipeline pipelineEngine =
+        makeDecompressPipeline(memoryLimitBytes, decoderWorkers);
     FQC_TRY_ASSIGN(stats,
                    pipelineEngine.run(
                        *input, [](const std::vector<ReadRecord>&) -> VoidResult { return {}; }));

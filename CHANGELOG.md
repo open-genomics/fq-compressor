@@ -4,6 +4,10 @@
 
 ### 改进
 
+- **解码管线预算构造收口**：`decompress` 与 `verify` 共用
+  `makeDecompressPipeline`，解码 worker 数归一、同存帧预算和逐帧上限只推导一次；
+  行为不变。
+
 - **FASTQ 行读取错误收敛**：`FastqParser` 新增 `readLineChecked`，把
   "超长行 / 底层流错误 / 干净 EOF" 的重复分支收敛为一个 `Result<bool>` 契约；
   `readRecord` 与 `readRequiredLine` 只保留各自的 EOF 语义。错误文本统一带行号，
