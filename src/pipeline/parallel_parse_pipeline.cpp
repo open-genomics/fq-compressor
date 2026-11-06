@@ -271,9 +271,9 @@ auto ParallelParsePipeline::run(std::span<const ReadRecord> initialRecords,
     const auto inFlightLimit = MpmcQueue<ParseItem, kDefaultQueueDepth>::kUsableCapacity +
         MpmcQueue<OrderedItem, kDefaultQueueDepth>::kUsableCapacity + parserParallelism_;
     InFlightLimiter frameLimiter(inFlightLimit, parserParallelism_);
-    std::optional<Error> parseError;
-    std::optional<Error> encoderError;
-    std::optional<Error> writerError;
+    // 全流水线唯一的首个错误槽：parser / encoder / writer 都可能并发失败，
+    // 所有写入都走同一把错误锁；正常路径不加锁。只保留第一个失败。
+    std::optional<Error> firstError;
     std::mutex errorMutex;
     PipelineStats stats;
     stats.parserWorkers = parserParallelism_;
@@ -291,7 +291,7 @@ auto ParallelParsePipeline::run(std::span<const ReadRecord> initialRecords,
     std::stop_token stopToken = stopSource.get_token();
 
     auto recordError = [&](const Error& error) {
-        recordGuardedError(errorMutex, parseError, error);
+        recordGuardedError(errorMutex, firstError, error);
     };
 
     // K parser workers, one per byte chunk of [sampleEnd, fileSize).
@@ -321,7 +321,7 @@ auto ParallelParsePipeline::run(std::span<const ReadRecord> initialRecords,
         // runGuarded 只包异常屏障，不改变 chunk / marker / credit 状态机；
         // 复杂度仍来自外层 parseWorker 的交错，拆开反而隐藏不变量。
         // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-        runGuarded("parallel parser", stopSource, parseError, errorMutex, [&] {
+        runGuarded("parallel parser", stopSource, firstError, errorMutex, [&] {
             FrameAccumulator accumulator(targetFrameBytes_, false);
 
             auto pushFrame = [&](ParseItem item) -> bool {
@@ -481,7 +481,7 @@ auto ParallelParsePipeline::run(std::span<const ReadRecord> initialRecords,
                                      stopToken,
                                      stopSource,
                                      errorMutex,
-                                     encoderError,
+                                     firstError,
                                      "parallel encoder",
                                      std::move(encodeWorker),
                                      encoderTimings);
@@ -490,7 +490,7 @@ auto ParallelParsePipeline::run(std::span<const ReadRecord> initialRecords,
     std::jthread writerThread([&] {
         std::uint64_t popNs = 0;
         std::uint64_t writeNs = 0;
-        runGuarded("parallel writer", stopSource, writerError, [&] {
+        runGuarded("parallel writer", stopSource, firstError, errorMutex, [&] {
             ChunkOrderer<ReadyFrame> orderer;
             auto emitReady = [&](std::vector<ReadyFrame> ready) {
                 for (auto& readyFrame : ready) {
@@ -499,7 +499,7 @@ auto ParallelParsePipeline::run(std::span<const ReadRecord> initialRecords,
                     writeNs += nanosSince(writeStart);
                     frameLimiter.release(readyFrame.chunk);
                     if (!result) {
-                        writerError = result.error();
+                        recordGuardedError(errorMutex, firstError, result.error());
                         stopSource.request_stop();
                         return;
                     }
@@ -518,9 +518,7 @@ auto ParallelParsePipeline::run(std::span<const ReadRecord> initialRecords,
                     emitReady(orderer.submitFrame(
                         out->chunk, out->local, ReadyFrame{out->chunk, std::move(out->frame)}));
                 }
-                if (writerError.has_value()) {
-                    break;
-                }
+                // emitReady 失败时已 request_stop，下一轮 while 条件会退出。
             }
         });
         writerPopNs.store(popNs, std::memory_order_relaxed);
@@ -539,14 +537,8 @@ auto ParallelParsePipeline::run(std::span<const ReadRecord> initialRecords,
     queue2.close();
     writerThread.join();
 
-    if (writerError.has_value()) {
-        return makeError<PipelineStats>(std::move(*writerError));
-    }
-    if (encoderError.has_value()) {
-        return makeError<PipelineStats>(std::move(*encoderError));
-    }
-    if (parseError.has_value()) {
-        return makeError<PipelineStats>(std::move(*parseError));
+    if (firstError.has_value()) {
+        return makeError<PipelineStats>(std::move(*firstError));
     }
     // Same contract as CompressPipeline: run() owns archive completion.
     FQC_TRY(writer.finish());

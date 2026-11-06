@@ -16,17 +16,18 @@
 
 namespace fqc::pipeline {
 
-/// Record `error` into `slot` only if it is still empty. Single-writer stages
-/// (reader/writer threads) call this without a mutex.
+/// Record `error` into `slot` only if it is still empty. This is the
+/// single-writer primitive; pipelines with a shared first-error slot use the
+/// mutex overload below.
 inline void recordGuardedError(std::optional<Error>& slot, Error error) {
     if (!slot) {
         slot = std::move(error);
     }
 }
 
-/// Multi-writer variant: parser pools and worker stages share one error slot,
-/// so the first-writer check and store must be atomic with respect to each
-/// other.
+/// Multi-writer variant: every stage of a pipeline shares one first-error
+/// slot, so the first-writer check and store must be atomic with respect to
+/// each other. The lock is taken only on the error path.
 inline void recordGuardedError(std::mutex& mutex, std::optional<Error>& slot, Error error) {
     const std::lock_guard lk(mutex);
     recordGuardedError(slot, std::move(error));
@@ -52,7 +53,7 @@ void runGuarded(std::string_view stageName,
     }
 }
 
-/// Multi-writer variant used by parser worker pools.
+/// Multi-writer variant used by pipelines with a shared first-error slot.
 template <typename Fn>
 void runGuarded(std::string_view stageName,
                 std::stop_source& stopSource,

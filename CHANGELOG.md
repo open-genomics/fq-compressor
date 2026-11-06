@@ -21,7 +21,14 @@
 - **共享异常屏障**：reader / writer / parser 线程的 6 处 `try/catch` 收敛到
   `pipeline::runGuarded` / `recordGuardedError`，统一“首个错误 + request_stop”；
   worker stage 的异常路径复用同一实现。原 reader/writer 的 catch 会覆盖循环内已记录的
-  具体错误，现在只保留首个失败；归档格式不变。
+  具体错误，现在每个错误槽只保留首个失败；归档格式不变。
+
+- **全流水线唯一首个错误槽**：压缩、并行解析和解压三条流水线不再各自维护
+  `readerError` / `encoderError` / `writerError` 并按固定阶段优先级返回，而是共享一个
+  `firstError`。所有阶段只在错误路径上通过同一把锁写入，先失败者保留，后续级联失败不
+  覆盖根因；正常路径无锁。三条流水线共删除 6 个错误槽和 3 组优先级分支，归档格式与
+  成功路径行为不变。→ 详见
+  `.agents/notes/implemented/simplification/2026-11-06-single-pipeline-error-slot.md`
 
 - **遥测字段语义化**：`queue1Stats` / `queue2Stats` 改为 `inputQueueStats` /
   `outputQueueStats`，`workerWorkNs` 改为 `workerPrimaryNs`；日志同步使用

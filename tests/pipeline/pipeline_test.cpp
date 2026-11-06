@@ -111,6 +111,21 @@ TEST(CompressPipelineTest, PairedRun) {
     EXPECT_EQ(result->archive.recordCount, 10U);
 }
 
+TEST(CompressPipelineTest, ReaderFailureReturnsFormatError) {
+    // A malformed record fails in the reader before any frame reaches the
+    // writer. The shared first-error slot must surface that parse error rather
+    // than a later cascade failure.
+    std::istringstream input("@read0\nACGT\n+\nIII\n");
+    std::ostringstream output;
+
+    ArchiveWriter writer(output, {.profile = DatasetProfile::kIllumina});
+    CompressPipeline pipeline(4096);
+
+    auto result = pipeline.run(input, nullptr, {}, writer);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, ErrorCode::kFormatError);
+}
+
 TEST(CompressPipelineTest, WriterFailureAbortsReaderWithoutDeadlock) {
     // Enough records to fill the queue depth several times over, so the reader
     // is blocked on a full push when the writer fails. The writer must abort

@@ -67,3 +67,18 @@ TEST(StageGuardTest, LockedVariantRecordsError) {
     EXPECT_EQ(firstError->code, ErrorCode::kInternalError);
     EXPECT_TRUE(stopSource.stop_requested());
 }
+
+TEST(StageGuardTest, LockedVariantKeepsFirstError) {
+    std::stop_source stopSource;
+    std::mutex errorMutex;
+    std::optional<Error> firstError = Error{ErrorCode::kUsageError, "first"};
+
+    runGuarded("test stage", stopSource, firstError, errorMutex, [] {
+        throw std::runtime_error("second");
+    });
+
+    ASSERT_TRUE(firstError.has_value());
+    EXPECT_EQ(firstError->code, ErrorCode::kUsageError);
+    EXPECT_EQ(firstError->message, "first");
+    EXPECT_TRUE(stopSource.stop_requested());
+}
