@@ -94,7 +94,8 @@ public:
                           std::size_t parallelism = kDefaultParallelism);
 
     /// `initialRecords` is the profile sample; it seeds worker 0's frame
-    /// accumulator (copied, same as CompressPipeline).
+    /// accumulator (copied, same as CompressPipeline). On success, `run`
+    /// finalizes the archive before returning, matching CompressPipeline.
     [[nodiscard]] auto run(std::span<const ReadRecord> initialRecords,
                            format::ArchiveWriter& writer) -> Result<PipelineStats>;
 

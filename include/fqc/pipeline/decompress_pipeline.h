@@ -7,6 +7,7 @@
 #include "fqc/common/error.h"
 #include "fqc/common/types.h"
 #include "fqc/format/archive.h"
+#include "fqc/pipeline/pipeline_telemetry.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -16,13 +17,10 @@
 
 namespace fqc::pipeline {
 
-struct DecompressStats {
-    format::ArchiveMetadata metadata;
-    std::uint64_t frameCount = 0;
-    std::uint64_t recordCount = 0;
-    std::uint64_t totalBases = 0;
-    std::uint64_t encodedBytes = 0;
-    std::size_t inFlightHighWater = 0;
+/// Decompression result: the same canonical archive counters and telemetry
+/// shape as compression, plus the decoder worker count.
+struct DecompressStats : PipelineRunStats {
+    std::size_t decoderWorkers = 0;
 };
 
 /// Concurrent decompression pipeline, the mirror image of `CompressPipeline`:

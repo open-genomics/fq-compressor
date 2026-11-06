@@ -4,6 +4,13 @@
 
 ### 改进
 
+- **流水线结果与遥测统一**：`CompressPipeline` / `ParallelParsePipeline` /
+  `DecompressPipeline` 共用 `PipelineRunStats`（canonical `ArchiveStats` + 阶段计时 +
+  队列快照 + in-flight 高水位 + `logicalBytes`），删除命令层的 `toArchiveStats` 翻译；
+  `decompress` / `verify` 也输出与压缩对称的分段计时。压缩 `run` 成功时负责写 footer
+  并 flush，使 `archive.encodedBytes` 是完整归档快照。归档字节布局不变 → 详见
+  `.agents/notes/implemented/architecture/2026-11-06-unified-pipeline-results-and-telemetry.md`
+
 - **ARM64（AArch64）构建适配**：Release 的 native 调优在 aarch64 改用
   `-mcpu=native`（clang 的 `-march=native` 在 ARM 上只映射到 `generic`）；新增
   `conan/profiles/clang-armv8` 与构建文档；decompress/verify 新增

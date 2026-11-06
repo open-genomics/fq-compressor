@@ -73,12 +73,21 @@ TEST(DecompressPipelineTest, BasicRunPreservesOrderAndCounts) {
 
     ASSERT_TRUE(result.has_value()) << result.error().message;
     EXPECT_EQ(collected, records);
-    EXPECT_GT(result->frameCount, 1U);
-    EXPECT_EQ(result->recordCount, records.size());
-    EXPECT_EQ(result->totalBases, records.size() * 150U);
-    EXPECT_EQ(result->encodedBytes, archive.size());
+    EXPECT_GT(result->archive.frameCount, 1U);
+    EXPECT_EQ(result->archive.recordCount, records.size());
+    EXPECT_EQ(result->archive.totalBases, records.size() * 150U);
+    EXPECT_EQ(result->archive.encodedBytes, archive.size());
     EXPECT_EQ(result->metadata.profile, DatasetProfile::kIllumina);
-    EXPECT_GT(result->inFlightHighWater, 0U);
+    EXPECT_EQ(result->decoderWorkers, 4U);
+    EXPECT_GT(result->logicalBytes, 0U);
+    EXPECT_GT(result->telemetry.inFlightHighWater, 0U);
+    EXPECT_EQ(result->telemetry.queue1Stats.pushes, result->archive.frameCount);
+    EXPECT_EQ(result->telemetry.queue1Stats.pops, result->archive.frameCount);
+    EXPECT_EQ(result->telemetry.queue2Stats.pushes, result->archive.frameCount);
+    EXPECT_EQ(result->telemetry.queue2Stats.pops, result->archive.frameCount);
+    EXPECT_GT(result->telemetry.timings.wallNs, 0U);
+    EXPECT_GT(result->telemetry.timings.workerWorkNs, 0U);
+    EXPECT_GT(result->telemetry.timings.writerWorkNs, 0U);
 }
 
 TEST(DecompressPipelineTest, SingleDecoderPreservesOrder) {
@@ -106,8 +115,8 @@ TEST(DecompressPipelineTest, EmptyArchiveSucceeds) {
 
     ASSERT_TRUE(result.has_value()) << result.error().message;
     EXPECT_TRUE(collected.empty());
-    EXPECT_EQ(result->frameCount, 0U);
-    EXPECT_EQ(result->recordCount, 0U);
+    EXPECT_EQ(result->archive.frameCount, 0U);
+    EXPECT_EQ(result->archive.recordCount, 0U);
 }
 
 TEST(DecompressPipelineTest, TamperedFooterGlobalChecksumFails) {

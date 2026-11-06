@@ -130,25 +130,23 @@ private:
     return requested == 0 ? pipeline::DecompressPipeline::kDefaultDecoderParallelism : requested;
 }
 
-/// Per-stage wall-clock plus queue snapshots. Info level, so `-q` suppresses it.
-void logPipelineObservability(const pipeline::PipelineStats& stats) {
+/// Shared telemetry log: one shape for compression and decompression.
+void logPipelineTelemetry(const pipeline::PipelineTelemetry& telemetry) {
+    const auto& t = telemetry.timings;
     FQC_LOG_INFO(
-        "pipeline workers: parser={} encoder={}", stats.parserWorkers, stats.encoderWorkers);
-    const auto& t = stats.timings;
-    FQC_LOG_INFO(
-        "pipeline stages (ms): reader parse={:.1f} push={:.1f} | encoder pop={:.1f} "
-        "encode={:.1f} zstd={:.1f} push={:.1f} | writer pop={:.1f} write={:.1f} | wall={:.1f}",
-        nsToMs(t.readerParseNs),
+        "pipeline stages (ms): reader work={:.1f} push={:.1f} | worker pop={:.1f} "
+        "work={:.1f} secondary={:.1f} push={:.1f} | writer pop={:.1f} work={:.1f} | wall={:.1f}",
+        nsToMs(t.readerWorkNs),
         nsToMs(t.readerPushNs),
-        nsToMs(t.encoderPopNs),
-        nsToMs(t.encoderEncodeNs),
-        nsToMs(t.encoderCompressNs),
-        nsToMs(t.encoderPushNs),
+        nsToMs(t.workerPopNs),
+        nsToMs(t.workerWorkNs),
+        nsToMs(t.workerSecondaryNs),
+        nsToMs(t.workerPushNs),
         nsToMs(t.writerPopNs),
-        nsToMs(t.writerWriteNs),
+        nsToMs(t.writerWorkNs),
         nsToMs(t.wallNs));
-    const auto& q1 = stats.queue1Stats;
-    const auto& q2 = stats.queue2Stats;
+    const auto& q1 = telemetry.queue1Stats;
+    const auto& q2 = telemetry.queue2Stats;
     FQC_LOG_INFO(
         "pipeline queues: q1 pushes={} pops={} pushWaits={} popWaits={} highWater={} | "
         "q2 pushes={} pops={} pushWaits={} popWaits={} highWater={}",
@@ -162,7 +160,18 @@ void logPipelineObservability(const pipeline::PipelineStats& stats) {
         q2.pushWaits,
         q2.popWaits,
         q2.highWater);
-    FQC_LOG_INFO("pipeline in-flight frames: highWater={}", stats.inFlightHighWater);
+    FQC_LOG_INFO("pipeline in-flight frames: highWater={}", telemetry.inFlightHighWater);
+}
+
+void logCompressionObservability(const pipeline::PipelineStats& stats) {
+    FQC_LOG_INFO(
+        "pipeline workers: parser={} encoder={}", stats.parserWorkers, stats.encoderWorkers);
+    logPipelineTelemetry(stats.telemetry);
+}
+
+void logDecompressionObservability(const pipeline::DecompressStats& stats) {
+    FQC_LOG_INFO("pipeline workers: decoder={}", stats.decoderWorkers);
+    logPipelineTelemetry(stats.telemetry);
 }
 
 [[nodiscard]] auto targetFrameBytesFor(const CompressionRequest& request) noexcept -> std::size_t {
@@ -258,15 +267,6 @@ void logPipelineObservability(const pipeline::PipelineStats& stats) {
 
 }  // namespace
 
-[[nodiscard]] auto toArchiveStats(const pipeline::DecompressStats& stats) -> format::ArchiveStats {
-    return {
-        .frameCount = stats.frameCount,
-        .recordCount = stats.recordCount,
-        .totalBases = stats.totalBases,
-        .encodedBytes = stats.encodedBytes,
-    };
-}
-
 auto ArchiveEngine::compress(const CompressionRequest& request) -> Result<OperationStats> {
     FQC_TRY(validateMemoryLimit(request.memoryLimitBytes));
     if (request.targetFrameBytes == 0) {
@@ -343,11 +343,11 @@ auto ArchiveEngine::compress(const CompressionRequest& request) -> Result<Operat
             *primaryStream, mateStream, std::span<const ReadRecord>{sample}, writer);
     }
     FQC_TRY_ASSIGN(pipelineStats, std::move(pipelineResult));
-    logPipelineObservability(pipelineStats);
-    FQC_TRY(writer.finish());
+    logCompressionObservability(pipelineStats);
     output.reset();
     FQC_TRY(outputTransaction.commit(request.forceOverwrite));
-    return toOperationStats(writer.metadata(), writer.stats(), true, pipelineStats.logicalBytes);
+    return toOperationStats(
+        pipelineStats.metadata, pipelineStats.archive, true, pipelineStats.logicalBytes);
 }
 
 auto ArchiveEngine::decompress(const DecompressionRequest& request) -> Result<OperationStats> {
@@ -356,7 +356,6 @@ auto ArchiveEngine::decompress(const DecompressionRequest& request) -> Result<Op
     FQC_TRY_ASSIGN(input, io::openInputFile(request.inputPath));
     OutputTransaction outputTransaction(request.outputPath, request.outputPath != "-");
     FQC_TRY_ASSIGN(output, openOutput(outputTransaction.path()));
-    std::uint64_t logicalBytes = 0;
     const pipeline::DecompressPipeline pipelineEngine(
         maxFrameBytesFor(request.memoryLimitBytes),
         request.memoryLimitBytes,
@@ -365,18 +364,18 @@ auto ArchiveEngine::decompress(const DecompressionRequest& request) -> Result<Op
         stats,
         pipelineEngine.run(*input, [&](const std::vector<ReadRecord>& records) -> VoidResult {
             for (const auto& record : records) {
-                logicalBytes += canonicalFastqBytes(record);
                 FQC_TRY(writeFastqRecord(*output, record));
             }
             return {};
         }));
+    logDecompressionObservability(stats);
     output->flush();
     if (!*output) {
         return makeError<OperationStats>(ErrorCode::kIOError, "failed to flush decompressed FASTQ");
     }
     output.reset();
     FQC_TRY(outputTransaction.commit(request.forceOverwrite));
-    return toOperationStats(stats.metadata, toArchiveStats(stats), false, logicalBytes);
+    return toOperationStats(stats.metadata, stats.archive, false, stats.logicalBytes);
 }
 
 auto ArchiveEngine::verify(const std::filesystem::path& inputPath,
@@ -386,19 +385,14 @@ auto ArchiveEngine::verify(const std::filesystem::path& inputPath,
     FQC_TRY_ASSIGN(input, io::openInputFile(inputPath));
     // Same pipeline as decompress with a counting-only sink: full decode and
     // validation, nothing written.
-    std::uint64_t logicalBytes = 0;
     const pipeline::DecompressPipeline pipelineEngine(maxFrameBytesFor(memoryLimitBytes),
                                                       memoryLimitBytes,
                                                       resolveDecoderWorkers(decoderWorkers));
-    FQC_TRY_ASSIGN(
-        stats,
-        pipelineEngine.run(*input, [&](const std::vector<ReadRecord>& records) -> VoidResult {
-            for (const auto& record : records) {
-                logicalBytes += canonicalFastqBytes(record);
-            }
-            return {};
-        }));
-    return toOperationStats(stats.metadata, toArchiveStats(stats), false, logicalBytes);
+    FQC_TRY_ASSIGN(stats,
+                   pipelineEngine.run(
+                       *input, [](const std::vector<ReadRecord>&) -> VoidResult { return {}; }));
+    logDecompressionObservability(stats);
+    return toOperationStats(stats.metadata, stats.archive, false, stats.logicalBytes);
 }
 
 }  // namespace fqc::commands

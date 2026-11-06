@@ -280,8 +280,6 @@ auto CompressPipeline::run(std::istream& primary,
                 }
                 auto ready = reorder.submit(out->frameId, std::move(out->frame));
                 for (auto& frame : ready) {
-                    stats.recordCount += frame->recordCount;
-                    stats.frameCount += 1;
                     const auto writeStart = Clock::now();
                     auto result = writer.writeCompressedFrame(std::move(frame));
                     writeNs += nanosSince(writeStart);
@@ -316,23 +314,6 @@ auto CompressPipeline::run(std::istream& primary,
     queue2.close();
     writerThread.join();
 
-    // All workers joined, so the relaxed loads below see the final values.
-    stats.timings = {
-        .readerParseNs = readerParseNs.load(std::memory_order_relaxed),
-        .readerPushNs = readerPushNs.load(std::memory_order_relaxed),
-        .encoderPopNs = encoderPopNs.load(std::memory_order_relaxed),
-        .encoderEncodeNs = encoderEncodeNs.load(std::memory_order_relaxed),
-        .encoderCompressNs = encoderCompressNs.load(std::memory_order_relaxed),
-        .encoderPushNs = encoderPushNs.load(std::memory_order_relaxed),
-        .writerPopNs = writerPopNs.load(std::memory_order_relaxed),
-        .writerWriteNs = writerWriteNs.load(std::memory_order_relaxed),
-        .wallNs = nanosSince(wallStart),
-    };
-    stats.queue1Stats = queue1.stats();
-    stats.queue2Stats = queue2.stats();
-    stats.logicalBytes = logicalBytes;
-    stats.inFlightHighWater = frameLimiter.highWater();
-
     if (writerError.has_value()) {
         return makeError<PipelineStats>(std::move(*writerError));
     }
@@ -342,6 +323,31 @@ auto CompressPipeline::run(std::istream& primary,
     if (readerError.has_value()) {
         return makeError<PipelineStats>(std::move(*readerError));
     }
+    // A compression run owns the archive lifetime: finish the footer before
+    // exposing counters, so `PipelineStats.archive` is a complete snapshot.
+    FQC_TRY(writer.finish());
+
+    // All workers joined, so the relaxed loads below see the final values.
+    stats.telemetry.timings = {
+        .readerWorkNs = readerParseNs.load(std::memory_order_relaxed),
+        .readerPushNs = readerPushNs.load(std::memory_order_relaxed),
+        .workerPopNs = encoderPopNs.load(std::memory_order_relaxed),
+        .workerWorkNs = encoderEncodeNs.load(std::memory_order_relaxed),
+        .workerSecondaryNs = encoderCompressNs.load(std::memory_order_relaxed),
+        .workerPushNs = encoderPushNs.load(std::memory_order_relaxed),
+        .writerPopNs = writerPopNs.load(std::memory_order_relaxed),
+        .writerWorkNs = writerWriteNs.load(std::memory_order_relaxed),
+        .wallNs = nanosSince(wallStart),
+    };
+    stats.telemetry.queue1Stats = queue1.stats();
+    stats.telemetry.queue2Stats = queue2.stats();
+    stats.telemetry.inFlightHighWater = frameLimiter.highWater();
+    stats.metadata = writer.metadata();
+    // ArchiveWriter owns the authoritative byte/record counters; copying them
+    // after join keeps the pipeline result aligned with what was actually
+    // written instead of maintaining a second set of counters in parallel.
+    stats.archive = writer.stats();
+    stats.logicalBytes = logicalBytes;
     return stats;
 }
 

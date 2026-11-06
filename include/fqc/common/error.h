@@ -89,17 +89,17 @@ template <typename T>
 /// If `expr` is an error `Result`/`VoidResult`, return that error from the
 /// enclosing function. Success values are discarded; use `FQC_TRY_ASSIGN` to
 /// bind one. Parentheses around `expr` are not required, even with commas.
-#define FQC_TRY(...)                                                      \
-    do {                                                                  \
-        if (auto _fqcTryResult = (__VA_ARGS__); !_fqcTryResult) {         \
-            return ::std::unexpected(::std::move(_fqcTryResult.error())); \
-        }                                                                 \
+#define FQC_TRY(...)                                                     \
+    do {                                                                 \
+        if (auto fqcTryResult = (__VA_ARGS__); !fqcTryResult) {          \
+            return ::std::unexpected(::std::move(fqcTryResult.error())); \
+        }                                                                \
     } while (0)
 
 /// Like `FQC_TRY`, but binds the success value to `var`.
-#define FQC_TRY_ASSIGN(var, ...)                                                       \
-    auto FQC_CONCAT(_fqcTry_, __LINE__) = (__VA_ARGS__);                               \
-    if (!FQC_CONCAT(_fqcTry_, __LINE__)) {                                             \
-        return ::std::unexpected(::std::move(FQC_CONCAT(_fqcTry_, __LINE__).error())); \
-    }                                                                                  \
-    auto var = ::std::move(*FQC_CONCAT(_fqcTry_, __LINE__))
+#define FQC_TRY_ASSIGN(var, ...)                                                           \
+    auto FQC_CONCAT(fqcTryResult, __LINE__) = (__VA_ARGS__);                               \
+    if (!FQC_CONCAT(fqcTryResult, __LINE__)) {                                             \
+        return ::std::unexpected(::std::move(FQC_CONCAT(fqcTryResult, __LINE__).error())); \
+    }                                                                                      \
+    auto var = ::std::move(*FQC_CONCAT(fqcTryResult, __LINE__))

@@ -194,8 +194,8 @@ TEST(ParallelParsePipelineTest, MultiWorkerPreservesRecordOrderAndContent) {
 
     PipelineStats stats;
     const auto archive = runParallel(file, {}, 0, 4, 512, &stats);
-    EXPECT_GT(stats.inFlightHighWater, 0U);
-    EXPECT_LE(stats.inFlightHighWater, 10U);
+    EXPECT_GT(stats.telemetry.inFlightHighWater, 0U);
+    EXPECT_LE(stats.telemetry.inFlightHighWater, 10U);
     EXPECT_EQ(readAllRecords(archive), fqc::test::parseAllFastq(fastq));
 }
 

@@ -7,7 +7,7 @@
 #include "fqc/common/error.h"
 #include "fqc/common/types.h"
 #include "fqc/format/archive.h"
-#include "fqc/pipeline/mpmc_queue.h"
+#include "fqc/pipeline/pipeline_telemetry.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -16,33 +16,11 @@
 
 namespace fqc::pipeline {
 
-/// Wall-clock breakdown per pipeline stage. Each thread accumulates
-/// `steady_clock` samples in locals and merges with one relaxed fetch_add at
-/// exit, so the measurement stays off the synchronization hot path. Encoder
-/// fields are the sum across all N workers. zstd lives in `encoderCompressNs`;
-/// the writer should approach pure I/O (`writerWriteNs`).
-struct StageTimings {
-    std::uint64_t readerParseNs = 0;      // reader: parse + accumulate records
-    std::uint64_t readerPushNs = 0;       // reader: queue1 push (incl. backpressure)
-    std::uint64_t encoderPopNs = 0;       // encoders: queue1 pop wait
-    std::uint64_t encoderEncodeNs = 0;    // encoders: encodeFrame (2-bit pack+checksum)
-    std::uint64_t encoderCompressNs = 0;  // encoders: compressFrame (zstd x3)
-    std::uint64_t encoderPushNs = 0;      // encoders: queue2 push
-    std::uint64_t writerPopNs = 0;        // writer: queue2 pop wait
-    std::uint64_t writerWriteNs = 0;      // writer: frame header + write + checksum
-    std::uint64_t wallNs = 0;             // run() total wall clock
-};
-
-struct PipelineStats {
-    std::size_t frameCount = 0;
-    std::size_t recordCount = 0;
-    std::uint64_t logicalBytes = 0;
+/// Compression result: canonical archive counters, shared telemetry, and the
+/// two worker counts specific to this pipeline.
+struct PipelineStats : PipelineRunStats {
     std::size_t parserWorkers = 1;
     std::size_t encoderWorkers = 0;
-    std::size_t inFlightHighWater = 0;
-    StageTimings timings;
-    QueueStats queue1Stats;
-    QueueStats queue2Stats;
 };
 
 /// Concurrent pipeline: a reader thread parses FASTQ and accumulates bounded
@@ -63,9 +41,11 @@ public:
 
     /// Run the pipeline. `initialRecords` are emitted first (e.g. a profile
     /// sample already consumed by the caller), then records are streamed from
-    /// `primary` (and `mate` when paired). On any stage failure the shared
-    /// stop_source cancels the others through their stop_token, so no stage
-    /// deadlocks waiting on a full push or empty pop.
+    /// `primary` (and `mate` when paired). On success, `run` finalizes the
+    /// archive (frame footer + flush) before returning, so
+    /// `PipelineStats.archive` is a complete snapshot. On any stage failure
+    /// the shared stop_source cancels the others through their stop_token, so
+    /// no stage deadlocks waiting on a full push or empty pop.
     [[nodiscard]] auto run(std::istream& primary,
                            std::istream* mate,
                            std::span<const ReadRecord> initialRecords,

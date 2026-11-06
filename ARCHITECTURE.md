@@ -105,6 +105,13 @@ encoder 状态帧内局部，worker 间无需共享可变状态。profile 采样
 `ArchiveReader::readFrame` 保留为组合 API（readRawFrame + decodeRawFrame + 顺序累积），行为
 不变。
 
+三条流水线共用同一结果模型 `pipeline::PipelineRunStats`：`metadata`、`archive`（直接复用
+`ArchiveWriter` / `ArchiveReader` 的 `ArchiveStats`）、`telemetry`（阶段计时、两条队列计数、
+in-flight 高水位）和 `logicalBytes`（规范 FASTQ 字节数）。压缩 `run` 成功时会写完 footer
+并 flush，因此 `archive.encodedBytes` 是完整归档的快照；解压与 verify 使用同一遥测形状，
+不再各自维护一套近似计数字段。`PipelineRunStats` 只描述“一条帧流水线跑完后的结果”，
+不引入通用 DAG 或调度框架。
+
 在 8 核 x86_64 WSL2 主机上，64 MiB 随机短读压缩约 149 MiB/s（相对顺序解析 +47.7%）；
 长读解析占比小，并行收益落在噪声内。WSL2 吞吐波动 ±20-85%，数字仅供粗略参考——
 性能台账见 `docs/benchmarks.md`，真实语料见 `docs/real-corpus.md`，并行化逐阶段史

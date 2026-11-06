@@ -8,6 +8,7 @@
 #include "fqc/pipeline/in_flight_limiter.h"
 #include "fqc/pipeline/mpmc_queue.h"
 #include "fqc/pipeline/reorder_buffer.h"
+#include "fqc/pipeline/timing.h"
 #include "fqc/pipeline/worker_error.h"
 
 #include <cstddef>
@@ -73,6 +74,15 @@ auto DecompressPipeline::run(std::istream& input,
     // (MPMC, thread-safe) and the stop_source.
     DecompressStats stats;                            // writer
     std::uint64_t finalGlobalChecksum = 0;            // writer
+
+    std::atomic<std::uint64_t> readerWorkNs{0};
+    std::atomic<std::uint64_t> readerPushNs{0};
+    std::atomic<std::uint64_t> workerPopNs{0};
+    std::atomic<std::uint64_t> workerWorkNs{0};
+    std::atomic<std::uint64_t> workerPushNs{0};
+    std::atomic<std::uint64_t> writerPopNs{0};
+    std::atomic<std::uint64_t> writerWorkNs{0};
+    const auto wallStart = Clock::now();
     format::ArchiveMetadata metadata;                 // reader
     std::uint64_t encodedBytes = 0;                   // reader
     std::optional<format::ArchiveFooter> footerData;  // reader
@@ -85,9 +95,13 @@ auto DecompressPipeline::run(std::istream& input,
     // decoder workers. records/bases and the rolling checksum accumulate on
     // the writer side.
     std::jthread reader([&] {
+        std::uint64_t workNs = 0;
+        std::uint64_t pushNs = 0;
         try {
+            const auto openStart = Clock::now();
             format::ArchiveReader archiveReader(input, maxFrameBytes_, memoryLimitBytes_);
             auto opened = archiveReader.open();
+            workNs += nanosSince(openStart);
             if (!opened) {
                 readerError = opened.error();
                 stopSource.request_stop();
@@ -96,7 +110,9 @@ auto DecompressPipeline::run(std::istream& input,
 
                 std::uint64_t frameId = 0;
                 while (!stopToken.stop_requested()) {
+                    const auto readStart = Clock::now();
                     auto raw = archiveReader.readRawFrame();
+                    workNs += nanosSince(readStart);
                     if (!raw) {
                         readerError = raw.error();
                         stopSource.request_stop();
@@ -117,7 +133,10 @@ auto DecompressPipeline::run(std::istream& input,
                     if (!frameLimiter.acquire(stopToken)) {
                         break;
                     }
-                    if (!queue1.push(std::move(in), stopToken)) {
+                    const auto pushStart = Clock::now();
+                    const bool pushed = queue1.push(std::move(in), stopToken);
+                    pushNs += nanosSince(pushStart);
+                    if (!pushed) {
                         frameLimiter.release();
                         break;
                     }
@@ -132,18 +151,27 @@ auto DecompressPipeline::run(std::istream& input,
             stopSource.request_stop();
         }
         queue1.close();
+        readerWorkNs.store(workNs, std::memory_order_relaxed);
+        readerPushNs.store(pushNs, std::memory_order_relaxed);
     });
 
     // N decoder workers: decodeRawFrame is pure computation. Workers do not
     // close queue2; the main thread closes it after join.
     auto decoderLoop = [&] {
+        std::uint64_t popNs = 0;
+        std::uint64_t decodeNs = 0;
+        std::uint64_t pushNs = 0;
         try {
             while (!stopToken.stop_requested()) {
+                const auto popStart = Clock::now();
                 auto in = queue1.pop(stopToken);
+                popNs += nanosSince(popStart);
                 if (!in.has_value()) {
                     break;
                 }
+                const auto decodeStart = Clock::now();
                 auto decoded = format::decodeRawFrame(*in->frame);
+                decodeNs += nanosSince(decodeStart);
                 if (!decoded) {
                     {
                         const std::lock_guard lk(decoderErrorMutex);
@@ -156,7 +184,10 @@ auto DecompressPipeline::run(std::istream& input,
                 }
                 OrderedFrame out{in->frameId,
                                  std::make_unique<format::DecodedFrame>(std::move(*decoded))};
-                if (!queue2.push(std::move(out), stopToken)) {
+                const auto pushStart = Clock::now();
+                const bool pushed = queue2.push(std::move(out), stopToken);
+                pushNs += nanosSince(pushStart);
+                if (!pushed) {
                     break;
                 }
             }
@@ -173,6 +204,9 @@ auto DecompressPipeline::run(std::istream& input,
             }
             stopSource.request_stop();
         }
+        workerPopNs.fetch_add(popNs, std::memory_order_relaxed);
+        workerWorkNs.fetch_add(decodeNs, std::memory_order_relaxed);
+        workerPushNs.fetch_add(pushNs, std::memory_order_relaxed);
     };
 
     std::vector<std::jthread> decoders;
@@ -185,21 +219,30 @@ auto DecompressPipeline::run(std::istream& input,
     // checksum (order-dependent -- must stay on this thread) and invoke the
     // sink. A sink failure cancels the pipeline.
     std::jthread writer([&] {
+        std::uint64_t popNs = 0;
+        std::uint64_t workNs = 0;
         try {
             ReorderBuffer<std::unique_ptr<format::DecodedFrame>> reorder;
             while (!stopToken.stop_requested()) {
+                const auto popStart = Clock::now();
                 auto out = queue2.pop(stopToken);
+                popNs += nanosSince(popStart);
                 if (!out.has_value()) {
                     break;
                 }
                 auto ready = reorder.submit(out->frameId, std::move(out->frame));
                 for (auto& frame : ready) {
-                    stats.frameCount += 1;
-                    stats.recordCount += frame->recordCount;
-                    stats.totalBases += frame->totalBases;
+                    const auto workStart = Clock::now();
+                    stats.archive.frameCount += 1;
+                    stats.archive.recordCount += frame->recordCount;
+                    stats.archive.totalBases += frame->totalBases;
+                    for (const auto& record : frame->records) {
+                        stats.logicalBytes += canonicalFastqBytes(record);
+                    }
                     finalGlobalChecksum =
                         format::advanceGlobalChecksum(finalGlobalChecksum, frame->checksum);
                     auto sinkResult = sink(std::move(frame->records));
+                    workNs += nanosSince(workStart);
                     frameLimiter.release();
                     if (!sinkResult) {
                         writerError = sinkResult.error();
@@ -218,6 +261,8 @@ auto DecompressPipeline::run(std::istream& input,
             writerError = workerCrashError("decompress writer", "unknown exception");
             stopSource.request_stop();
         }
+        writerPopNs.store(popNs, std::memory_order_relaxed);
+        writerWorkNs.store(workNs, std::memory_order_relaxed);
     });
 
     reader.join();
@@ -229,7 +274,20 @@ auto DecompressPipeline::run(std::istream& input,
     queue2.close();
     writer.join();
 
-    stats.inFlightHighWater = frameLimiter.highWater();
+    stats.telemetry.timings = {
+        .readerWorkNs = readerWorkNs.load(std::memory_order_relaxed),
+        .readerPushNs = readerPushNs.load(std::memory_order_relaxed),
+        .workerPopNs = workerPopNs.load(std::memory_order_relaxed),
+        .workerWorkNs = workerWorkNs.load(std::memory_order_relaxed),
+        .workerSecondaryNs = 0,
+        .workerPushNs = workerPushNs.load(std::memory_order_relaxed),
+        .writerPopNs = writerPopNs.load(std::memory_order_relaxed),
+        .writerWorkNs = writerWorkNs.load(std::memory_order_relaxed),
+        .wallNs = nanosSince(wallStart),
+    };
+    stats.telemetry.queue1Stats = queue1.stats();
+    stats.telemetry.queue2Stats = queue2.stats();
+    stats.telemetry.inFlightHighWater = frameLimiter.highWater();
 
     if (writerError.has_value()) {
         return makeError<DecompressStats>(std::move(*writerError));
@@ -250,9 +308,9 @@ auto DecompressPipeline::run(std::istream& input,
     // Footer validation: totals and the rolling global checksum are checked
     // against the writer side's accumulated (in-order) values -- same
     // strictness as the sequential ArchiveReader path.
-    if (footerData->frameCount != stats.frameCount ||
-        footerData->recordCount != stats.recordCount ||
-        footerData->totalBases != stats.totalBases) {
+    if (footerData->frameCount != stats.archive.frameCount ||
+        footerData->recordCount != stats.archive.recordCount ||
+        footerData->totalBases != stats.archive.totalBases) {
         return makeError<DecompressStats>(ErrorCode::kFormatError, "FQC v2 footer totals disagree");
     }
     if (footerData->globalChecksum != finalGlobalChecksum) {
@@ -261,7 +319,8 @@ auto DecompressPipeline::run(std::istream& input,
     }
 
     stats.metadata = metadata;
-    stats.encodedBytes = encodedBytes;
+    stats.archive.encodedBytes = encodedBytes;
+    stats.decoderWorkers = parallelism_;
     return stats;
 }
 
