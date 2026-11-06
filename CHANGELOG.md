@@ -4,6 +4,11 @@
 
 ### 改进
 
+- **realistic 基准刷新**：用聚合内存预算修复后的 `513b9f9` 重跑 512/1024 MiB
+  realistic 基准，归档到 `perf-baselines/2026-11-06-realistic-64mib/`；README 性能表
+  与 `docs/benchmarks.md` 改为当前绝对 baseline。旧 2026-11-05 归档保留为历史，
+  不同运行窗口不可横比，尤其不能把数字差异归因于代码。
+
 - **流水线结果与遥测统一**：`CompressPipeline` / `ParallelParsePipeline` /
   `DecompressPipeline` 共用 `PipelineRunStats`（canonical `ArchiveStats` + 阶段计时 +
   队列快照 + in-flight 高水位 + `logicalBytes`），删除命令层的 `toArchiveStats` 翻译；

@@ -98,29 +98,28 @@ FASTQ 记录的信息字段——ID、序列、质量值——按**列式分离*
 
 ## 性能
 
-> 口径：`tests/e2e/test_performance.sh` 默认数据已改为 `FQC_PERF_DATA=realistic`
-> （短读位置相关质量、长读宽质量分布）；`structured`/`random` 仅作压力 fixture。
-> 下表的 148.84 MiB/s 是阶段 H 的 random 数据 A/B，保留作历史对照，不能与
-> realistic 或真实语料横比。该数字使用旧的 64 MiB 帧预算公式；2026-11-06 后
-> 64 MiB 预算会主动缩小帧以守住硬上限，不能与当前二进制直接横比。
+> 口径：`tests/e2e/test_performance.sh` 默认 `FQC_PERF_DATA=realistic`（短读位置相关
+> 质量、长读宽质量分布）；`structured`/`random` 仅作压力 fixture。下表是当前 HEAD 的
+> **绝对 baseline**，不是优化 A/B；不同日期、机器或运行窗口的数字不可横比。
 
-合成数据（阶段 H A/B 同窗口，64 MiB 内存预算，随机 FASTQ ×5 次中位数）：
+当前 realistic baseline（2026-11-06，commit `513b9f9`，16 GiB 预算、64 MiB 目标帧、
+4 parser、5 次中位数）：
 
-| 数据 | 压缩（并行解析） | 相对顺序解析 | 压缩比 |
-|---|---:|---:|---:|
-| Illumina-like 150 bp | **148.84 MiB/s** | +47.7% | 2.96× |
-| ONT-like 20 kbp | 与顺序路径持平 | — | 2.84× |
+| 数据 | 实际输入 | 压缩 MiB/s | 解压 MiB/s | 压缩比 | 压缩 RSS |
+|---|---:|---:|---:|---:|---:|
+| Illumina 150 bp | 502.61 MiB | 341.91 | 353.95 | 3.33× | 924 MiB |
+| Illumina 150 bp | 1005.22 MiB | 331.75 | 410.29 | 3.33× | 1 230 MiB |
+| ONT 20 kbp | 1024.03 MiB | 317.03 | 616.88 | 2.63× | 1 647 MiB |
 
-2026-11-05 的 realistic 正式 baseline（WSL2，Ryzen 7 8845HS，Clang 18.1.3，
-64 MiB frame，4 parser，5 次中位数）：目标 512 MiB（实际 470.51 MiB）Illumina
-压缩 247.63 MiB/s、目标 1024 MiB（实际 941.02 MiB）Illumina 265.82 MiB/s、
-目标 1024 MiB（实际 1023.53 MiB）ONT 135.20 MiB/s；压缩比 3.38× / 3.38× /
-2.63×。原始 JSONL 与极差、RSS 见 [docs/benchmarks.md](docs/benchmarks.md)。
-这是绝对 baseline，不是与旧 structured 数据的对比（数据、CPU、编译器均不同）。
+极差、原始 JSONL 与归档说明见 [docs/benchmarks.md](docs/benchmarks.md)。
 
-真实生物语料实测（Illumina WXS 4.15×、ONT 1.96× 等）见
-[docs/real-corpus.md](docs/real-corpus.md)；合成数据不代表真实压缩比——短读质量
-集中时更高，长读质量近满字母表时可以更低。
+- 与 2026-11-05 的 247.63 / 265.82 / 135.20 MiB/s 差异较大，但运行窗口、生成器版本
+  和内存预算口径不同，不能归因于代码；同窗口 A/B 才能下结论。
+- 历史阶段 H 的 148.84 MiB/s（随机数据、旧帧预算公式）仅作历史对照，不能与当前
+  二进制或真实语料横比。
+- 真实生物语料实测（Illumina WXS 4.15×、ONT 1.96× 等）见
+  [docs/real-corpus.md](docs/real-corpus.md)；合成数据不代表真实压缩比——短读质量
+  集中时更高，长读质量近满字母表时可以更低。
 
 ## 同类工具对比
 
