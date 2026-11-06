@@ -159,8 +159,7 @@ constexpr std::size_t kFramePeakToTargetFactor = 4;
     std::size_t memoryLimitBytes, std::size_t requestedWorkers) -> pipeline::DecompressPipeline {
     const auto workers = resolveDecoderWorkers(requestedWorkers);
     const auto bufferedFrames = maxBufferedFrames(workers, 1);
-    return pipeline::DecompressPipeline(
-        maxFrameBytesFor(memoryLimitBytes, bufferedFrames, 0), memoryLimitBytes, workers);
+    return {maxFrameBytesFor(memoryLimitBytes, bufferedFrames, 0), memoryLimitBytes, workers};
 }
 
 /// Shared telemetry log: one shape for compression and decompression.
