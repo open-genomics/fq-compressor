@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <mutex>
 #include <stop_token>
+#include <utility>
 #include <vector>
 
 namespace fqc::pipeline {
@@ -36,8 +37,8 @@ public:
     /// Owner credits must be released in the same order they were acquired;
     /// a per-owner ordered sink naturally provides that property.
     explicit InFlightLimiter(std::size_t capacity, std::size_t reservedOwners = 0)
-        : capacity_(capacity),
-          sharedCapacity_(capacity - reservedOwners),
+        : kCapacity(capacity),
+          kSharedCapacity(capacity - reservedOwners),
           reservedInUse_(reservedOwners, false) {}
 
     InFlightLimiter(const InFlightLimiter&) = delete;
@@ -45,7 +46,7 @@ public:
 
     /// Acquire one credit, or return false when cancellation is requested.
     [[nodiscard]] auto acquire(std::stop_token st = {}) -> bool {
-        return acquire(kNoOwner, st);
+        return acquire(kNoOwner, std::move(st));
     }
 
     /// Acquire one credit for `owner`, keeping one credit available to each
@@ -112,14 +113,14 @@ private:
     static constexpr std::size_t kNoOwner = static_cast<std::size_t>(-1);
 
     [[nodiscard]] auto canAcquireLocked(std::size_t owner) const -> bool {
-        return inFlight_ < capacity_ &&
+        return inFlight_ < kCapacity &&
             (owner != kNoOwner && owner < reservedInUse_.size() && !reservedInUse_[owner]
                  ? true
-                 : sharedInFlight_ < sharedCapacity_);
+                 : sharedInFlight_ < kSharedCapacity);
     }
 
-    const std::size_t capacity_;
-    const std::size_t sharedCapacity_;
+    const std::size_t kCapacity;
+    const std::size_t kSharedCapacity;
     mutable std::mutex m_;
     std::condition_variable_any cv_;
     std::size_t inFlight_ = 0;

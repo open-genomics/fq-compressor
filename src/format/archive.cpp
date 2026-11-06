@@ -263,6 +263,8 @@ inline constexpr auto kBaseCodes = makeBaseCodes();
         !record.comment.contains('\n');
 }
 
+inline constexpr std::uint32_t kBaseBits = 2U;
+
 void appendPackedSequence(Bytes& output, std::string_view sequence) {
     appendVarint(output, sequence.size());
     const auto packedSize = packedSequenceSize(sequence.size());
@@ -278,7 +280,8 @@ void appendPackedSequence(Bytes& output, std::string_view sequence) {
         const auto c2 = kBaseCodes[static_cast<std::uint8_t>(sequence[index + 2])];
         const auto c3 = kBaseCodes[static_cast<std::uint8_t>(sequence[index + 3])];
         output[packedStart + index / 4] = static_cast<std::uint8_t>(
-            (c0 & 0x03U) | ((c1 & 0x03U) << 2U) | ((c2 & 0x03U) << 4U) | ((c3 & 0x03U) << 6U));
+            (c0 & 0x03U) | ((c1 & 0x03U) << kBaseBits) | ((c2 & 0x03U) << (2U * kBaseBits)) |
+            ((c3 & 0x03U) << (3U * kBaseBits)));
         exceptionCount += static_cast<std::size_t>(c0 > 3U) + static_cast<std::size_t>(c1 > 3U) +
             static_cast<std::size_t>(c2 > 3U) + static_cast<std::size_t>(c3 > 3U);
     }

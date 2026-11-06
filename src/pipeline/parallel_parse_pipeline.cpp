@@ -308,6 +308,9 @@ auto ParallelParsePipeline::run(std::span<const ReadRecord> initialRecords,
     const std::uint64_t step =
         region == 0 ? 0 : (region + parserParallelism_ - 1) / parserParallelism_;
 
+    // chunk 边界、异常补 marker 和 frame credit 属于同一状态机；
+    // 拆分会隐藏“每个 worker 必须恰好补发一个 marker”的不变量。
+    // NOLINTNEXTLINE(readability-function-cognitive-complexity)
     auto parseWorker = [&](std::uint64_t workerIndex) {
         std::uint64_t parseNs = 0;
         std::uint64_t pushNs = 0;
