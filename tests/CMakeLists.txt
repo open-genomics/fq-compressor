@@ -140,6 +140,11 @@ fqc_add_test(chunk_orderer_test
     SOURCES pipeline/chunk_orderer_test.cpp
 )
 
+# Shared worker stage unit tests
+fqc_add_test(worker_stage_test
+    SOURCES pipeline/worker_stage_test.cpp
+)
+
 # Parallel parse pipeline integration tests
 fqc_add_test(parallel_parse_pipeline_test
     SOURCES pipeline/parallel_parse_pipeline_test.cpp

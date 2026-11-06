@@ -29,6 +29,7 @@ while (!stop_requested)
 - `WorkerStageTimingSink`：原子汇总，worker 退出时合并一次，热路径不做原子写；
 - `startWorkerStage(...)`：创建 N 个 `std::jthread`，每个线程执行
   `pop -> handler -> push`，并统一处理错误记录、取消请求、异常屏障和计时合并。
+  输入队列和输出队列的容量分别作为模板参数推导，helper 不假设两端容量相同。
 
 helper 只接管 worker 执行循环。以下仍由每条流水线自己掌握：
 
@@ -44,6 +45,17 @@ handler 返回 `Result<Output>`：错误由 helper 记录到调用方提供的
 
 `parallel_parse_pipeline` 的 chunk-end marker 留在 handler 内直接返回 `OrderedItem`；
 helper 不知道 marker 的存在，也不参与顺序语义。
+
+## 抽取后发现的隐藏假设
+
+第一版 `startWorkerStage` 只接受一个 `Capacity`，要求输入和输出队列容量相同。三条现有
+流水线恰好都使用 `kDefaultQueueDepth`，所以生产代码编译通过；新增的直接测试使用 8 槽输入
+和 64 槽输出，立刻暴露了这个假设。
+
+这不是测试写错，而是 helper 的契约过窄：worker stage 只关心“从输入取、向输出放”，两端
+容量没有理由绑定。修复是把 `InputCapacity` / `OutputCapacity` 分开推导，调用方仍无需显式
+写模板参数。结论是：**通用组件的测试应该故意使用与生产不同的形状**，否则只能证明“当前
+调用点能编译”，不能证明契约本身成立。
 
 ## Alternatives considered
 
@@ -63,6 +75,9 @@ helper 不知道 marker 的存在，也不参与顺序语义。
 ## Consequences
 
 - 三条流水线共减少约 130 行重复控制流，worker 循环只剩 handler 和启动调用；
+- 输入/输出队列容量独立推导，helper 不依赖“两条队列深度相同”的隐含前提；
+- 新增 `tests/pipeline/worker_stage_test.cpp` 直接覆盖成功路径、错误传播、异常屏障、
+  stop token 唤醒和计时合并；这些路径中的异常与 stop 语义很难由端到端测试稳定触发；
 - 错误优先级、异常屏障、取消语义和阶段计时只有一份实现，后续修正不会漏掉某条路径；
 - helper 是纯头文件模板，不新增编译单元，也不改变线程拓扑或队列生命周期；
 - handler 必须可复制、不得抛异常（异常仍会被屏障捕获，但视为 bug）；`stageName` 必须是
@@ -72,7 +87,7 @@ helper 不知道 marker 的存在，也不参与顺序语义。
 
 ## Verification
 
-- `clang-debug` / `clang-release` / `clang-asan` / `clang-tsan`：17/17 通过；
+- `clang-debug` / `clang-release` / `clang-asan` / `clang-tsan`：18/18 通过；
 - 同一输入分别用改动前、改动后的 release 二进制压缩，单帧与 8 帧归档均逐字节一致
   （`cmp`），解压 round-trip 一致；
 - 8 帧 4 MiB 输入确认 worker pop / compute / secondary / push 计时均非零；

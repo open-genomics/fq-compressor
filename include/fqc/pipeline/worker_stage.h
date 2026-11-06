@@ -63,10 +63,14 @@ struct WorkerStageTimingSink {
 /// All referenced queues, stop state and the timing sink must outlive the
 /// returned threads. `stageName` is used in `workerCrashError`; it must refer
 /// to storage that outlives the threads (string literals in practice).
-template <typename Input, typename Output, std::size_t Capacity, typename Handler>
+template <typename Input,
+          std::size_t InputCapacity,
+          typename Output,
+          std::size_t OutputCapacity,
+          typename Handler>
 [[nodiscard]] auto startWorkerStage(std::size_t workerCount,
-                                    MpmcQueue<Input, Capacity>& input,
-                                    MpmcQueue<Output, Capacity>& output,
+                                    MpmcQueue<Input, InputCapacity>& input,
+                                    MpmcQueue<Output, OutputCapacity>& output,
                                     const std::stop_token& stopToken,
                                     std::stop_source& stopSource,
                                     std::mutex& errorMutex,

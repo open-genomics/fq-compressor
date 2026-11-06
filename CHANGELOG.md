@@ -14,6 +14,7 @@
 - **共享 worker stage**：三条流水线的 `pop -> handler -> push` 循环、首个错误记录、取消请求、
   异常屏障和 worker 本地计时合并收敛到 `pipeline::startWorkerStage`，删除约 130 行重复控制流。
   helper 不接管队列关闭、线程 join 顺序或 reader/writer 生命周期，也不引入通用 DAG；
+  输入/输出队列容量独立推导，并新增直接契约测试（成功、错误、异常、stop、计时）。
   归档格式与帧顺序不变，单帧与 8 帧归档均通过改动前后逐字节 `cmp` → 详见
   `.agents/notes/implemented/architecture/2026-11-06-shared-worker-stage.md`
 
