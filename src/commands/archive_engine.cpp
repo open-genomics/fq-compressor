@@ -37,7 +37,6 @@ namespace fqc::commands {
 
 namespace {
 
-constexpr std::size_t kEngineMemoryReserveBytes = std::size_t{16} * 1024 * 1024;
 constexpr std::size_t kMinimumMemoryLimitBytes = std::size_t{64} * 1024 * 1024;
 
 class OutputTransaction {
@@ -120,6 +119,11 @@ private:
 // enqueued yet, so the aggregate budget must count it explicitly.
 constexpr std::size_t kPipelineQueueFrames =
     2 * (pipeline::CompressPipeline::kDefaultQueueDepth - 1);
+// The budget formula assumes one shared queue depth across all three pipelines.
+static_assert(pipeline::CompressPipeline::kDefaultQueueDepth ==
+              pipeline::ParallelParsePipeline::kDefaultQueueDepth);
+static_assert(pipeline::CompressPipeline::kDefaultQueueDepth ==
+              pipeline::DecompressPipeline::kDefaultQueueDepth);
 constexpr std::size_t kFramePeakToTargetFactor = 4;
 
 [[nodiscard]] constexpr auto maxBufferedFrames(
@@ -134,7 +138,8 @@ constexpr std::size_t kFramePeakToTargetFactor = 4;
                                     std::size_t bufferedFrames,
                                     std::size_t heldBytes) noexcept -> std::size_t {
     return std::min(format::kDefaultMaxFrameBytes,
-                    (memoryLimitBytes - kEngineMemoryReserveBytes - heldBytes) / bufferedFrames);
+                    (memoryLimitBytes - format::kCodecMemoryReserveBytes - heldBytes) /
+                        bufferedFrames);
 }
 
 [[nodiscard]] constexpr auto nsToMs(std::uint64_t ns) -> double {
@@ -294,7 +299,8 @@ void logDecompressionObservability(const pipeline::DecompressStats& stats) {
 /// capacities), capped at the historical 512 MiB sample cap. Keeping the
 /// sample inside this budget leaves the rest for frames and codec scratch.
 [[nodiscard]] auto sampleBudgetBytes(std::size_t memoryLimitBytes) noexcept -> std::size_t {
-    return std::min(kProfileSampleMaxBytes, (memoryLimitBytes - kEngineMemoryReserveBytes) / 8);
+    return std::min(kProfileSampleMaxBytes,
+                    (memoryLimitBytes - format::kCodecMemoryReserveBytes) / 8);
 }
 
 }  // namespace
@@ -345,7 +351,7 @@ auto ArchiveEngine::compress(const CompressionRequest& request) -> Result<Operat
         }
     }
 
-    if (sampleBytes >= request.memoryLimitBytes - kEngineMemoryReserveBytes) {
+    if (sampleBytes >= request.memoryLimitBytes - format::kCodecMemoryReserveBytes) {
         return makeError<OperationStats>(ErrorCode::kUsageError,
                                          "profile sample exceeds the memory budget");
     }
@@ -372,7 +378,13 @@ auto ArchiveEngine::compress(const CompressionRequest& request) -> Result<Operat
                    pipeline::ParallelParsePipeline::kDefaultEncoderParallelism)
         : pipeline::CompressPipeline::kDefaultEncoderParallelism;
     const auto sourceLocalFrames = parallel ? request.parseWorkers : std::size_t{1};
-    const auto bufferedFrames = maxBufferedFrames(encoderWorkers, sourceLocalFrames);
+    // InFlightLimiter is sized from the source fan-out: the sequential reader
+    // uses encoder workers, while parallel parsing reserves one credit per
+    // parser (K), not per encoder (min(K, 4)). Each parser can additionally
+    // hold one frame while waiting for a credit, so its bound is
+    // 2*(queueDepth-1) + 2K.
+    const auto inFlightWorkers = parallel ? request.parseWorkers : encoderWorkers;
+    const auto bufferedFrames = maxBufferedFrames(inFlightWorkers, sourceLocalFrames);
     const auto maxFrameBytes =
         maxFrameBytesFor(request.memoryLimitBytes, bufferedFrames, sampleBytes);
     const auto targetFrameBytes = targetFrameBytesFor(request.targetFrameBytes, maxFrameBytes);

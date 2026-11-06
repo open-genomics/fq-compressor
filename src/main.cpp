@@ -75,13 +75,16 @@ struct VerifyOptions {
     return std::optional<fqc::format::DatasetProfile>(*profile);
 }
 
-void logStats(std::string_view operation, const fqc::commands::OperationStats& stats, bool quiet) {
+void logStats(std::string_view operation,
+              const fqc::commands::OperationStats& stats,
+              bool quiet,
+              std::string_view outputLabel) {
     if (quiet) {
         return;
     }
     FQC_LOG_INFO(
         "{} complete: profile={}, paired={}, frames={}, records={}, bases={}, input={} "
-        "bytes, output={} bytes",
+        "bytes, {}={} bytes",
         operation,
         fqc::format::profileToString(stats.profile),
         stats.paired,
@@ -89,6 +92,7 @@ void logStats(std::string_view operation, const fqc::commands::OperationStats& s
         stats.recordCount,
         stats.totalBases,
         stats.inputBytes,
+        outputLabel,
         stats.outputBytes);
 }
 
@@ -220,7 +224,7 @@ auto run(int argc, char* argv[]) -> int {
             if (!result) {
                 return reportError(result);
             }
-            logStats("compression", *result, global.quiet);
+            logStats("compression", *result, global.quiet, "output");
         } else if (*decompressCommand) {
             auto result = fqc::commands::ArchiveEngine::decompress(
                 {.inputPath = decompress.input,
@@ -231,14 +235,14 @@ auto run(int argc, char* argv[]) -> int {
             if (!result) {
                 return reportError(result);
             }
-            logStats("decompression", *result, global.quiet);
+            logStats("decompression", *result, global.quiet, "output");
         } else if (*verifyCommand) {
             auto result = fqc::commands::ArchiveEngine::verify(
                 verify.input, *memoryLimit, verify.decodeWorkers);
             if (!result) {
                 return reportError(result);
             }
-            logStats("verification", *result, global.quiet);
+            logStats("verification", *result, global.quiet, "decoded");
         }
         return 0;
     } catch (const std::exception& error) {

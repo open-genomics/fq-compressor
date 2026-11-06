@@ -83,16 +83,19 @@ CLI 默认预算 16 GiB，最低支持 64 MiB。编解码器不写临时文件�
 内存预算按最大同存帧数分摊，而不是只按单帧计算：
 
 ```text
-maxBufferedFrames = 2 × (queueDepth - 1) + workerCount + sourceLocalFrames
+maxBufferedFrames = 2 × (queueDepth - 1) + inFlightWorkers + sourceLocalFrames
 逐帧峰值预算 = (内存限制 - 16 MiB 运行时预留 - 采样持有字节) / maxBufferedFrames
 累积目标 = min(用户目标, 逐帧峰值预算 / 4)
 ```
 
 `sourceLocalFrames` 在顺序压缩/解压为 1，在并行解析为 parser 数 K；它尚未进入
-InFlightLimiter，必须显式计入。16 MiB 的编解码器/运行时预留只计一次，不再乘到每一帧上。
-默认 16 GiB 下逐帧上限仍为 512 MiB、目标帧仍为 64 MiB；64 MiB 下目标帧会缩到约 0.5–1 MiB。
-实测 64 MiB 预算、316 MB / 1M reads 输入：顺序压缩 18.2 MiB、K=4 25.9 MiB、K=8 29.4 MiB、
-解压 17.1 MiB，均低于预算。
+InFlightLimiter，必须显式计入。`inFlightWorkers` 取 InFlightLimiter 的容量口径：顺序压缩为
+encoder 数，并行解析为 parser 数 K，解压为 decoder 数；并行解析因此是 `6 + 2K` 帧
+（窗口 `6 + K` 加每个 parser 等待 credit 的一帧）。16 MiB 的编解码器/运行时预留只计一次，
+不再乘到每一帧上。
+默认 16 GiB、默认并行度下逐帧上限仍为 512 MiB、目标帧仍为 64 MiB；64 MiB 下目标帧会缩到约 0.5–1 MiB。
+实测 64 MiB 预算、316 MB / 1M reads 输入：顺序压缩约 18.5 MiB、K=4 约 25.8 MiB、
+K=8 约 27 MiB、解压约 21 MiB（顺序归档），均低于预算。
 
 ## 执行架构
 

@@ -16,9 +16,9 @@ CLI 把 `--memory-limit` 描述为硬上限，README 也承诺“最低 64 MiB�
 
 根因有三层：
 
-1. `estimateCompressionPeak` / `estimateDecompressionPeak` 把 16 MiB 的
-   `kCodecMemoryReserve` 加进**每一帧**的峰值。流水线同时有约 10 帧在途时，这个固定预留
-   被乘了 10 次。
+1. `estimateCompressionPeak` / `estimateDecompressionPeak` 把 16 MiB 的 codec/runtime
+   预留（现 `kCodecMemoryReserveBytes`）加进**每一帧**的峰值。流水线同时有约 10 帧在途时，
+   这个固定预留被乘了 10 次。
 2. `encodeFrame` / `readRawFrame` 用整机 `memoryLimitBytes` 检查单帧峰值；
    `maxFrameBytes` 只限制单路 raw stream。也就是说，单帧能占满整机预算，多帧叠加没有
    上界。
@@ -36,22 +36,26 @@ decompress 的 round-trip 在 line 40721 与输入不一致。这属于“校验
 format 层：
 
 - `estimateCompressionPeak` / `estimateDecompressionPeak` 返回**帧本地峰值**，不含
-  `kCodecMemoryReserve`；全局预留只由调用方计一次。
+  `kCodecMemoryReserveBytes`；全局预留只由调用方计一次。
 - `encodeFrame` / `readRawFrame` 同时检查：
   - 帧本地峰值 ≤ `maxFrameBytes`（逐帧预算）；
-  - 帧本地峰值 ≤ `memoryLimitBytes - kCodecMemoryReserve`（单帧全局上界）。
+  - 帧本地峰值 ≤ `memoryLimitBytes - kCodecMemoryReserveBytes`（单帧全局上界）。
 
 command 层按实际流水线形态分摊预算：
 
 ```text
-maxBufferedFrames = 2 × (queueDepth - 1) + workerCount + sourceLocalFrames
+maxBufferedFrames = 2 × (queueDepth - 1) + inFlightWorkers + sourceLocalFrames
 maxFrameBytes = (memoryLimit - 16 MiB - sampleHeldBytes) / maxBufferedFrames
 targetFrameBytes = min(userTarget, maxFrameBytes / 4)
 ```
 
 - `sourceLocalFrames` 在顺序压缩/解压为 1，在并行解析为 parser 数 K；它尚未进入
   `InFlightLimiter`，必须显式计入。
-- `workerCount` 用实际值：顺序压缩 4，并行压缩 `min(K,4)`，解压为配置的 decoder 数。
+- `inFlightWorkers` 取 `InFlightLimiter` 的实际容量口径：顺序压缩为 encoder 数（4），
+  并行解析为 parser 数 K（limiter 的 capacity 和 reserved owners 都按 K 计，不是
+  `min(K,4)` 的 encoder 数），解压为配置的 decoder 数。
+- 并行解析的最大同存帧数是 `6 + 2K`：in-flight 窗口 `6 + K`，加上每个 parser 正在
+  等待 credit 的那一帧。按 `6 + min(K,4) + K` 估算会在 K=8 时漏掉 4 帧。
 - 目标帧大小取峰值预算的 1/4：`estimate*Peak` 约是 retained FASTQ 字节的 4 倍
   （记录字符串 + 原始流 + Zstd 输出上界 + vector 元数据）。
 
@@ -65,8 +69,9 @@ targetFrameBytes = min(userTarget, maxFrameBytes / 4)
 - 最后一对记录允许越过采样预算；随后用
   `sampleBytes >= memoryLimit - reserve` 显式失败，保证它没有越过整个可用内存。
 
-默认 16 GiB 下 `maxFrameBytes` 仍为 512 MiB、目标帧仍为 64 MiB，因此归档字节不变。
-64 MiB 下目标帧缩到约 0.5–1 MiB。
+默认 16 GiB、默认并行度（K=4）下 `maxFrameBytes` 仍为 512 MiB、目标帧仍为 64 MiB，
+因此归档字节不变。
+64 MiB 下目标帧缩到约 0.5–1 MiB（顺序约 0.95 MiB，K=8 约 0.48 MiB）。
 
 ## Alternatives considered
 
@@ -84,9 +89,10 @@ targetFrameBytes = min(userTarget, maxFrameBytes / 4)
 
 ## Consequences
 
-- 低内存下帧更小、帧数更多，压缩比略降：64 MiB / 316 MB 输入的归档从 127,599,977 B
-  增至 127,988,317 B（+0.30%）。这是用吞吐/体积换硬上限的明确取舍。
-- 默认 16 GiB 行为与归档逐字节不变；性能路径没有新增原子或锁。
+- 低内存下帧更小、帧数更多，压缩比略降：64 MiB / 316 MB 输入，顺序压缩归档从
+  127,599,977 B 增至 127,988,317 B（+0.30%），K=4 / K=8 分别为 128,025,071 B /
+  128,094,667 B。这是用吞吐/体积换硬上限的明确取舍。
+- 默认 16 GiB、默认并行度（K=4）下行为与归档逐字节不变；性能路径没有新增原子或锁。
 - 低内存下 profile 采样更早停止；150 bp 短读仍有约 1.7 万条，足够 profile 判定。
 - `maxFrameBytes` 的语义从“单路 raw stream 上限”变为“帧本地峰值预算”；raw stream
   检查保留为廉价早退，但不再是唯一约束。默认 64 MiB 目标帧不受影响；旧的自定义超大帧
@@ -103,13 +109,14 @@ targetFrameBytes = min(userTarget, maxFrameBytes / 4)
 - `clang-debug` / `clang-release` / `clang-asan` / `clang-tsan`：19/19 通过；
 - `clang-format-18` 通过；`scripts/notes.sh verify` 16 篇通过；定向 clang-tidy
   （LLVM 19）项目路径 0 告警；
-- 64 MiB / 316 MB / 1M reads 实测峰值 RSS：
-  - 顺序压缩 18,632 KiB ≈ 18.2 MiB
-  - 并行压缩 K=4 26,496 KiB ≈ 25.9 MiB
-  - 并行压缩 K=8 30,068 KiB ≈ 29.4 MiB
-  - 解压 17,500 KiB ≈ 17.1 MiB
+- 64 MiB / 316 MB / 1M reads 实测峰值 RSS（同一 release 二进制的多次运行范围）：
+  - 顺序压缩 18,760–19,256 KiB ≈ 18.3–18.8 MiB
+  - 并行压缩 K=4 26,448 KiB ≈ 25.8 MiB
+  - 并行压缩 K=8 26,884–27,600 KiB ≈ 26.3–27.0 MiB
+  - 解压（顺序归档）21,328 KiB ≈ 20.8 MiB；K=4 归档 18,388 KiB ≈ 18.0 MiB；
+    K=8 归档 13,596 KiB ≈ 13.3 MiB
 - 64 MiB 归档 decompress 回原 FASTQ 逐字节一致，`verify` 通过；
-- 默认 16 GiB 下，改动前后 release 二进制对同一 316 MB 输入生成的归档逐字节一致
+- 默认 16 GiB、K=4 下，改动前后 release 二进制对同一 316 MB 输入生成的归档逐字节一致
   （127,599,977 B），decompress round-trip 一致；
 - 未跑默认 16 GiB 的性能 A/B：成功路径的帧大小、编码路径和归档字节都没有变化，新增的
   只是命令层的常量计算；64 MiB 的帧缩小是有意的行为变化，不用它去推断默认路径性能。
@@ -122,6 +129,8 @@ targetFrameBytes = min(userTarget, maxFrameBytes / 4)
   原始输入的逐字节 `cmp` 作为门禁。
 - **固定预留要区分“每进程”和“每帧”。** 16 MiB 的 codec/runtime 预留是每进程的；
   逐帧峰值只能计帧自己的内存。
+- **in-flight 窗口的 owner 数不等于 encoder 数。** 并行解析按 parser 预留 credit；
+  预算要跟 `InFlightLimiter` 的实际 capacity 走，而不是跟最终 encoder 数走。
 - **预算公式要跟着流水线拓扑走。** 队列深度、worker 数和 source-local 帧数变了，
   `maxBufferedFrames` 必须同步变；不要留下一个与拓扑无关的 magic divisor。
 - **剩余边界：** 单条记录本身超过预算时，parser 仍会先分配该记录；本轮没有把

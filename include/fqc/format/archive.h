@@ -22,6 +22,9 @@ inline constexpr std::uint16_t kArchiveVersion = 2;
 inline constexpr std::size_t kDefaultTargetFrameBytes = std::size_t{64} * 1024 * 1024;
 inline constexpr std::size_t kDefaultMaxFrameBytes = std::size_t{512} * 1024 * 1024;
 inline constexpr std::size_t kDefaultMemoryLimitBytes = 16ULL * 1024ULL * 1024ULL * 1024ULL;
+/// Process-wide codec/runtime headroom (zstd scratch, allocator slack) that is
+/// budgeted once per process, never per in-flight frame.
+inline constexpr std::size_t kCodecMemoryReserveBytes = std::size_t{16} * 1024 * 1024;
 /// Accepted range for the configurable quality-stream zstd level. Single source
 /// of truth: the CLI validates against it and the archive encoder enforces it.
 inline constexpr int kMinZstdLevel = 1;

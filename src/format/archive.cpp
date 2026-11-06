@@ -34,7 +34,6 @@ constexpr std::uint32_t kFlagPaired = 1U << 0U;
 constexpr std::uint8_t kIdCodecZstd = 1;
 constexpr std::uint8_t kSequenceCodecPackedZstd = 1;
 constexpr std::uint8_t kQualityCodecZstd = 1;
-constexpr std::size_t kCodecMemoryReserve = std::size_t{16} * 1024 * 1024;
 // ID/sequence streams always compress at this level (throughput-oriented; the
 // ratio/level curve flattens early on these streams). Only the quality stream
 // gets a configurable level (ArchiveOptions::qualityZstdLevel), bounded by the
@@ -469,7 +468,7 @@ struct RawStreamSizes {
     return sizes;
 }
 
-/// Frame-local peak, excluding the process-wide `kCodecMemoryReserve`.
+/// Frame-local peak, excluding the process-wide `kCodecMemoryReserveBytes`.
 /// Callers combine it with the global reserve and the in-flight frame window;
 /// see ArchiveEngine's frame-budget derivation.
 [[nodiscard]] auto estimateCompressionPeak(std::span<const ReadRecord> records,
@@ -658,8 +657,8 @@ auto encodeFrame(std::span<const ReadRecord> records,
         return makeError<std::unique_ptr<EncodedFrame>>(
             ErrorCode::kUsageError, "FQC v2 frame exceeds configured frame budget");
     }
-    if (options.memoryLimitBytes <= kCodecMemoryReserve ||
-        *peakMemory > options.memoryLimitBytes - kCodecMemoryReserve) {
+    if (options.memoryLimitBytes <= kCodecMemoryReserveBytes ||
+        *peakMemory > options.memoryLimitBytes - kCodecMemoryReserveBytes) {
         return makeError<std::unique_ptr<EncodedFrame>>(
             ErrorCode::kUsageError, "FQC v2 frame exceeds configured memory limit");
     }
@@ -767,7 +766,7 @@ auto ArchiveWriter::ensureHeader() -> VoidResult {
     if (headerWritten_) {
         return {};
     }
-    if (options_.maxFrameBytes == 0 || options_.memoryLimitBytes <= kCodecMemoryReserve) {
+    if (options_.maxFrameBytes == 0 || options_.memoryLimitBytes <= kCodecMemoryReserveBytes) {
         return makeVoidError(ErrorCode::kUsageError,
                              "FQC v2 frame and memory limits must be positive");
     }
@@ -896,7 +895,7 @@ auto ArchiveReader::open() -> Result<ArchiveMetadata> {
     if (opened_) {
         return metadata_;
     }
-    if (maxFrameBytes_ == 0 || memoryLimitBytes_ <= kCodecMemoryReserve) {
+    if (maxFrameBytes_ == 0 || memoryLimitBytes_ <= kCodecMemoryReserveBytes) {
         return makeError<ArchiveMetadata>(ErrorCode::kUsageError,
                                           "FQC v2 frame and memory limits must be positive");
     }
@@ -1120,8 +1119,8 @@ auto ArchiveReader::readRawFrame() -> Result<std::optional<RawFrame>> {
         return makeError<std::optional<RawFrame>>(ErrorCode::kFormatError,
                                                   "FQC v2 frame exceeds configured frame budget");
     }
-    if (memoryLimitBytes_ <= kCodecMemoryReserve ||
-        *peakMemory > memoryLimitBytes_ - kCodecMemoryReserve) {
+    if (memoryLimitBytes_ <= kCodecMemoryReserveBytes ||
+        *peakMemory > memoryLimitBytes_ - kCodecMemoryReserveBytes) {
         return makeError<std::optional<RawFrame>>(ErrorCode::kFormatError,
                                                   "FQC v2 frame exceeds configured memory limit");
     }

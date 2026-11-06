@@ -53,6 +53,9 @@ struct OperationStats {
     std::uint64_t frameCount = 0;
     std::uint64_t recordCount = 0;
     std::uint64_t totalBases = 0;
+    /// Compression reports FASTQ -> archive; decompression and verification
+    /// report archive -> logical FASTQ. Verification decodes the full output
+    /// but writes no file, so its `outputBytes` is the decoded size.
     std::uint64_t inputBytes = 0;
     std::uint64_t outputBytes = 0;
 };
