@@ -469,9 +469,12 @@ struct RawStreamSizes {
     return sizes;
 }
 
+/// Frame-local peak, excluding the process-wide `kCodecMemoryReserve`.
+/// Callers combine it with the global reserve and the in-flight frame window;
+/// see ArchiveEngine's frame-budget derivation.
 [[nodiscard]] auto estimateCompressionPeak(std::span<const ReadRecord> records,
                                            const RawStreamSizes& sizes) -> Result<std::size_t> {
-    std::size_t peak = kCodecMemoryReserve;
+    std::size_t peak = 0;
     if (records.size() > std::numeric_limits<std::size_t>::max() / (sizeof(ReadRecord) * 2) ||
         !checkedAdd(peak, records.size() * sizeof(ReadRecord) * 2)) {
         return makeError<std::size_t>(ErrorCode::kUsageError,
@@ -578,7 +581,8 @@ struct RawStreamSizes {
                                              std::size_t rawQualities,
                                              std::size_t qualities,
                                              std::size_t recordCount) -> Result<std::size_t> {
-    std::size_t peak = kCodecMemoryReserve;
+    // Frame-local peak; the global reserve is counted once by the caller.
+    std::size_t peak = 0;
     if (recordCount > std::numeric_limits<std::size_t>::max() / (sizeof(ReadRecord) * 2) ||
         !checkedAdd(peak, recordCount * sizeof(ReadRecord) * 2)) {
         return makeError<std::size_t>(ErrorCode::kFormatError,
@@ -650,7 +654,12 @@ auto encodeFrame(std::span<const ReadRecord> records,
         return makeError<std::unique_ptr<EncodedFrame>>(peakMemory.error().code,
                                                         peakMemory.error().message);
     }
-    if (*peakMemory > options.memoryLimitBytes) {
+    if (*peakMemory > options.maxFrameBytes) {
+        return makeError<std::unique_ptr<EncodedFrame>>(
+            ErrorCode::kUsageError, "FQC v2 frame exceeds configured frame budget");
+    }
+    if (options.memoryLimitBytes <= kCodecMemoryReserve ||
+        *peakMemory > options.memoryLimitBytes - kCodecMemoryReserve) {
         return makeError<std::unique_ptr<EncodedFrame>>(
             ErrorCode::kUsageError, "FQC v2 frame exceeds configured memory limit");
     }
@@ -1107,7 +1116,12 @@ auto ArchiveReader::readRawFrame() -> Result<std::optional<RawFrame>> {
     if (!peakMemory) {
         return makeError<std::optional<RawFrame>>(peakMemory.error());
     }
-    if (*peakMemory > memoryLimitBytes_) {
+    if (*peakMemory > maxFrameBytes_) {
+        return makeError<std::optional<RawFrame>>(ErrorCode::kFormatError,
+                                                  "FQC v2 frame exceeds configured frame budget");
+    }
+    if (memoryLimitBytes_ <= kCodecMemoryReserve ||
+        *peakMemory > memoryLimitBytes_ - kCodecMemoryReserve) {
         return makeError<std::optional<RawFrame>>(ErrorCode::kFormatError,
                                                   "FQC v2 frame exceeds configured memory limit");
     }

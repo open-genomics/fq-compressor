@@ -198,6 +198,39 @@ TEST_F(ArchiveEngineTest, RoundTripsHeaderWithTrailingSpaceByteIdentically) {
     EXPECT_EQ(temp_.readFile("ts.out.fastq"), input);
 }
 
+// The 64 MiB sample budget stops the profile sample before EOF. The sample
+// boundary must not consume a record and then discard it: the pipeline resumes
+// at the last record actually retained. This input is large enough to cross the
+// held-bytes sample budget with 150 bp records.
+TEST_F(ArchiveEngineTest, SampleBoundaryPreservesAllRecordsAt64MiB) {
+    constexpr int kRecordCount = 20'000;
+    std::string input;
+    input.reserve(static_cast<std::size_t>(kRecordCount) * 320);
+    for (int i = 0; i < kRecordCount; ++i) {
+        input += "@read" + std::to_string(i) + "\n";
+        input += std::string(150, 'A') + "\n+\n";
+        input += std::string(150, 'I') + "\n";
+    }
+    temp_.writeFile("sample-boundary.fastq", input);
+
+    ArchiveEngine engine;
+    auto compressed = engine.compress({.inputPath = temp_.path() / "sample-boundary.fastq",
+                                       .matePath = {},
+                                       .outputPath = temp_.path() / "sample-boundary.fqc",
+                                       .profile = format::DatasetProfile::kIllumina,
+                                       .memoryLimitBytes = 64 * 1024 * 1024,
+                                       .forceOverwrite = true});
+    ASSERT_TRUE(compressed) << compressed.error().message;
+    EXPECT_EQ(compressed->recordCount, static_cast<std::uint64_t>(kRecordCount));
+
+    auto decompressed = engine.decompress({.inputPath = temp_.path() / "sample-boundary.fqc",
+                                           .outputPath = temp_.path() / "sample-boundary.out.fastq",
+                                           .memoryLimitBytes = 64 * 1024 * 1024,
+                                           .forceOverwrite = true});
+    ASSERT_TRUE(decompressed) << decompressed.error().message;
+    EXPECT_EQ(temp_.readFile("sample-boundary.out.fastq"), input);
+}
+
 // BUG-1 regression: genuine trailing \r inside sequence/quality must survive
 // (only the single CRLF line-ending \r is stripped).
 TEST_F(ArchiveEngineTest, RejectsGenuineTrailingCarriageReturnsLoudly) {

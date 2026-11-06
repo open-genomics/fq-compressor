@@ -16,7 +16,7 @@ namespace fqc::commands {
 
 inline constexpr std::size_t kDefaultMemoryLimitBytes = format::kDefaultMemoryLimitBytes;
 inline constexpr std::size_t kProfileSampleMaxRecords = 50'000;
-inline constexpr std::size_t kProfileSampleMaxBases = 512ULL * 1024ULL * 1024ULL;
+inline constexpr std::size_t kProfileSampleMaxBytes = 512ULL * 1024ULL * 1024ULL;
 
 struct CompressionRequest {
     std::filesystem::path inputPath;

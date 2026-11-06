@@ -115,9 +115,26 @@ private:
     return {};
 }
 
-[[nodiscard]] auto maxFrameBytesFor(std::size_t memoryLimitBytes) noexcept -> std::size_t {
+// Two bounded queues + worker pool + the source-side frame being accumulated.
+// The source-local frame is not covered by InFlightLimiter: it has not been
+// enqueued yet, so the aggregate budget must count it explicitly.
+constexpr std::size_t kPipelineQueueFrames =
+    2 * (pipeline::CompressPipeline::kDefaultQueueDepth - 1);
+constexpr std::size_t kFramePeakToTargetFactor = 4;
+
+[[nodiscard]] constexpr auto maxBufferedFrames(
+    std::size_t workerCount, std::size_t sourceLocalFrames) noexcept -> std::size_t {
+    return kPipelineQueueFrames + workerCount + sourceLocalFrames;
+}
+
+/// Split the non-reserved budget across every frame that can hold data at
+/// once. `estimateCompressionPeak` / `estimateDecompressionPeak` are
+/// frame-local; the 16 MiB codec/runtime reserve is counted once here.
+[[nodiscard]] auto maxFrameBytesFor(std::size_t memoryLimitBytes,
+                                    std::size_t bufferedFrames,
+                                    std::size_t heldBytes) noexcept -> std::size_t {
     return std::min(format::kDefaultMaxFrameBytes,
-                    (memoryLimitBytes - kEngineMemoryReserveBytes) / 4);
+                    (memoryLimitBytes - kEngineMemoryReserveBytes - heldBytes) / bufferedFrames);
 }
 
 [[nodiscard]] constexpr auto nsToMs(std::uint64_t ns) -> double {
@@ -174,9 +191,21 @@ void logDecompressionObservability(const pipeline::DecompressStats& stats) {
     logPipelineTelemetry(stats.telemetry);
 }
 
-[[nodiscard]] auto targetFrameBytesFor(const CompressionRequest& request) noexcept -> std::size_t {
-    return std::min(request.targetFrameBytes,
-                    (request.memoryLimitBytes - kEngineMemoryReserveBytes) / 8);
+/// The encoder's frame-local peak is roughly 4x the retained FASTQ bytes
+/// (record strings + raw streams + compressed bound). Keep the accumulation
+/// target at a quarter of the peak budget so a closed frame fits before it is
+/// handed to the encoder.
+[[nodiscard]] auto targetFrameBytesFor(std::size_t requestedTargetFrameBytes,
+                                       std::size_t maxFrameBytes) noexcept -> std::size_t {
+    return std::min(requestedTargetFrameBytes, maxFrameBytes / kFramePeakToTargetFactor);
+}
+
+/// Conservative per-record held memory. The vector's geometric growth can
+/// leave up to one extra slot per element, so count two ReadRecord objects;
+/// string capacities are what the allocator actually holds.
+[[nodiscard]] auto recordHeldBytes(const ReadRecord& record) noexcept -> std::size_t {
+    return 2 * sizeof(ReadRecord) + record.id.capacity() + record.comment.capacity() +
+        record.sequence.capacity() + record.quality.capacity();
 }
 
 /// File size when `path` is a regular uncompressed file (parallel parsing needs
@@ -261,8 +290,11 @@ void logDecompressionObservability(const pipeline::DecompressStats& stats) {
     };
 }
 
-[[nodiscard]] auto sampleLimitBytes(std::size_t memoryLimitBytes) noexcept -> std::size_t {
-    return std::min(kProfileSampleMaxBases, (memoryLimitBytes - kEngineMemoryReserveBytes) / 8);
+/// Held-memory budget for the profile sample (record slots + string
+/// capacities), capped at the historical 512 MiB sample cap. Keeping the
+/// sample inside this budget leaves the rest for frames and codec scratch.
+[[nodiscard]] auto sampleBudgetBytes(std::size_t memoryLimitBytes) noexcept -> std::size_t {
+    return std::min(kProfileSampleMaxBytes, (memoryLimitBytes - kEngineMemoryReserveBytes) / 8);
 }
 
 }  // namespace
@@ -290,19 +322,32 @@ auto ArchiveEngine::compress(const CompressionRequest& request) -> Result<Operat
     }
 
     std::vector<ReadRecord> sample;
-    const auto maxSampleBytes = sampleLimitBytes(request.memoryLimitBytes);
-    std::size_t sampledBases = 0;
-    while (sample.size() < kProfileSampleMaxRecords && sampledBases < maxSampleBytes) {
+    const auto sampleBudget = sampleBudgetBytes(request.memoryLimitBytes);
+    std::size_t sampleBytes = 0;
+    while (sample.size() < kProfileSampleMaxRecords) {
         FQC_TRY_ASSIGN(pair, io::readRecordPair(primary, mate ? &*mate : nullptr));
         if (!pair.has_value()) {
             break;
         }
-        sampledBases += pair->first.sequence.size();
+        // 采样在整个流水线期间一直存活，也会被复制进首帧；按实际持有字节
+        // 限流，避免超大 ID/comment 绕过只按碱基计的旧上限。必须先加入再
+        // 判断是否超预算：readRecordPair 已经消费了输入，消费后丢弃会让
+        // 并行路径从采样终点继续时少一对记录。允许最后一对越过预算，随后
+        // 的显式检查会保证它没有越过整个可用内存。
+        sampleBytes += recordHeldBytes(pair->first);
         sample.push_back(std::move(pair->first));
         if (pair->second) {
-            sampledBases += pair->second->sequence.size();
+            sampleBytes += recordHeldBytes(*pair->second);
             sample.push_back(std::move(*pair->second));
         }
+        if (sampleBytes >= sampleBudget) {
+            break;
+        }
+    }
+
+    if (sampleBytes >= request.memoryLimitBytes - kEngineMemoryReserveBytes) {
+        return makeError<OperationStats>(ErrorCode::kUsageError,
+                                         "profile sample exceeds the memory budget");
     }
 
     FQC_TRY_ASSIGN(resolvedProfile,
@@ -311,12 +356,6 @@ auto ArchiveEngine::compress(const CompressionRequest& request) -> Result<Operat
 
     OutputTransaction outputTransaction(request.outputPath, request.outputPath != "-");
     FQC_TRY_ASSIGN(output, openOutput(outputTransaction.path()));
-    format::ArchiveWriter writer(*output,
-                                 {.profile = resolvedProfile,
-                                  .paired = request.paired(),
-                                  .maxFrameBytes = maxFrameBytesFor(request.memoryLimitBytes),
-                                  .memoryLimitBytes = request.memoryLimitBytes,
-                                  .qualityZstdLevel = request.qualityZstdLevel});
 
     // Parallel parsing: uncompressed regular file, workers > 0. gzip is a pure
     // inflate stream, stdin is not seekable, paired lock-step does not
@@ -325,19 +364,36 @@ auto ArchiveEngine::compress(const CompressionRequest& request) -> Result<Operat
     if (request.parseWorkers > 0 && !request.paired() && request.inputPath != "-") {
         inputFileSize = uncompressedRegularFileSize(request.inputPath);
     }
-    Result<pipeline::PipelineStats> pipelineResult;
     // Profile sampling may already consume a small file completely. There is
     // no suffix to split in that case, so avoid starting empty parser chunks.
-    if (inputFileSize > primary.bytesConsumed()) {
+    const bool parallel = inputFileSize > primary.bytesConsumed();
+    const auto encoderWorkers = parallel
+        ? std::min(request.parseWorkers,
+                   pipeline::ParallelParsePipeline::kDefaultEncoderParallelism)
+        : pipeline::CompressPipeline::kDefaultEncoderParallelism;
+    const auto sourceLocalFrames = parallel ? request.parseWorkers : std::size_t{1};
+    const auto bufferedFrames = maxBufferedFrames(encoderWorkers, sourceLocalFrames);
+    const auto maxFrameBytes =
+        maxFrameBytesFor(request.memoryLimitBytes, bufferedFrames, sampleBytes);
+    const auto targetFrameBytes = targetFrameBytesFor(request.targetFrameBytes, maxFrameBytes);
+
+    format::ArchiveWriter writer(*output,
+                                 {.profile = resolvedProfile,
+                                  .paired = request.paired(),
+                                  .maxFrameBytes = maxFrameBytes,
+                                  .memoryLimitBytes = request.memoryLimitBytes,
+                                  .qualityZstdLevel = request.qualityZstdLevel});
+
+    Result<pipeline::PipelineStats> pipelineResult;
+    if (parallel) {
         pipeline::ParallelParsePipeline parallelEngine(request.inputPath,
                                                        inputFileSize,
-                                                       targetFrameBytesFor(request),
+                                                       targetFrameBytes,
                                                        primary.bytesConsumed(),
                                                        request.parseWorkers);
         pipelineResult = parallelEngine.run(std::span<const ReadRecord>{sample}, writer);
     } else {
-        const pipeline::CompressPipeline pipelineEngine(targetFrameBytesFor(request),
-                                                        request.paired());
+        const pipeline::CompressPipeline pipelineEngine(targetFrameBytes, request.paired());
         std::istream* mateStream = mateStreamPtr ? mateStreamPtr.get() : nullptr;
         pipelineResult = pipelineEngine.run(
             *primaryStream, mateStream, std::span<const ReadRecord>{sample}, writer);
@@ -356,10 +412,12 @@ auto ArchiveEngine::decompress(const DecompressionRequest& request) -> Result<Op
     FQC_TRY_ASSIGN(input, io::openInputFile(request.inputPath));
     OutputTransaction outputTransaction(request.outputPath, request.outputPath != "-");
     FQC_TRY_ASSIGN(output, openOutput(outputTransaction.path()));
+    const auto decoderWorkers = resolveDecoderWorkers(request.decoderWorkers);
+    const auto bufferedFrames = maxBufferedFrames(decoderWorkers, 1);
     const pipeline::DecompressPipeline pipelineEngine(
-        maxFrameBytesFor(request.memoryLimitBytes),
+        maxFrameBytesFor(request.memoryLimitBytes, bufferedFrames, 0),
         request.memoryLimitBytes,
-        resolveDecoderWorkers(request.decoderWorkers));
+        decoderWorkers);
     FQC_TRY_ASSIGN(
         stats,
         pipelineEngine.run(*input, [&](const std::vector<ReadRecord>& records) -> VoidResult {
@@ -385,9 +443,10 @@ auto ArchiveEngine::verify(const std::filesystem::path& inputPath,
     FQC_TRY_ASSIGN(input, io::openInputFile(inputPath));
     // Same pipeline as decompress with a counting-only sink: full decode and
     // validation, nothing written.
-    const pipeline::DecompressPipeline pipelineEngine(maxFrameBytesFor(memoryLimitBytes),
-                                                      memoryLimitBytes,
-                                                      resolveDecoderWorkers(decoderWorkers));
+    const auto workers = resolveDecoderWorkers(decoderWorkers);
+    const auto bufferedFrames = maxBufferedFrames(workers, 1);
+    const pipeline::DecompressPipeline pipelineEngine(
+        maxFrameBytesFor(memoryLimitBytes, bufferedFrames, 0), memoryLimitBytes, workers);
     FQC_TRY_ASSIGN(stats,
                    pipelineEngine.run(
                        *input, [](const std::vector<ReadRecord>&) -> VoidResult { return {}; }));
