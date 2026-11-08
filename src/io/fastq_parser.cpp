@@ -89,7 +89,7 @@ auto FastqParser::readLine(std::string& line) -> bool {
     // 分块读行：std::getline(string) 会先按整行长度分配内存，gzip 解压出的
     // 超长行可绕过 maxLineBytes_ 把内存打满。固定 64 KiB 栈缓冲逐块扫描，
     // 只有不超过上限的内容才追加到 line。
-    constexpr std::size_t kChunkBytes = 64 * 1024;
+    constexpr std::size_t kChunkBytes = std::size_t{64} * 1024;
     std::array<char, kChunkBytes> chunk{};
     line.clear();
     std::size_t rawBytes = 0;
