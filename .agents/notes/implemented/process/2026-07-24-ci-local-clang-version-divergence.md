@@ -39,3 +39,26 @@ CI（`.github/workflows/ci.yml`）用 clang-18（action 内联 `-s compiler.vers
 CI workflow 与 `.github/actions/conan-build/` 内联 clang-18；本地 conan profile
 为 clang-21；两侧 sanitizer 门禁（`scripts/test.sh clang-asan|clang-tsan`）
 目前结果一致。
+
+## 2026-11-08 补充：格式检查的版本陷阱已实际发生
+
+`clang-format` 的返回类型换行策略在 18 / 19 / 21 之间**不一致**：同一份源码在
+18.1.3 下合规，在 19.1.7 与 21.1.8 下都会被要求改写（反之亦然）。本机没有
+`clang-format-18` 时 `scripts/lint.sh` 会回退到裸 `clang-format`，于是出现
+"本地 `format-check` 全绿、CI 全红"：
+
+- 2026-11-08 的 CI 失败正是这个：`src/format/archive.cpp`、`src/main.cpp`、
+  `include/fqc/io/fastq_parser.h` 等 9 个文件的返回类型换行是 clang-format 21
+  的输出，CI 的 18 要求另一种写法。
+- 修复方式：用 **18.1.3**（`uv pip install clang-format==18.1.3` 或
+  `scripts/core/install-deps` 装的 `clang-format-18`）重新格式化整个源码树。
+- `detect_clang_format` 现在在回退到非 18.x 时向 stderr 告警，避免再次静默漂移。
+  校验 CI 一致性的命令：
+
+  ```bash
+  find src include tests \( -name '*.cpp' -o -name '*.h' -o -name '*.hpp' \) \
+      -not -path '*/build/*' -print0 | xargs -0 clang-format-18 --dry-run --Werror
+  ```
+
+教训与上面一致但更具体：**格式器必须与 CI 同版本**，编译器版本分歧可以接受，
+格式器不行——它的输出是 CI 的硬门禁输入。

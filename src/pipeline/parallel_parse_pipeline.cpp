@@ -60,8 +60,9 @@ struct ReadyFrame {
 
 /// Reads one raw line, advancing the absolute `offset` past the delimiter.
 /// Trims '\r' like the parser does. Returns false at EOF.
-[[nodiscard]] auto readRawLine(std::istream& input, std::string& line, std::uint64_t& offset)
-    -> bool {
+[[nodiscard]] auto readRawLine(std::istream& input,
+                               std::string& line,
+                               std::uint64_t& offset) -> bool {
     if (!std::getline(input, line)) {
         return false;
     }
@@ -93,8 +94,9 @@ constexpr std::size_t kAlignmentWindowLines = 7;
 /// 可行形状：[]、[qual]、['+', qual]、[seq, '+', qual]。qual 行内容任意，
 /// '+' 行是唯一的形状锚点——没有锚点却要求更长的后缀，说明数据已损坏
 /// （如缺 '+' 行的记录），必须交给上层报错而不是继续跳过。
-auto findFirstRecordStart(std::istream& input, std::uint64_t baseOffset, std::size_t maxLineBytes)
-    -> Result<std::optional<std::uint64_t>> {
+auto findFirstRecordStart(std::istream& input,
+                          std::uint64_t baseOffset,
+                          std::size_t maxLineBytes) -> Result<std::optional<std::uint64_t>> {
     std::uint64_t offset = baseOffset;
 
     // 第一步：行首对齐。baseOffset 落在行中段时 getline 读出的是行尾残段——它属于

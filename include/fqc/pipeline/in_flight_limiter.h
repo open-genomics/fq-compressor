@@ -154,9 +154,11 @@ template <typename Queue, typename Item>
 /// Owner-reserved variant used by parallel parsers: the credit belongs to
 /// `owner` and must be released with the same owner after ordered commit.
 template <typename Queue, typename Item>
-[[nodiscard]] auto pushWithCredit(
-    InFlightLimiter& limiter, std::size_t owner, Queue& queue, Item item, std::stop_token st = {})
-    -> bool {
+[[nodiscard]] auto pushWithCredit(InFlightLimiter& limiter,
+                                  std::size_t owner,
+                                  Queue& queue,
+                                  Item item,
+                                  std::stop_token st = {}) -> bool {
     if (!limiter.acquire(owner, st)) {
         return false;
     }

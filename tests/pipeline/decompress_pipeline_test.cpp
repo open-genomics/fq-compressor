@@ -38,8 +38,8 @@ namespace {
 }
 
 // Write a multi-frame archive (small maxFrameBytes forces many frames).
-[[nodiscard]] auto makeArchive(const std::vector<ReadRecord>& records, std::size_t recordsPerFrame)
-    -> std::string {
+[[nodiscard]] auto makeArchive(const std::vector<ReadRecord>& records,
+                               std::size_t recordsPerFrame) -> std::string {
     std::ostringstream output(std::ios::binary);
     ArchiveWriter writer(output,
                          {.profile = DatasetProfile::kIllumina, .maxFrameBytes = 1024 * 1024});

@@ -40,11 +40,12 @@ struct NoInitAllocator {
         std::allocator<T>{}.deallocate(pointer, count);
     }
 
+    // 只接管「无参默认构造」这一条路径（resize 的值初始化）。带参的
+    // construct 故意不提供：allocator_traits 会回退到 construct_at，
+    // assign/insert/push_back/resize(n, v) 因此保持真实的复制语义。
     template <class U>
-    void construct(U* /*pointer*/) noexcept {}
-    template <class U, class... Args>
-    void construct(U* pointer, Args&&... args) {
-        ::new (static_cast<void*>(pointer)) U(std::forward<Args>(args)...);
+    void construct(U* pointer) noexcept {
+        (void)pointer;
     }
 
     template <class U>

@@ -56,8 +56,8 @@ DecompressPipeline::DecompressPipeline(std::size_t maxFrameBytes,
 // reader/decoder/writer 的停止信号、队列关闭和 join 顺序属于同一生命周期，
 // 拆分反而会隐藏同步不变量；复杂度来自阶段交错本身。
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-auto DecompressPipeline::run(std::istream& input, RecordSink sink) const
-    -> Result<DecompressStats> {
+auto DecompressPipeline::run(std::istream& input,
+                             RecordSink sink) const -> Result<DecompressStats> {
     MpmcQueue<InputFrame, kDefaultQueueDepth> queue1;
     MpmcQueue<OrderedFrame, kDefaultQueueDepth> queue2;
     const auto inFlightLimit = MpmcQueue<InputFrame, kDefaultQueueDepth>::kUsableCapacity +

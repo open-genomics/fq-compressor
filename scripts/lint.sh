@@ -36,6 +36,17 @@ detect_clang_format() {
     if command -v clang-format-18 &> /dev/null; then
         echo "clang-format-18"
     elif command -v clang-format &> /dev/null; then
+        # 回退到裸 clang-format 时至少喊一声：18 与 19/21 在返回类型换行策略上
+        # 输出不同，用错版本本地全绿、CI 全红（历史上已发生过）。
+        local version
+        version=$(clang-format --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+        case "$version" in
+            18.*) ;;
+            *)
+                echo "Warning: 使用的是 clang-format ${version:-unknown}，CI 固定 18.x；" >&2
+                echo "         格式化结果可能与 CI 不一致，建议安装 clang-format-18。" >&2
+                ;;
+        esac
         echo "clang-format"
     else
         echo "Error: clang-format not found" >&2

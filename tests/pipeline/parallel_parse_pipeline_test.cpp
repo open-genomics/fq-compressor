@@ -37,8 +37,9 @@ using fqc::pipeline::PipelineStats;
 
 namespace {
 
-[[nodiscard]] auto makeFastq(int count, int sequenceLength = 150, bool atQuality = false)
-    -> std::string {
+[[nodiscard]] auto makeFastq(int count,
+                             int sequenceLength = 150,
+                             bool atQuality = false) -> std::string {
     std::string fastq;
     for (int i = 0; i < count; ++i) {
         fastq += "@read_" + std::to_string(i) + " comment\n";
@@ -136,8 +137,8 @@ private:
 // findFirstRecordStart 现在返回 Result<optional>：错误即对齐区损坏（顺序路径
 // 同样会失败），optional 为空即无记录起点。该辅助解包错误分支，让既有断言
 // 保持"optional 语义"的可读性。
-[[nodiscard]] auto alignedStart(std::istream& input, std::uint64_t base)
-    -> std::optional<std::uint64_t> {
+[[nodiscard]] auto alignedStart(std::istream& input,
+                                std::uint64_t base) -> std::optional<std::uint64_t> {
     auto found = fqc::pipeline::findFirstRecordStart(input, base);
     EXPECT_TRUE(found.has_value()) << (found.has_value() ? "" : found.error().message);
     if (!found.has_value()) {
