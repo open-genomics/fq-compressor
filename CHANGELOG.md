@@ -181,6 +181,11 @@
 
 ### 构建
 
+- **Release workflow 的第三方 Action 固定到 commit SHA**：`checkout`、
+  `ccache-action`、`action-gh-release` 由可移动 tag 改为 40 位 SHA（保留
+  版本注释），避免 tag 被重指后以 `contents: write` 权限执行未审计代码；
+  版本更新仍由现有 Dependabot 的 github-actions 规则提 PR。
+
 - **fuzz 预设与 libc++ 混链的误导性链接错误**：libFuzzer 预编译运行时按
   libstdc++ 构建，与默认 `clang-base` 的 `-stdlib=libc++` 混链会报
   `std::__cxx11::basic_string...` 未定义符号。`tests/CMakeLists.txt` 在

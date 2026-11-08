@@ -26,10 +26,10 @@ jobs:
       # 路径再次漂移。
       PRESET: clang-release-portable
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
       - name: Setup ccache
-        uses: hendrikmuhs/ccache-action@v1
+        uses: hendrikmuhs/ccache-action@77c3f8fd59034e6f3d5c58867ded0185b48d534f # v1
         with:
           key: release-${{ runner.os }}
 
@@ -67,7 +67,7 @@ jobs:
           sha256sum dist/fqc > dist/SHA256SUMS
 
       - name: Upload to GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           files: dist/*
           fail_on_unmatched_files: true
