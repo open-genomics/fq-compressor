@@ -40,7 +40,7 @@ constexpr std::uint8_t kQualityCodecZstd = 1;
 // public kMinZstdLevel/kMaxZstdLevel (single source of truth, shared with CLI).
 constexpr int kStreamZstdLevel = 1;
 
-using Bytes = std::vector<std::uint8_t>;
+using Bytes = ByteBuffer;
 
 void appendU16(Bytes& output, std::uint16_t value) {
     output.push_back(static_cast<std::uint8_t>(value));

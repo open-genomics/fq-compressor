@@ -88,9 +88,9 @@ struct ArchiveStats {
 /// by `compressFrame` (zstd, also CPU-only). Splitting encode from compress
 /// keeps each pipeline stage's work item small and independently schedulable.
 struct EncodedFrame {
-    std::vector<std::uint8_t> rawIds;
-    std::vector<std::uint8_t> rawSequences;
-    std::vector<std::uint8_t> rawQualities;
+    ByteBuffer rawIds;
+    ByteBuffer rawSequences;
+    ByteBuffer rawQualities;
     std::uint32_t recordCount = 0;
     std::uint64_t totalBases = 0;
     std::uint64_t checksum = 0;
@@ -104,9 +104,9 @@ struct EncodedFrame {
 /// `ArchiveWriter::writeCompressedFrame` (frame header + write, no CPU-heavy
 /// work left).
 struct CompressedFrame {
-    std::vector<std::uint8_t> ids;
-    std::vector<std::uint8_t> sequences;
-    std::vector<std::uint8_t> qualities;
+    ByteBuffer ids;
+    ByteBuffer sequences;
+    ByteBuffer qualities;
     std::uint64_t rawIdsSize = 0;
     std::uint64_t rawSequencesSize = 0;
     std::uint64_t rawQualitiesSize = 0;
@@ -139,9 +139,9 @@ struct CompressedFrame {
 /// (pure computation, safe on a worker thread). Sizes are pre-validated
 /// against the reader's configured limits, so they fit `std::size_t`.
 struct RawFrame {
-    std::vector<std::uint8_t> ids;        // zstd-compressed
-    std::vector<std::uint8_t> sequences;  // zstd-compressed
-    std::vector<std::uint8_t> qualities;  // zstd-compressed
+    ByteBuffer ids;        // zstd-compressed
+    ByteBuffer sequences;  // zstd-compressed
+    ByteBuffer qualities;  // zstd-compressed
     std::size_t rawIdsSize = 0;
     std::size_t rawSequencesSize = 0;
     std::size_t rawQualitiesSize = 0;

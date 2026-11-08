@@ -85,6 +85,22 @@ if [[ -n "$FILTER" ]]; then
     # ctest -R 只能匹配二进制名而匹配不到具体 GTest 用例；过滤器改由 GTest
     # 自己（GTEST_FILTER 环境变量）执行，ctest 子进程会继承。
     echo "GTest filter: $FILTER"
+
+    # GTest 对零匹配过滤器返回成功（某个二进制一条用例都没跑也是 0 退出），
+    # 拼错 pattern 会静默全绿。先用 --gtest_list_tests 确认至少命中一条。
+    matched=false
+    while IFS= read -r test_bin; do
+        list_output="$("$test_bin" --gtest_list_tests --gtest_filter="$FILTER" 2>/dev/null || true)"
+        if grep -qE '^  [^ ]' <<<"$list_output"; then
+            matched=true
+            break
+        fi
+    done < <(find "$BUILD_DIR" -maxdepth 4 -type f -executable -name '*_test' | sort)
+    if [[ "$matched" == false ]]; then
+        echo "Error: GTest filter '$FILTER' 没有匹配任何用例（检查 pattern 拼写）" >&2
+        exit 1
+    fi
+
     export GTEST_FILTER="$FILTER"
 fi
 ctest "${CTEST_ARGS[@]}"

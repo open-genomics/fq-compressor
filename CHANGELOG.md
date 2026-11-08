@@ -4,6 +4,18 @@
 
 ### 改进
 
+- **归档字节缓冲不再整块零初始化**：`fqc::ByteBuffer`
+  （`std::vector<uint8_t, NoInitAllocator<uint8_t>>`）取代裸
+  `std::vector<std::uint8_t>`，用于 `RawFrame` / `DecodedBuffer` /
+  `CompressedFrame` 的载荷与 `CompressedStream` 的解压输出缓冲。这些缓冲
+  `resize(n)` 之后立刻被 `readExact` / `ZSTD_decompress` 整块覆盖，
+  `vector::resize` 的值初始化（整块 memset）纯属浪费；实测约 8 ms/GiB
+  （64 KiB 块）～30 ms/GiB（4 MiB 块）。分配器只把无参构造变成空操作，带参构造
+  仍是真实构造，`assign`/`insert`/`push_back`/`resize(n, v)` 语义不变。
+  **兼容性**：`RawFrame`/`CompressedFrame` 字段类型由
+  `std::vector<std::uint8_t>` 变为 `ByteBuffer`，绑定到 `std::vector<uint8_t>&`
+  的外部代码需同步改型；`.data()`/`.size()` 等用法不受影响。归档格式不变。
+
 - **解码管线预算构造收口**：`decompress` 与 `verify` 共用
   `makeDecompressPipeline`，解码 worker 数归一、同存帧预算和逐帧上限只推导一次；
   行为不变。
@@ -83,6 +95,11 @@
   `docs/postmortems/2026-09-21-worker-topology.md`
 
 ### 修复
+
+- **`scripts/test.sh` 零匹配过滤器静默全绿**：GTest 对零匹配的
+  `--gtest_filter` 返回成功，pattern 拼错时整轮测试一条用例都没跑却是绿的。
+  脚本现在先用各 `*_test` 的 `--gtest_list_tests` 确认过滤器至少命中一条用例，
+  否则以退出码 1 报错并提示检查拼写。
 
 - **超长 FASTQ 行在分配后才发现**：`FastqParser` 原先用 `std::getline(string)`
   读完整行再检查长度，gzip 解压出的恶意超长行可绕过 `--memory-limit` 打满内存。

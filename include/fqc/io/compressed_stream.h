@@ -15,6 +15,7 @@
 #pragma once
 
 #include "fqc/common/error.h"
+#include "fqc/common/types.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -109,7 +110,7 @@ private:
     std::istream* source_ = nullptr;
 
     /// @brief Compressed input buffer.
-    std::vector<std::uint8_t> inputBuffer_;
+    ByteBuffer inputBuffer_;
 
     /// @brief Decompressed output buffer.
     std::vector<char> outputBuffer_;
