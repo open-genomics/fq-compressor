@@ -31,7 +31,9 @@ struct NoInitAllocator {
 
     NoInitAllocator() = default;
     template <class U>
-    NoInitAllocator(const NoInitAllocator<U>&) noexcept {}
+    NoInitAllocator(const NoInitAllocator<U>& other) noexcept {
+        (void)other;
+    }
 
     auto allocate(std::size_t count) -> T* {
         return std::allocator<T>{}.allocate(count);
@@ -49,7 +51,8 @@ struct NoInitAllocator {
     }
 
     template <class U>
-    auto operator==(const NoInitAllocator<U>&) const noexcept -> bool {
+    auto operator==(const NoInitAllocator<U>& other) const noexcept -> bool {
+        (void)other;
         return true;
     }
 };
