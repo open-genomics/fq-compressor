@@ -4,7 +4,9 @@
 
 #include "fqc/io/fastq_parser.h"
 
+#include <array>
 #include <istream>
+#include <limits>
 #include <string>
 
 namespace fqc::io {
@@ -63,6 +65,12 @@ auto FastqParser::readRecord() -> Result<std::optional<ReadRecord>> {
     if (plusLine.empty() || plusLine[0] != '+') {
         return std::unexpected(formatError("expected '+'"));
     }
+    // 归档只重建裸 '+'；接受 "+id"/"+desc" 会让解压输出静默改写该行，
+    // 违反字节级无损承诺。显式拒绝，而不是悄悄丢弃这段文本。
+    if (plusLine.size() != 1) {
+        return std::unexpected(formatError(
+            "'+' line must be bare; per-read '+' content is not stored by the archive format"));
+    }
 
     FQC_TRY(readRequiredLine(record.quality));
     if (record.quality.size() != record.sequence.size()) {
@@ -77,27 +85,62 @@ auto FastqParser::readLine(std::string& line) -> bool {
     if (eof_) {
         return false;
     }
-    if (!std::getline(stream_, line)) {
-        // badbit (not eofbit) means the underlying stream failed -- e.g. a corrupt
-        // gzip member made GzipStreamBuf::underflow() throw. Distinguish this from a
-        // clean end-of-file so the caller can surface an I/O error instead of silently
-        // truncating the input.
+
+    // 分块读行：std::getline(string) 会先按整行长度分配内存，gzip 解压出的
+    // 超长行可绕过 maxLineBytes_ 把内存打满。固定 64 KiB 栈缓冲逐块扫描，
+    // 只有不超过上限的内容才追加到 line。
+    constexpr std::size_t kChunkBytes = 64 * 1024;
+    std::array<char, kChunkBytes> chunk{};
+    line.clear();
+    std::size_t rawBytes = 0;
+    bool readAny = false;
+
+    while (true) {
+        stream_.getline(chunk.data(), static_cast<std::streamsize>(chunk.size()));
+        const auto extracted = static_cast<std::size_t>(stream_.gcount());
+        // getline 在「读到 EOF 但已取到字符」时只置 eofbit、不置 failbit；
+        // 只有真正遇到 '\n' 才是分隔符。把 eof 当成分隔符会吃掉最后一行的
+        // 末字符（无尾随换行的合法记录会被截断）。
+        const bool hasDelimiter = !stream_.fail() && !stream_.eof();
+        const std::size_t contentBytes = extracted - (hasDelimiter && extracted > 0 ? 1U : 0U);
+
+        rawBytes += extracted;
+        if (contentBytes > 0) {
+            if (line.size() + contentBytes > maxLineBytes_) {
+                lineTooLong_ = true;
+                // 排空剩余行，保持错误路径之后的流位置可预测；ignore 不分配内存。
+                stream_.clear();
+                stream_.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+                bytesConsumed_ += rawBytes;
+                return false;
+            }
+            line.append(chunk.data(), contentBytes);
+            readAny = true;
+        }
+
+        if (hasDelimiter) {
+            break;
+        }
+        if (stream_.eof()) {
+            break;
+        }
         if (stream_.bad()) {
             streamError_ = true;
+            eof_ = true;
+            bytesConsumed_ += rawBytes;
+            return false;
         }
+        // 未遇到分隔符且未到 EOF：缓冲区满，清除 failbit 后继续下一块。
+        stream_.clear();
+    }
+
+    if (!readAny && rawBytes == 0) {
         eof_ = true;
         return false;
     }
+
     ++lineNumber_;
-    // Count raw bytes before trimTrailingCr strips '\r'. getline consumes the '\n'
-    // delimiter unless it stopped at EOF (eofbit set after extracting content).
-    bytesConsumed_ += line.size() + (stream_.eof() ? 0 : 1);
-    // Cap the RAW line (the allocation getline already made). bytesConsumed_
-    // stays consistent so error-path offset accounting is unaffected.
-    if (line.size() > maxLineBytes_) {
-        lineTooLong_ = true;
-        return false;
-    }
+    bytesConsumed_ += rawBytes;
     trimTrailingCr(line);
     return true;
 }

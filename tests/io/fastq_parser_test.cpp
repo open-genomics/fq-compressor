@@ -58,6 +58,18 @@ TEST(FastqParserTest, RejectsQualityLengthMismatch) {
     EXPECT_EQ(result.error().code, ErrorCode::kFormatError);
 }
 
+TEST(FastqParserTest, RejectsNonBarePlusLine) {
+    // 归档不保存 '+' 行文本；接受 "+read1" 会让解压固定输出裸 '+'，
+    // 往返结果被静默改写。必须 fail-closed。
+    std::istringstream input("@read1\nACGT\n+read1\nIIII\n");
+    FastqParser parser(input);
+
+    auto result = parser.readRecord();
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, ErrorCode::kFormatError);
+    EXPECT_NE(result.error().message.find("bare"), std::string::npos);
+}
+
 TEST(FastqParserTest, RejectsOversizedLineWithFormatError) {
     // 行长上限把畸形/敌意输入的超长行变成干净的 kFormatError，而不是让
     // std::string 无限增长直到 bad_alloc（在 worker 线程里会 std::terminate）。
@@ -240,6 +252,33 @@ TEST(FastqParserTest, RejectsMateWithMoreRecordsThanPrimary) {
     auto second = readRecordPair(primaryParser, &mateParser);
     ASSERT_FALSE(second.has_value());
     EXPECT_EQ(second.error().code, ErrorCode::kFormatError);
+}
+
+TEST(FastqParserTest, RejectsOversizedLineAcrossChunkBoundary) {
+    // 行内容跨过内部 64 KiB 读块后仍必须在上限处失败，而不是继续追加。
+    const std::string huge(70 * 1024, 'A');
+    std::istringstream input("@read1\n" + huge + "\n+\n" + std::string(huge.size(), 'I') + "\n");
+    FastqParser parser(input, /*maxLineBytes=*/32);
+
+    auto result = parser.readRecord();
+
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, ErrorCode::kFormatError);
+    EXPECT_NE(result.error().message.find("maximum length"), std::string::npos);
+}
+
+TEST(FastqParserTest, AcceptsLongLineBelowLimitAcrossChunkBoundary) {
+    // 合法长行（> 64 KiB 但 < 上限）必须被完整读入。
+    const std::string sequence(70 * 1024, 'A');
+    std::istringstream input("@read1\n" + sequence + "\n+\n" + std::string(sequence.size(), 'I') +
+                             "\n");
+    FastqParser parser(input, /*maxLineBytes=*/100 * 1024);
+
+    auto result = parser.readRecord();
+
+    ASSERT_TRUE(result.has_value());
+    ASSERT_TRUE(result->has_value());
+    EXPECT_EQ((*result)->sequence, sequence);
 }
 
 }  // namespace fqc::io::test

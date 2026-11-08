@@ -126,8 +126,9 @@ static_assert(pipeline::CompressPipeline::kDefaultQueueDepth ==
               pipeline::DecompressPipeline::kDefaultQueueDepth);
 constexpr std::size_t kFramePeakToTargetFactor = 4;
 
-[[nodiscard]] constexpr auto maxBufferedFrames(
-    std::size_t inFlightWorkers, std::size_t sourceLocalFrames) noexcept -> std::size_t {
+[[nodiscard]] constexpr auto maxBufferedFrames(std::size_t inFlightWorkers,
+                                               std::size_t sourceLocalFrames) noexcept
+    -> std::size_t {
     return kPipelineQueueFrames + inFlightWorkers + sourceLocalFrames;
 }
 
@@ -155,8 +156,9 @@ constexpr std::size_t kFramePeakToTargetFactor = 4;
 /// Build the decode pipeline with the same budget derivation for `decompress`
 /// and `verify`: the per-frame limit depends on the decoder count because every
 /// in-flight decoder may hold one frame.
-[[nodiscard]] auto makeDecompressPipeline(
-    std::size_t memoryLimitBytes, std::size_t requestedWorkers) -> pipeline::DecompressPipeline {
+[[nodiscard]] auto makeDecompressPipeline(std::size_t memoryLimitBytes,
+                                          std::size_t requestedWorkers)
+    -> pipeline::DecompressPipeline {
     const auto workers = resolveDecoderWorkers(requestedWorkers);
     const auto bufferedFrames = maxBufferedFrames(workers, 1);
     return {maxFrameBytesFor(memoryLimitBytes, bufferedFrames, 0), memoryLimitBytes, workers};

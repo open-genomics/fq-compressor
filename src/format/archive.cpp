@@ -98,8 +98,8 @@ void appendString(Bytes& output, std::string_view value) {
     return static_cast<std::uint32_t>(value);
 }
 
-[[nodiscard]] auto writeBytes(std::ostream& output,
-                              std::span<const std::uint8_t> bytes) -> VoidResult {
+[[nodiscard]] auto writeBytes(std::ostream& output, std::span<const std::uint8_t> bytes)
+    -> VoidResult {
     output.write(reinterpret_cast<const char*>(bytes.data()),
                  static_cast<std::streamsize>(bytes.size()));
     if (!output) {
@@ -374,8 +374,8 @@ void appendPackedSequence(Bytes& output, std::string_view sequence) {
     return output;
 }
 
-[[nodiscard]] auto decompress(std::span<const std::uint8_t> input,
-                              std::size_t outputSize) -> Result<Bytes> {
+[[nodiscard]] auto decompress(std::span<const std::uint8_t> input, std::size_t outputSize)
+    -> Result<Bytes> {
     Bytes output(outputSize);
     const auto result = ZSTD_decompress(output.data(), output.size(), input.data(), input.size());
     if (ZSTD_isError(result) != 0U || result != outputSize) {
@@ -392,8 +392,8 @@ void appendPackedSequence(Bytes& output, std::string_view sequence) {
     return XXH64(qualities.data(), qualities.size(), checksum);
 }
 
-[[nodiscard]] auto advanceGlobalChecksumImpl(std::uint64_t current,
-                                             std::uint64_t frameChecksum) -> std::uint64_t {
+[[nodiscard]] auto advanceGlobalChecksumImpl(std::uint64_t current, std::uint64_t frameChecksum)
+    -> std::uint64_t {
     Bytes encoded;
     encoded.reserve(8);
     appendU64(encoded, frameChecksum);
@@ -595,6 +595,19 @@ struct RawStreamSizes {
                                           "FQC v2 frame memory estimate overflow");
         }
     }
+    // decodeRawStreams 会把原始流复制进 ReadRecord 的字符串：
+    // id/comment 与 quality 各约一倍 raw 大小，序列是 2-bit 打包，解码后约 4 倍。
+    constexpr std::size_t kPackedSequenceExpansion = 4;
+    if (rawSequences > std::numeric_limits<std::size_t>::max() / kPackedSequenceExpansion) {
+        return makeError<std::size_t>(ErrorCode::kFormatError,
+                                      "FQC v2 frame memory estimate overflow");
+    }
+    const std::size_t expandedSequences = rawSequences * kPackedSequenceExpansion;
+    if (!checkedAdd(peak, rawIds) || !checkedAdd(peak, expandedSequences) ||
+        !checkedAdd(peak, rawQualities)) {
+        return makeError<std::size_t>(ErrorCode::kFormatError,
+                                      "FQC v2 frame memory estimate overflow");
+    }
     for (const auto encodedSize : {ids, sequences, qualities}) {
         if (!checkedAdd(peak, encodedSize)) {
             return makeError<std::size_t>(ErrorCode::kFormatError,
@@ -623,8 +636,8 @@ auto parseProfile(std::string_view value) -> Result<DatasetProfile> {
                                      "unknown dataset profile: " + std::string(value));
 }
 
-auto encodeFrame(std::span<const ReadRecord> records,
-                 const ArchiveOptions& options) -> Result<std::unique_ptr<EncodedFrame>> {
+auto encodeFrame(std::span<const ReadRecord> records, const ArchiveOptions& options)
+    -> Result<std::unique_ptr<EncodedFrame>> {
     if (records.empty()) {
         return makeError<std::unique_ptr<EncodedFrame>>(ErrorCode::kUsageError,
                                                         "FQC v2 frame cannot be empty");
@@ -673,8 +686,8 @@ auto encodeFrame(std::span<const ReadRecord> records,
     return frame;
 }
 
-auto compressFrame(std::unique_ptr<EncodedFrame> frame,
-                   int qualityZstdLevel) -> Result<std::unique_ptr<CompressedFrame>> {
+auto compressFrame(std::unique_ptr<EncodedFrame> frame, int qualityZstdLevel)
+    -> Result<std::unique_ptr<CompressedFrame>> {
     if (frame == nullptr) {
         return makeError<std::unique_ptr<CompressedFrame>>(ErrorCode::kUsageError,
                                                            "FQC v2 encoded frame is null");

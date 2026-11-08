@@ -53,8 +53,21 @@ echo ""
 # Conan 2.x 生成的 toolchain 文件位于嵌套路径 build/<preset>/build/<BuildType>/generators/
 BUILD_DIR="build/$PRESET"
 if ! find "$BUILD_DIR" -name "conan_toolchain.cmake" -print -quit 2>/dev/null | grep -q .; then
+    # 补救命令必须带 build_type 与 clang/libc++ 设置：缺省 profile 是
+    # Release+gcc，会把 toolchain 生成到 build/Release/generators 且 ABI 不符，
+    # 照旧提示执行后仍无法配置 preset。
+    case "$PRESET" in
+        clang-release*) BUILD_TYPE=Release ;;
+        *) BUILD_TYPE=Debug ;;
+    esac
+    LIBCXX="libc++"
+    [[ "$PRESET" == "clang-fuzz" ]] && LIBCXX="libstdc++11"
+    CLANG_MAJOR="$(clang -dumpversion 2>/dev/null | cut -d. -f1 || true)"
     echo "Error: Conan toolchain not found in $BUILD_DIR." >&2
-    echo "Run 'conan install . --build=missing --lockfile=conan.lock --output-folder=$BUILD_DIR' first." >&2
+    echo "Run the following first (compiler.version = local clang major):" >&2
+    echo "  CC=clang CXX=clang++ conan install . --output-folder=$BUILD_DIR --build=missing \\" >&2
+    echo "      --lockfile=conan.lock -s build_type=$BUILD_TYPE -s compiler=clang \\" >&2
+    echo "      -s compiler.version=${CLANG_MAJOR:-<major>} -s compiler.libcxx=$LIBCXX -s compiler.cppstd=23" >&2
     exit 1
 fi
 

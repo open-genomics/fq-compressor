@@ -34,9 +34,8 @@ class ChunkOrderer {
 public:
     /// Submit one frame. Returns the longest ready sequence in (chunk, local)
     /// order (possibly empty).
-    [[nodiscard]] auto submitFrame(std::uint64_t chunk,
-                                   std::uint64_t local,
-                                   T value) -> std::vector<T> {
+    [[nodiscard]] auto submitFrame(std::uint64_t chunk, std::uint64_t local, T value)
+        -> std::vector<T> {
         // emplace 遇重复键会静默丢弃新条目；上游契约保证键唯一，这里防御性地告警，
         // 让违背契约的调用立即在日志中暴露而不是无声丢帧。
         if (!pending_.emplace(std::make_pair(chunk, local), std::move(value)).second) {
@@ -48,8 +47,8 @@ public:
 
     /// Submit a chunk-completion marker: `totalFrames` is how many frames the
     /// chunk produced (0 allowed). Returns any items unblocked by it.
-    [[nodiscard]] auto submitChunkEnd(std::uint64_t chunk,
-                                      std::uint64_t totalFrames) -> std::vector<T> {
+    [[nodiscard]] auto submitChunkEnd(std::uint64_t chunk, std::uint64_t totalFrames)
+        -> std::vector<T> {
         chunkTotals_.emplace(chunk, totalFrames);
         return drain();
     }

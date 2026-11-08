@@ -60,9 +60,8 @@ struct ReadyFrame {
 
 /// Reads one raw line, advancing the absolute `offset` past the delimiter.
 /// Trims '\r' like the parser does. Returns false at EOF.
-[[nodiscard]] auto readRawLine(std::istream& input,
-                               std::string& line,
-                               std::uint64_t& offset) -> bool {
+[[nodiscard]] auto readRawLine(std::istream& input, std::string& line, std::uint64_t& offset)
+    -> bool {
     if (!std::getline(input, line)) {
         return false;
     }
@@ -94,9 +93,8 @@ constexpr std::size_t kAlignmentWindowLines = 7;
 /// 可行形状：[]、[qual]、['+', qual]、[seq, '+', qual]。qual 行内容任意，
 /// '+' 行是唯一的形状锚点——没有锚点却要求更长的后缀，说明数据已损坏
 /// （如缺 '+' 行的记录），必须交给上层报错而不是继续跳过。
-auto findFirstRecordStart(std::istream& input,
-                          std::uint64_t baseOffset,
-                          std::size_t maxLineBytes) -> Result<std::optional<std::uint64_t>> {
+auto findFirstRecordStart(std::istream& input, std::uint64_t baseOffset, std::size_t maxLineBytes)
+    -> Result<std::optional<std::uint64_t>> {
     std::uint64_t offset = baseOffset;
 
     // 第一步：行首对齐。baseOffset 落在行中段时 getline 读出的是行尾残段——它属于
@@ -162,17 +160,56 @@ auto findFirstRecordStart(std::istream& input,
         ++count;
     }
 
-    // 残段形状可行性：候选前的非跳过行必须可能是一个合法记录的行后缀（该记录由
-    // 上一 worker 解析），否则这个 framing 在合法输入中不可达。可行形状：[]、
-    // [qual]、['+', qual]、[seq, '+', qual]；'+' 行是唯一的形状锚点。质量行假警报
-    // 被跳过（skipped）后不计入残段。行序按物理顺序（最早在前）。
+    // 块边界落在行首（或上一行换行）时被丢弃的残段为空，partialFirstChar 没有
+    // 线索；窗口首行若紧跟一条裸 '+' 行（LF 或 CRLF），它只可能是上一记录的
+    // quality 行（有效记录的空 quality 会被 parser 拒绝），用文件字节几何补上
+    // 这个判定。非裸 '+' 行已由 parser 拒绝，'+\n' / '+\r\n' 是唯一合法形态。
+    auto precededByBarePlusLine = [&]() -> bool {
+        if (count == 0 || starts[0] < 2) {
+            return false;
+        }
+        const std::uint64_t lineStart = starts[0];
+        input.clear();
+        input.seekg(static_cast<std::streamoff>(lineStart - 2));
+        char lastByte = 0;
+        if (!input.get(lastByte)) {
+            return false;
+        }
+        std::uint64_t contentEnd = lineStart - 2;
+        if (lastByte == '\r') {
+            if (lineStart < 3) {
+                return false;
+            }
+            --contentEnd;
+            input.clear();
+            input.seekg(static_cast<std::streamoff>(contentEnd));
+            char plus = 0;
+            if (!input.get(plus) || plus != '+') {
+                return false;
+            }
+        } else if (lastByte != '+') {
+            return false;
+        }
+        if (contentEnd == 0) {
+            return true;
+        }
+        input.clear();
+        input.seekg(static_cast<std::streamoff>(contentEnd - 1));
+        char delimiter = 0;
+        return input.get(delimiter) && delimiter == '\n';
+    };
+    const bool firstLinePrecededByPlus = precededByBarePlusLine();
+
+    // 残段形状可行性：候选前的非空物理行（含被判定为质量行假警报的 skipped 行）
+    // 必须可能是一个合法记录的行后缀（该记录由上一 worker 解析），否则这个
+    // framing 在合法输入中不可达。可行形状：[]、[qual]、['+', qual]、
+    // [seq, '+', qual]；'+' 行是唯一的形状锚点。skipped 行是物理存在于候选之前
+    // 的上一记录 quality 行，正是上述可行形状的成员——剔除会让 [seq, '+', qual]
+    // 退化成 [seq, '+']，把合法 header 误判为不可行。行序按物理顺序（最早在前）。
     auto residueFeasible = [&](std::size_t candidate) -> bool {
         std::array<const std::string*, 3> r{};
         std::size_t n = 0;
         for (std::size_t i = 0; i < candidate && n < 3; ++i) {
-            if (skipped[i]) {
-                continue;
-            }
             r[n++] = &lines[i];
         }
         switch (n) {
@@ -188,14 +225,16 @@ auto findFirstRecordStart(std::istream& input,
         }
     };
 
-    // 质量行判定：结构拒绝的 '@' 候选，仅当其前一行是 '+'（p≥1）或残段首字符是
-    // '+'（p==0，残段是 '+' 行的后半）时，才可能是上一条记录的 '@' 质量行
+    // 质量行判定：结构拒绝的 '@' 候选，仅当其前一行是 '+'（p≥1）、残段首字符是
+    // '+'（p==0，残段是 '+' 行的后半）或窗口首行紧跟裸 '+' 行（p==0，块边界
+    // 正好落在该质量行或其前一换行）时，才可能是上一条记录的 '@' 质量行
     // （Phred+33 Q31）假警报而应跳过；否则它是畸形记录头（缺 '+' 行、长度不匹配、
     // 只有 id 行等），顺序路径会在同一位置报错，这里必须返回它让 worker 的 parser
     // 同样报错，否则该记录被静默丢弃。
     auto isQualityLine = [&](std::size_t p) -> bool {
         if (p == 0) {
-            return partialFirstChar.has_value() && *partialFirstChar == '+';
+            return firstLinePrecededByPlus ||
+                (partialFirstChar.has_value() && *partialFirstChar == '+');
         }
         for (std::size_t i = p; i > 0; --i) {
             if (!skipped[i - 1]) {
@@ -219,7 +258,7 @@ auto findFirstRecordStart(std::istream& input,
                 // 结构合法但残段不可行（如缺 '+' 记录的伪候选）：继续扫，窗口收满
                 // 仍未命中时报错。
             } else if (isQualityLine(p)) {
-                skipped[p] = true;  // 质量行假警报：跳过，后续候选的残段排除该行
+                skipped[p] = true;  // 质量行假警报：跳过该候选，但仍计入后续残段
             } else {
                 return starts[p];  // 畸形头：worker 的 parser 报与顺序路径相同的错
             }

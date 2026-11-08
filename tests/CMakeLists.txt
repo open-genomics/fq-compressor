@@ -179,6 +179,19 @@ if(FQC_BUILD_FUZZERS)
     if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
         message(FATAL_ERROR "FQC_BUILD_FUZZERS=ON requires Clang (libFuzzer ships with clang)")
     endif()
+    # libFuzzer 的预编译运行时按 libstdc++ 构建；与 libc++ 混链会在链接期报
+    # std::__cxx11::basic_string 等未定义符号。这里提前拦截，避免把工具链配置
+    # 错误误判成代码问题。
+    if(CMAKE_CXX_FLAGS MATCHES "-stdlib=libc\\+\\+")
+        message(FATAL_ERROR
+            "FQC_BUILD_FUZZERS=ON cannot be combined with -stdlib=libc++: the prebuilt "
+            "libFuzzer runtime is built against libstdc++.\n"
+            "Use the clang-fuzz preset with a libstdc++ Conan profile, e.g.\n"
+            "  conan install . --output-folder=build/clang-fuzz --build=missing "
+            "-s compiler=clang -s compiler.version=18 "
+            "-s compiler.libcxx=libstdc++11 -s compiler.cppstd=23\n"
+            "  ./scripts/build.sh clang-fuzz")
+    endif()
 
     foreach(fuzz_target IN ITEMS fastq_parser_fuzz archive_reader_fuzz)
         add_executable(${fuzz_target} fuzz/${fuzz_target}.cpp)

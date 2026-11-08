@@ -37,9 +37,8 @@ using fqc::pipeline::PipelineStats;
 
 namespace {
 
-[[nodiscard]] auto makeFastq(int count,
-                             int sequenceLength = 150,
-                             bool atQuality = false) -> std::string {
+[[nodiscard]] auto makeFastq(int count, int sequenceLength = 150, bool atQuality = false)
+    -> std::string {
     std::string fastq;
     for (int i = 0; i < count; ++i) {
         fastq += "@read_" + std::to_string(i) + " comment\n";
@@ -137,8 +136,8 @@ private:
 // findFirstRecordStart 现在返回 Result<optional>：错误即对齐区损坏（顺序路径
 // 同样会失败），optional 为空即无记录起点。该辅助解包错误分支，让既有断言
 // 保持"optional 语义"的可读性。
-[[nodiscard]] auto alignedStart(std::istream& input,
-                                std::uint64_t base) -> std::optional<std::uint64_t> {
+[[nodiscard]] auto alignedStart(std::istream& input, std::uint64_t base)
+    -> std::optional<std::uint64_t> {
     auto found = fqc::pipeline::findFirstRecordStart(input, base);
     EXPECT_TRUE(found.has_value()) << (found.has_value() ? "" : found.error().message);
     if (!found.has_value()) {
@@ -218,6 +217,39 @@ TEST(ParallelParsePipelineTest, AdversarialAtQualityLinesRoundTrip) {
     TempFastqFile file(fastq);
 
     const auto archive = runParallel(file, {}, 0, 4, 256);
+    EXPECT_EQ(readAllRecords(archive), fqc::test::parseAllFastq(fastq));
+}
+
+TEST(ParallelParsePipelineTest, ThreeWorkersBoundaryAtQualityLineRoundTrips) {
+    // 70 B = 5 条 14 B 记录；K=3 时 step=24，worker 1 的块边界正好落在
+    // rec1 以 '@II' 开头的 quality 行首。对齐扫描若把它当畸形头返回，
+    // worker 的 parser 会以 "expected '+'" 拒绝整个合法文件。
+    std::string fastq;
+    for (int i = 0; i < 5; ++i) {
+        fastq += "@r" + std::to_string(i) + "\nAAA\n+\n@II\n";
+    }
+    ASSERT_EQ(fastq.size(), 70U);
+    ASSERT_EQ(fastq[24], '@');  // rec1 的质量行首 == ceil(70/3)
+    TempFastqFile file(fastq);
+
+    const auto archive = runParallel(file, {}, 0, 3, 4096);
+    EXPECT_EQ(readAllRecords(archive), fqc::test::parseAllFastq(fastq));
+}
+
+TEST(ParallelParsePipelineTest, FourWorkersBoundaryInsideHeaderRoundTrips) {
+    // 78 B = 6 条 13 B 记录；K=4 时 step=20，worker 2 的块边界 40 落在
+    // rec3 header 行内部，窗口残段是 rec2 完整的 [seq, '+', '@I']。
+    // 残段可行性若剔除被判定为质量行的 '@I'，合法 header 会被判不可行。
+    std::string fastq;
+    for (int i = 0; i < 6; ++i) {
+        const std::string index = i < 10 ? "0" + std::to_string(i) : std::to_string(i);
+        fastq += "@r" + index + "\nAA\n+\n@I\n";
+    }
+    ASSERT_EQ(fastq.size(), 78U);
+    ASSERT_EQ(fastq[39], '@');  // rec3 header 行首；边界 40 在其内部
+    TempFastqFile file(fastq);
+
+    const auto archive = runParallel(file, {}, 0, 4, 4096);
     EXPECT_EQ(readAllRecords(archive), fqc::test::parseAllFastq(fastq));
 }
 
@@ -356,6 +388,58 @@ TEST(FindFirstRecordStartTest, AtQualityLineIsNotARecordStart) {
     // Must skip the false candidate and land on record 1's header.
     EXPECT_GT(*found, residueBase);
     EXPECT_EQ(fastq.substr(static_cast<std::size_t>(*found), 7), "@read_1");
+}
+
+TEST(FindFirstRecordStartTest, BoundaryAtQualityLineStartSkipsIt) {
+    // 块边界正好落在以 '@' 开头的 quality 行首（或其前一个 '\n'，即 '+' 行末尾）：
+    // 此时 partialFirstChar 为空，但窗口首行前面的字节几何是一条裸 '+' 行——
+    // 该 '@' 行只可能是上一记录的 quality 行，必须跳过而不是当畸形头返回，
+    // 否则合法 FASTQ 会被整批拒绝。
+    const std::string fastq = "@r0\nAAA\n+\n@II\n@r1\nAAA\n+\n@II\n@r2\nAAA\n+\n@II\n";
+    const std::uint64_t qualityStart = 10;  // rec0 的 '@II' 质量行首
+    ASSERT_EQ(fastq[static_cast<std::size_t>(qualityStart)], '@');
+    const auto nextHeader = static_cast<std::uint64_t>(fastq.find("@r1"));
+    for (const std::uint64_t base : {qualityStart, qualityStart - 1}) {
+        std::istringstream input(fastq);
+        input.seekg(static_cast<std::streamoff>(base));
+        const auto found = alignedStart(input, base);
+        ASSERT_TRUE(found.has_value());
+        EXPECT_EQ(*found, nextHeader);
+    }
+
+    // CRLF 输入同样被接受（parser 规范化行尾）：'+' 行是 "+\r\n"，字节几何
+    // 必须容忍 '\r'，否则同一块边界几何在 CRLF 文件上仍会误报。
+    const std::string crlf = "@r0\r\nAAA\r\n+\r\n@II\r\n@r1\r\nAAA\r\n+\r\n@II\r\n";
+    const std::uint64_t crlfQualityStart = 13;  // rec0 的 '@II' 质量行首
+    ASSERT_EQ(crlf[static_cast<std::size_t>(crlfQualityStart)], '@');
+    const auto crlfNextHeader = static_cast<std::uint64_t>(crlf.find("@r1"));
+    for (const std::uint64_t base : {crlfQualityStart, crlfQualityStart - 1}) {
+        std::istringstream input(crlf);
+        input.seekg(static_cast<std::streamoff>(base));
+        const auto found = alignedStart(input, base);
+        ASSERT_TRUE(found.has_value());
+        EXPECT_EQ(*found, crlfNextHeader);
+    }
+}
+
+TEST(FindFirstRecordStartTest, BoundaryInsideHeaderWithAtQualityResidue) {
+    // 块边界落在某条记录 header 行内部，窗口残段是上一记录完整的
+    // [seq, '+', qual]，且该 quality 行以 '@' 开头（假警报，被标记 skipped）。
+    // 残段可行性必须把物理存在的 skipped 行计入：它们是可行形状的成员，
+    // 剔除会让合法的下一条 header 被判不可行、整批报错。
+    std::string fastq;
+    for (int i = 0; i < 6; ++i) {
+        const std::string index = i < 10 ? "0" + std::to_string(i) : std::to_string(i);
+        fastq += "@r" + index + "\nAA\n+\n@I\n";
+    }
+    const auto header = static_cast<std::uint64_t>(fastq.find("@r03"));
+    const auto nextHeader = static_cast<std::uint64_t>(fastq.find("@r04"));
+    const std::uint64_t base = header + 1;  // header 行内部（'@' 之后）
+    std::istringstream input(fastq);
+    input.seekg(static_cast<std::streamoff>(base));
+    const auto found = alignedStart(input, base);
+    ASSERT_TRUE(found.has_value());
+    EXPECT_EQ(*found, nextHeader);
 }
 
 TEST(FindFirstRecordStartTest, MalformedSequenceCandidateIsAccepted) {

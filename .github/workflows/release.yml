@@ -8,7 +8,7 @@ on:
     tags: ['v*']
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: release-${{ github.ref }}
@@ -17,6 +17,14 @@ concurrency:
 jobs:
   release:
     runs-on: ubuntu-24.04
+    # 只有发布 job 需要写 Release；构建与 smoke test 继承只读权限。
+    permissions:
+      contents: write
+    env:
+      # 构建目录由 preset 推导（CMakePresets.json 的 binaryDir 为
+      # build/${presetName}）。产物路径统一引用此变量，避免 preset 与取件
+      # 路径再次漂移。
+      PRESET: clang-release-portable
     steps:
       - uses: actions/checkout@v5
 
@@ -31,7 +39,7 @@ jobs:
           # FQC_PORTABLE=ON：发布产物禁用 -march=native，保证在旧 CPU 上可用
           # （clang-release-portable 预设；每 PR 的 release-build job 已在同一
           # 配置下跑过编译+测试门禁）
-          preset: clang-release-portable
+          preset: ${{ env.PRESET }}
           conan-build-type: Release
 
       # 发布回归 sanity：不做性能断言（CI 吞吐波动 ±20-85%，见
@@ -39,7 +47,7 @@ jobs:
       - name: Round-trip and verify sanity
         run: |
           set -euo pipefail
-          fqc=build/clang-release/src/fqc
+          fqc=build/${{ env.PRESET }}/src/fqc
           tmp="$(mktemp -d)"
           trap 'rm -rf "$tmp"' EXIT
           "$fqc" compress -i tests/fixtures/sequential-v2/input_se.fastq -o "$tmp/se.fqc"
@@ -52,7 +60,9 @@ jobs:
       - name: Stage artifacts
         run: |
           mkdir -p dist
-          cp build/clang-release/src/fqc dist/fqc
+          cp build/${{ env.PRESET }}/src/fqc dist/fqc
+          # 发布资产附带本项目许可证与静态链接依赖的许可证声明
+          cp LICENSE THIRD_PARTY_NOTICES.md dist/
           ldd dist/fqc
           sha256sum dist/fqc > dist/SHA256SUMS
 

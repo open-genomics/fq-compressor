@@ -18,8 +18,11 @@ namespace {
 
 // 8 MiB 帧内存信封：既允许小的合法帧完整走通 readFrame 全路径（zstd + 解码
 // + 校验和），又把单帧解码峰值压进 libFuzzer 默认 -rss_limit。
+// 进程级 memoryLimit 必须高于 kCodecMemoryReserveBytes，否则所有帧都会在
+// 预算检查处被拒绝，fuzz 从未真正解析归档。
 constexpr std::size_t kFuzzMaxFrameBytes = 8U * 1024U * 1024U;
-constexpr std::size_t kFuzzMemoryLimitBytes = 8U * 1024U * 1024U;
+constexpr std::size_t kFuzzMemoryLimitBytes =
+    fqc::format::kCodecMemoryReserveBytes + kFuzzMaxFrameBytes;
 
 }  // namespace
 

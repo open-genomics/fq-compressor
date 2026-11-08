@@ -130,8 +130,8 @@ struct CompressedFrame {
 /// The output is deterministic for a fixed zstd build, level and input: same
 /// bytes in, same bytes out. The pipeline relies on this for its
 /// byte-identical archive gate.
-[[nodiscard]] auto compressFrame(std::unique_ptr<EncodedFrame> frame,
-                                 int qualityZstdLevel) -> Result<std::unique_ptr<CompressedFrame>>;
+[[nodiscard]] auto compressFrame(std::unique_ptr<EncodedFrame> frame, int qualityZstdLevel)
+    -> Result<std::unique_ptr<CompressedFrame>>;
 
 /// A frame's three still-compressed payloads plus the header fields decoding
 /// needs. Produced by `ArchiveReader::readRawFrame` (I/O + all bounds and
@@ -181,8 +181,8 @@ struct ArchiveFooter {
 /// One step of the archive's rolling global checksum. Order-dependent: apply
 /// strictly in ascending frame-id order (the sequential reader does this
 /// internally; a pipeline must do it on its ordered end).
-[[nodiscard]] auto advanceGlobalChecksum(std::uint64_t current,
-                                         std::uint64_t frameChecksum) -> std::uint64_t;
+[[nodiscard]] auto advanceGlobalChecksum(std::uint64_t current, std::uint64_t frameChecksum)
+    -> std::uint64_t;
 
 class ArchiveWriter {
 public:

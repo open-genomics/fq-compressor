@@ -255,8 +255,10 @@ TEST(ArchiveTest, HigherQualityLevelNeverGrowsArchiveAndRoundTrips) {
         writeArchive({.profile = DatasetProfile::kIllumina, .qualityZstdLevel = 7}, records);
     EXPECT_LE(level7.size(), level1.size());
 
+    // 预算要覆盖解码后的 ReadRecord 字符串副本（2-bit 序列约 4 倍展开），
+    // 不只是 raw/压缩流；2000×150 bp 的真实峰值已超过 1 MiB。
     std::istringstream input(level7, std::ios::binary);
-    ArchiveReader reader(input, 1024 * 1024);
+    ArchiveReader reader(input, 8 * 1024 * 1024);
     ASSERT_TRUE(reader.open());
     auto frame = reader.readFrame();
     ASSERT_TRUE(frame);
@@ -431,6 +433,33 @@ TEST(ArchiveTest, RejectsHostileFrameMetadata) {
         writeArchive({.profile = DatasetProfile::kIllumina, .paired = true}, makeRecords());
     writeU32(paired, kRecordCountOffset, 3);
     expectFormatError(std::move(paired), kDefaultMaxFrameBytes);
+}
+
+TEST(ArchiveTest, FrameBudgetCountsDecodedRecordStringCopies) {
+    std::vector<ReadRecord> records;
+    records.reserve(50);
+    const std::string sequence(400, 'A');
+    const std::string quality(400, 'I');
+    for (int i = 0; i < 50; ++i) {
+        records.emplace_back("read" + std::to_string(i), sequence, quality);
+    }
+    const auto archive = writeArchive({.profile = DatasetProfile::kIllumina}, records);
+    const auto layout = frameLayout(archive);
+
+    // 旧估算：记录数组 + 三路 raw 流 + 三路压缩流。
+    const std::size_t oldPeak = records.size() * sizeof(ReadRecord) * 2 + layout.rawIdsSize +
+        layout.rawSequencesSize + layout.rawQualitiesSize + layout.idsSize + layout.sequencesSize +
+        layout.qualitiesSize;
+    // 预算高于旧估算、低于新增的字符串副本（至少 4x 序列展开）。
+    const std::size_t budget = oldPeak + layout.rawSequencesSize;
+
+    std::istringstream input(archive, std::ios::binary);
+    ArchiveReader reader(input, budget);
+    ASSERT_TRUE(reader.open());
+    auto result = reader.readFrame();
+
+    ASSERT_FALSE(result);
+    EXPECT_EQ(result.error().code, ErrorCode::kFormatError);
 }
 
 TEST(ArchiveTest, RejectsTruncatedVarintInAuthenticatedLogicalStream) {
